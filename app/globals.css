@@ -199,6 +199,31 @@ h1, h2, h3 {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 25%, transparent), 0 6px 16px -4px rgba(0, 0, 0, 0.4);
 }
 
+/* Recently active: a quiet breathing ring — ambient energy, not a precise
+   "online now" claim. Drop (time-boxed, "come say hi"): a brighter, faster
+   pulse plus a halo, because this one *should* read as urgent — it expires. */
+@keyframes pin-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 45%, transparent), 0 6px 16px -4px rgba(0, 0, 0, 0.4); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--good) 0%, transparent), 0 6px 16px -4px rgba(0, 0, 0, 0.4); }
+}
+@keyframes pin-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gold) 55%, transparent), 0 6px 16px -4px rgba(0, 0, 0, 0.4); }
+  50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--gold) 0%, transparent), 0 6px 16px -4px rgba(0, 0, 0, 0.4); }
+}
+.pin-active { animation: pin-breathe 2.4s ease-in-out infinite; }
+.pin-drop {
+  border-color: var(--gold);
+  animation: pin-pulse 1.6s ease-in-out infinite;
+}
+.pulse-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--good);
+  animation: pin-breathe 2.4s ease-in-out infinite;
+}
+
 /* ------------------------------------------------------------ misc */
 
 .backdrop {

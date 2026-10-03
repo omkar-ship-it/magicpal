@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import Link from "next/link";
 import { getSessionUser } from "@/lib/session";
 import NavAuth from "@/components/NavAuth";
+import PresenceHeartbeat from "@/components/PresenceHeartbeat";
 import "./globals.css";
 
 const inter = Inter({
@@ -26,6 +27,7 @@ export default async function RootLayout({
   return (
     <html lang="en" className={inter.variable}>
       <body>
+        {user?.onboarded && <PresenceHeartbeat />}
         <header className="sticky top-0 z-40 border-b border-[var(--line)] bg-[var(--card)]/90 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
             <Link href="/" className="flex items-center gap-2 font-semibold">

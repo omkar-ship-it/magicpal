@@ -28,6 +28,7 @@ export default async function MapPage() {
           ownLng={row?.lng ?? null}
           ownName={user.name ?? "You"}
           ownPhotoUrl={user.photoUrl}
+          ownVisible={row?.visibleOnMap ?? false}
         />
       </div>
     </div>

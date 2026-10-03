@@ -36,6 +36,16 @@ export const users = pgTable("users", {
    */
   visibleOnMap: boolean("visible_on_map").notNull().default(true),
 
+  /**
+   * Touched by a heartbeat ping while any authenticated page is open —
+   * powers the "N people active nearby right now" pulse. Deliberately
+   * bucketed to a wide window at read time (see ACTIVE_WINDOW_MINUTES in
+   * rules.ts) rather than shown as an exact last-seen time: a precise
+   * "active 2 min ago" reads as surveillance the way Facebook's old green
+   * dot did, "active recently" reads as ambient energy.
+   */
+  lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
+
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -109,4 +119,27 @@ export const messages = pgTable("messages", {
   body: text("body").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   readAt: timestamp("read_at", { withTimezone: true }),
+});
+
+// ----------------------------------------------------------------- drops
+
+/**
+ * A time-boxed "I'm here, come say hi" signal — separate from a person's
+ * permanent home pin. One row per drop; expiry is just `expiresAt` checked
+ * at query time (`expiresAt > now()`), the same "good enough, no cron"
+ * choice made everywhere else in this schema. A person has at most one live
+ * drop at a time — enforced in lib/drops.ts by clearing any existing drop
+ * before inserting a new one, rather than as a DB constraint, since "at most
+ * one *unexpired* row" isn't something a plain unique index can express.
+ */
+export const drops = pgTable("drops", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  lat: doublePrecision("lat").notNull(),
+  lng: doublePrecision("lng").notNull(),
+  label: text("label").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

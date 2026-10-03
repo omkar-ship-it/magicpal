@@ -1,8 +1,8 @@
-import { and, eq, isNotNull, ne } from "drizzle-orm";
+import { and, eq, gt, isNotNull, ne } from "drizzle-orm";
 import { db, hasDb } from "./db";
-import { users } from "./db/schema";
+import { drops, users } from "./db/schema";
 import { distanceKm, jitterLocation } from "./geo";
-import { MAX_MAP_RESULTS } from "./rules";
+import { ACTIVE_WINDOW_MINUTES, MAX_MAP_RESULTS } from "./rules";
 
 export type MapProfile = {
   id: string;
@@ -16,6 +16,10 @@ export type MapProfile = {
   lat: number;
   lng: number;
   distanceKm: number;
+  /** Heartbeat landed within ACTIVE_WINDOW_MINUTES. */
+  active: boolean;
+  /** A live, time-boxed "come say hi" — null if they have none right now. */
+  drop: { label: string; expiresAt: string } | null;
 };
 
 /**
@@ -39,6 +43,8 @@ export async function getNearbyProfiles(opts: {
 }): Promise<MapProfile[]> {
   if (!hasDb || !db) return [];
 
+  const activeSince = new Date(Date.now() - ACTIVE_WINDOW_MINUTES * 60_000);
+
   const rows = await db
     .select({
       id: users.id,
@@ -50,8 +56,14 @@ export async function getNearbyProfiles(opts: {
       locationLabel: users.locationLabel,
       lat: users.lat,
       lng: users.lng,
+      lastActiveAt: users.lastActiveAt,
+      dropLat: drops.lat,
+      dropLng: drops.lng,
+      dropLabel: drops.label,
+      dropExpiresAt: drops.expiresAt,
     })
     .from(users)
+    .leftJoin(drops, and(eq(drops.userId, users.id), gt(drops.expiresAt, new Date())))
     .where(
       and(
         eq(users.visibleOnMap, true),
@@ -64,8 +76,12 @@ export async function getNearbyProfiles(opts: {
 
   return rows
     .map((r) => {
-      const km = distanceKm(opts.centerLat, opts.centerLng, r.lat!, r.lng!);
-      const jittered = jitterLocation(r.id, r.lat!, r.lng!);
+      // A live drop anchors the pin to where it was dropped, not wherever
+      // the person's home location is set to today.
+      const pinLat = r.dropLat ?? r.lat!;
+      const pinLng = r.dropLng ?? r.lng!;
+      const km = distanceKm(opts.centerLat, opts.centerLng, pinLat, pinLng);
+      const jittered = jitterLocation(r.id, pinLat, pinLng);
       return {
         id: r.id,
         name: r.name!,
@@ -77,6 +93,8 @@ export async function getNearbyProfiles(opts: {
         lat: jittered.lat,
         lng: jittered.lng,
         distanceKm: km,
+        active: Boolean(r.lastActiveAt && r.lastActiveAt > activeSince),
+        drop: r.dropExpiresAt ? { label: r.dropLabel!, expiresAt: r.dropExpiresAt.toISOString() } : null,
       };
     })
     .filter((p) => p.distanceKm <= opts.radiusKm)

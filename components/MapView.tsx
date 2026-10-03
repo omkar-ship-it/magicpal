@@ -4,9 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import L from "leaflet";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
+import { DROP_DURATION_OPTIONS_MIN, DEFAULT_DROP_DURATION_MIN, MAX_DROP_LABEL } from "@/lib/rules";
 
 const RADIUS_OPTIONS_KM = [5, 10, 25, 50, 100] as const;
 const DEFAULT_RADIUS_KM = 25;
+
+type Drop = { label: string; expiresAt: string };
 
 type Profile = {
   id: string;
@@ -19,18 +22,25 @@ type Profile = {
   lat: number;
   lng: number;
   distanceKm: number;
+  active: boolean;
+  drop: Drop | null;
 };
 
 type ConnState = { status: "connect" | "pending" | "accepted" | "declined"; connectionId: string | null };
 
-function pinIcon(opts: { photoUrl: string | null; initial: string; me?: boolean }) {
-  const inner = opts.photoUrl
-    ? `<img src="${opts.photoUrl}" alt="" />`
-    : `<span>${opts.initial}</span>`;
-  const bg = opts.me ? "var(--brand)" : "var(--gold)";
+function minutesLeft(expiresAt: string, now: number): number {
+  return Math.max(0, Math.round((new Date(expiresAt).getTime() - now) / 60_000));
+}
+
+function pinIcon(opts: { photoUrl: string | null; initial: string; me?: boolean; active?: boolean; drop?: boolean }) {
+  const inner = opts.photoUrl ? `<img src="${opts.photoUrl}" alt="" />` : `<span>${opts.initial}</span>`;
+  const bg = opts.drop ? "var(--gold)" : opts.me ? "var(--brand)" : "var(--gold)";
+  const classes = ["pin", opts.me ? "pin-me" : "", opts.drop ? "pin-drop" : opts.active ? "pin-active" : ""]
+    .filter(Boolean)
+    .join(" ");
   return L.divIcon({
     className: "",
-    html: `<div class="pin ${opts.me ? "pin-me" : ""}" style="background:${bg}">${inner}</div>`,
+    html: `<div class="${classes}" style="background:${bg}">${inner}</div>`,
     iconSize: [38, 38],
     iconAnchor: [19, 19],
     popupAnchor: [0, -16],
@@ -45,16 +55,56 @@ function Recenter({ lat, lng }: { lat: number; lng: number }) {
   return null;
 }
 
+function DropBadge({ drop, now }: { drop: Drop; now: number }) {
+  return (
+    <p className="mt-1 flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: "var(--gold)" }}>
+      <span className="pulse-dot" style={{ background: "var(--gold)" }} />
+      “{drop.label}” · {minutesLeft(drop.expiresAt, now)}m left
+    </p>
+  );
+}
+
+function ActionButton({ p, conn, onConnect }: { p: Profile; conn: ConnState | undefined; onConnect: (id: string) => void }) {
+  if (!conn || conn.status === "connect") {
+    return (
+      <button onClick={() => onConnect(p.id)} className="btn btn-primary btn-sm w-full">
+        Connect
+      </button>
+    );
+  }
+  if (conn.status === "pending") {
+    return (
+      <button disabled className="btn btn-ghost btn-sm w-full">
+        Request sent
+      </button>
+    );
+  }
+  if (conn.status === "accepted") {
+    return (
+      <Link href={conn.connectionId ? `/messages/${conn.connectionId}` : "/connections"} className="btn btn-primary btn-sm w-full">
+        Message
+      </Link>
+    );
+  }
+  return (
+    <button disabled className="btn btn-ghost btn-sm w-full">
+      Not connected
+    </button>
+  );
+}
+
 export default function MapView({
   ownLat,
   ownLng,
   ownName,
   ownPhotoUrl,
+  ownVisible,
 }: {
   ownLat: number | null;
   ownLng: number | null;
   ownName: string;
   ownPhotoUrl: string | null;
+  ownVisible: boolean;
 }) {
   const [center, setCenter] = useState<{ lat: number; lng: number } | null>(
     ownLat != null && ownLng != null ? { lat: ownLat, lng: ownLng } : null
@@ -66,7 +116,26 @@ export default function MapView({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Array<{ label: string; lat: number; lng: number }>>([]);
   const [conn, setConn] = useState<Record<string, ConnState>>({});
+  const [myDrop, setMyDrop] = useState<Drop | null>(null);
+  const [dropOpen, setDropOpen] = useState(false);
+  const [dropLabel, setDropLabel] = useState("");
+  const [dropDuration, setDropDuration] = useState<number>(DEFAULT_DROP_DURATION_MIN);
+  const [dropBusy, setDropBusy] = useState(false);
+  const [dropError, setDropError] = useState("");
+  const [now, setNow] = useState(() => Date.now());
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/drops")
+      .then((r) => r.json())
+      .then((d) => setMyDrop(d.drop ?? null))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!center) return;
@@ -130,35 +199,40 @@ export default function MapView({
     }
   }
 
-  function ActionButton({ p }: { p: Profile }) {
-    const state = conn[p.id];
-    if (!state || state.status === "connect") {
-      return (
-        <button onClick={() => connectTo(p.id)} className="btn btn-primary btn-sm w-full">
-          Connect
-        </button>
-      );
+  async function submitDrop(e: React.FormEvent) {
+    e.preventDefault();
+    setDropBusy(true);
+    setDropError("");
+    try {
+      const res = await fetch("/api/drops", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: dropLabel, durationMinutes: dropDuration }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Couldn't drop a pin.");
+      setMyDrop(data.drop);
+      setDropOpen(false);
+      setDropLabel("");
+    } catch (err) {
+      setDropError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setDropBusy(false);
     }
-    if (state.status === "pending") {
-      return (
-        <button disabled className="btn btn-ghost btn-sm w-full">
-          Request sent
-        </button>
-      );
-    }
-    if (state.status === "accepted") {
-      return (
-        <Link href={state.connectionId ? `/messages/${state.connectionId}` : "/connections"} className="btn btn-primary btn-sm w-full">
-          Message
-        </Link>
-      );
-    }
-    return (
-      <button disabled className="btn btn-ghost btn-sm w-full">
-        Not connected
-      </button>
-    );
   }
+
+  async function endDrop() {
+    setDropBusy(true);
+    try {
+      await fetch("/api/drops", { method: "DELETE" });
+      setMyDrop(null);
+    } finally {
+      setDropBusy(false);
+    }
+  }
+
+  const activeCount = profiles.filter((p) => p.active || p.drop).length;
+  const dropCount = profiles.filter((p) => p.drop).length;
 
   return (
     <div className="flex flex-col gap-4">
@@ -210,6 +284,67 @@ export default function MapView({
         </div>
       </div>
 
+      <div className="card flex flex-wrap items-center justify-between gap-3 p-4">
+        <div className="flex items-center gap-2 text-[13px] font-medium text-[var(--ink-soft)]">
+          <span className="pulse-dot" />
+          {center
+            ? `${activeCount} active nearby right now${dropCount > 0 ? ` — ${dropCount} open to chat` : ""}`
+            : "Set a location to see who's active nearby"}
+        </div>
+
+        {ownVisible && ownLat != null ? (
+          myDrop ? (
+            <div className="flex items-center gap-3">
+              <span className="text-[12.5px] font-semibold" style={{ color: "var(--gold)" }}>
+                🟡 Live: “{myDrop.label}” · {minutesLeft(myDrop.expiresAt, now)}m left
+              </span>
+              <button onClick={endDrop} disabled={dropBusy} className="btn btn-ghost btn-sm">
+                End now
+              </button>
+            </div>
+          ) : dropOpen ? (
+            <form onSubmit={submitDrop} className="flex flex-wrap items-center gap-2">
+              <input
+                className="input"
+                style={{ width: 220 }}
+                placeholder="At Third Wave, open to chat…"
+                value={dropLabel}
+                onChange={(e) => setDropLabel(e.target.value.slice(0, MAX_DROP_LABEL))}
+                autoFocus
+                required
+              />
+              <select
+                className="input"
+                style={{ width: 110 }}
+                value={dropDuration}
+                onChange={(e) => setDropDuration(Number(e.target.value))}
+              >
+                {DROP_DURATION_OPTIONS_MIN.map((m) => (
+                  <option key={m} value={m}>
+                    {m}m
+                  </option>
+                ))}
+              </select>
+              <button type="submit" disabled={dropBusy} className="btn btn-primary btn-sm">
+                Go live
+              </button>
+              <button type="button" onClick={() => setDropOpen(false)} className="btn btn-ghost btn-sm">
+                Cancel
+              </button>
+              {dropError && <p className="w-full text-[12px] font-medium text-[var(--warn)]">{dropError}</p>}
+            </form>
+          ) : (
+            <button onClick={() => setDropOpen(true)} className="btn btn-primary btn-sm">
+              Drop a pin ✦
+            </button>
+          )
+        ) : (
+          <Link href="/profile" className="text-[12.5px] text-[var(--ink-soft)] underline">
+            Set a location to drop a pin
+          </Link>
+        )}
+      </div>
+
       {!center ? (
         <div className="card p-10 text-center">
           <p className="text-[14px] text-[var(--ink-soft)]">
@@ -226,9 +361,20 @@ export default function MapView({
               />
               <Recenter lat={center.lat} lng={center.lng} />
               {ownLat != null && ownLng != null && (
-                <Marker position={[ownLat, ownLng]} icon={pinIcon({ photoUrl: ownPhotoUrl, initial: ownName.slice(0, 1).toUpperCase(), me: true })}>
+                <Marker
+                  position={[ownLat, ownLng]}
+                  icon={pinIcon({
+                    photoUrl: ownPhotoUrl,
+                    initial: ownName.slice(0, 1).toUpperCase(),
+                    me: true,
+                    drop: Boolean(myDrop),
+                  })}
+                >
                   <Popup>
-                    <div className="p-3 text-[13px] font-semibold">You</div>
+                    <div className="p-3 text-[13px] font-semibold">
+                      You
+                      {myDrop && <DropBadge drop={myDrop} now={now} />}
+                    </div>
                   </Popup>
                 </Marker>
               )}
@@ -236,7 +382,12 @@ export default function MapView({
                 <Marker
                   key={p.id}
                   position={[p.lat, p.lng]}
-                  icon={pinIcon({ photoUrl: p.photoUrl, initial: p.name.slice(0, 1).toUpperCase() })}
+                  icon={pinIcon({
+                    photoUrl: p.photoUrl,
+                    initial: p.name.slice(0, 1).toUpperCase(),
+                    active: p.active,
+                    drop: Boolean(p.drop),
+                  })}
                 >
                   <Popup>
                     <div className="w-56 p-3">
@@ -246,8 +397,9 @@ export default function MapView({
                       <p className="mt-1 text-[11.5px] text-[var(--ink-soft)]">
                         ~{p.distanceKm.toFixed(1)}km away
                       </p>
+                      {p.drop && <DropBadge drop={p.drop} now={now} />}
                       <div className="mt-2.5">
-                        <ActionButton p={p} />
+                        <ActionButton p={p} conn={conn[p.id]} onConnect={connectTo} />
                       </div>
                     </div>
                   </Popup>
@@ -277,9 +429,13 @@ export default function MapView({
                   )}
                 </span>
                 <div className="flex-1">
-                  <p className="text-[13.5px] font-semibold leading-tight">{p.name}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-[13.5px] font-semibold leading-tight">{p.name}</p>
+                    {p.active && !p.drop && <span className="pulse-dot" title="Active recently" />}
+                  </div>
                   {p.headline && <p className="text-[12px] text-[var(--ink-soft)]">{p.headline}</p>}
                   <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">~{p.distanceKm.toFixed(1)}km</p>
+                  {p.drop && <DropBadge drop={p.drop} now={now} />}
                   {p.skills.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1">
                       {p.skills.slice(0, 3).map((s) => (
@@ -290,7 +446,7 @@ export default function MapView({
                     </div>
                   )}
                   <div className="mt-2.5">
-                    <ActionButton p={p} />
+                    <ActionButton p={p} conn={conn[p.id]} onConnect={connectTo} />
                   </div>
                 </div>
               </div>

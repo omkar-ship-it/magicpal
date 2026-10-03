@@ -160,6 +160,7 @@ async function main() {
     const bobEntry = nearWide.data.profiles.find((p) => p.name === "Flow Bob");
     assert(Boolean(bobEntry), "bob (~7km away) shows up within 10km");
     assert(bobEntry && (bobEntry.lat !== 12.9981 || bobEntry.lng !== 77.6245), "bob's displayed coordinates are jittered, not exact");
+    assert(bobEntry && bobEntry.active === false, "bob isn't 'active' before ever sending a heartbeat");
 
     // 5km and 10km are both valid RADIUS_OPTIONS_KM — an out-of-list value
     // like 1km silently falls back to the default radius, which would make
@@ -183,6 +184,37 @@ async function main() {
       jar: b.jar,
       body: { name: "Flow Bob", headline: "Test Designer", skills: ["design"], visibleOnMap: true },
     });
+
+    console.log("\nPresence pulse");
+    const heartbeat = await api("/api/presence/heartbeat", { method: "POST", jar: b.jar });
+    assert(heartbeat.status === 200, "heartbeat accepted");
+    const nearAfterHeartbeat = await api(`/api/nearby?lat=12.9352&lng=77.6245&radiusKm=10`, { jar: a.jar });
+    const bobActive = nearAfterHeartbeat.data.profiles.find((p) => p.name === "Flow Bob");
+    assert(bobActive?.active === true, "bob shows as active right after his own heartbeat");
+
+    console.log("\nTime-boxed drops");
+    await api("/api/profile", { method: "POST", jar: b.jar, body: { name: "Flow Bob", headline: "Test Designer", skills: ["design"], visibleOnMap: false } });
+    const dropWhileHidden = await api("/api/drops", { method: "POST", jar: b.jar, body: { label: "At the cafe", durationMinutes: 60 } });
+    assert(dropWhileHidden.status === 400, "can't drop a pin while hidden from the map");
+    await api("/api/profile", { method: "POST", jar: b.jar, body: { name: "Flow Bob", headline: "Test Designer", skills: ["design"], visibleOnMap: true } });
+
+    const dropCreate = await api("/api/drops", { method: "POST", jar: b.jar, body: { label: "At the cafe, say hi", durationMinutes: 60 } });
+    assert(dropCreate.status === 200 && dropCreate.data.drop?.label === "At the cafe, say hi", "drop creates with the given label");
+
+    const myDrop = await api("/api/drops", { jar: b.jar });
+    assert(myDrop.data.drop?.label === "At the cafe, say hi", "the owner can read back their own active drop");
+
+    const nearWithDrop = await api(`/api/nearby?lat=12.9352&lng=77.6245&radiusKm=10`, { jar: a.jar });
+    const bobWithDrop = nearWithDrop.data.profiles.find((p) => p.name === "Flow Bob");
+    assert(bobWithDrop?.drop?.label === "At the cafe, say hi", "someone else sees bob's live drop on the map");
+
+    const dropReplace = await api("/api/drops", { method: "POST", jar: b.jar, body: { label: "Actually at the park", durationMinutes: 30 } });
+    assert(dropReplace.data.drop?.label === "Actually at the park", "creating a new drop replaces the old one, not stacks");
+
+    await api("/api/drops", { method: "DELETE", jar: b.jar });
+    const nearAfterCancel = await api(`/api/nearby?lat=12.9352&lng=77.6245&radiusKm=10`, { jar: a.jar });
+    const bobAfterCancel = nearAfterCancel.data.profiles.find((p) => p.name === "Flow Bob");
+    assert(bobAfterCancel?.drop === null, "ending a drop removes it from everyone's map immediately");
 
     console.log("\nConnections");
     const req1 = await api("/api/connections", { method: "POST", jar: a.jar, body: { toUserId: bobEntry.id } });
