@@ -35,18 +35,31 @@ function minutesLeft(expiresAt: string, now: number): number {
   return Math.max(0, Math.round((new Date(expiresAt).getTime() - now) / 60_000));
 }
 
-function pinIcon(opts: { photoUrl: string | null; initial: string; me?: boolean; active?: boolean; drop?: boolean }) {
+function pinIcon(opts: {
+  photoUrl: string | null;
+  initial: string;
+  me?: boolean;
+  active?: boolean;
+  drop?: boolean;
+  highlighted?: boolean;
+}) {
   const inner = opts.photoUrl ? `<img src="${opts.photoUrl}" alt="" />` : `<span>${opts.initial}</span>`;
   const bg = opts.drop ? "var(--gold)" : opts.me ? "var(--brand)" : "var(--gold)";
-  const classes = ["pin", opts.me ? "pin-me" : "", opts.drop ? "pin-drop" : opts.active ? "pin-active" : ""]
+  const classes = [
+    "pin",
+    opts.me ? "pin-me" : "",
+    opts.drop ? "pin-drop" : opts.active ? "pin-active" : "",
+    opts.highlighted ? "pin-hover" : "",
+  ]
     .filter(Boolean)
     .join(" ");
+  const size = opts.highlighted ? 46 : 38;
   return L.divIcon({
     className: "",
     html: `<div class="${classes}" style="background:${bg}">${inner}</div>`,
-    iconSize: [38, 38],
-    iconAnchor: [19, 19],
-    popupAnchor: [0, -16],
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -(size / 2) + 3],
   });
 }
 
@@ -158,7 +171,22 @@ export default function MapView({
   const [dropBusy, setDropBusy] = useState(false);
   const [dropError, setDropError] = useState("");
   const [now, setNow] = useState(() => Date.now());
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const markersRef = useRef<Record<string, L.Marker>>({});
+
+  // Shared by both the pin itself and its matching row in the list panel —
+  // hovering either one highlights the pin and opens its card, the same
+  // split-view behaviour map-plus-list products (Airbnb, Google Maps'
+  // search results) use to tie a list to the map it's drawn from.
+  function hoverProfile(id: string) {
+    setHoveredId(id);
+    markersRef.current[id]?.openPopup();
+  }
+  function unhoverProfile(id: string) {
+    setHoveredId((h) => (h === id ? null : h));
+    markersRef.current[id]?.closePopup();
+  }
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30_000);
@@ -292,8 +320,13 @@ export default function MapView({
         style={{ height: "100%", width: "100%" }}
       >
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.esri.com">Esri</a> &mdash; Esri, HERE, Garmin, OpenStreetMap contributors'
+          url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+          maxZoom={16}
+        />
+        <TileLayer
+          url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}"
+          maxZoom={16}
         />
         <ZoomControl position="bottomright" />
         <Recenter lat={center.lat} lng={center.lng} />
@@ -307,7 +340,7 @@ export default function MapView({
               drop: Boolean(myDrop),
             })}
           >
-            <Popup>
+            <Popup autoPan={false}>
               <div className="p-3 text-[13px] font-semibold">
                 You
                 {myDrop && <DropBadge drop={myDrop} now={now} />}
@@ -319,14 +352,22 @@ export default function MapView({
           <Marker
             key={p.id}
             position={[p.lat, p.lng]}
+            ref={(m) => {
+              if (m) markersRef.current[p.id] = m;
+            }}
             icon={pinIcon({
               photoUrl: p.photoUrl,
               initial: p.name.slice(0, 1).toUpperCase(),
               active: p.active,
               drop: Boolean(p.drop),
+              highlighted: hoveredId === p.id,
             })}
+            eventHandlers={{
+              mouseover: () => hoverProfile(p.id),
+              mouseout: () => unhoverProfile(p.id),
+            }}
           >
-            <Popup>
+            <Popup autoPan={false}>
               <div className="w-56 p-3">
                 <p className="text-[14px] font-semibold">{p.name}</p>
                 {p.headline && <p className="text-[12.5px] text-[var(--ink-soft)]">{p.headline}</p>}
@@ -353,8 +394,20 @@ export default function MapView({
               ✦
             </span>
             <div className="relative min-w-0 flex-1">
+              <svg
+                className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--ink-soft)]"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+              >
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" strokeLinecap="round" />
+              </svg>
               <input
-                className="input"
+                className="input pl-9"
                 placeholder="Search a city or neighbourhood…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -473,7 +526,13 @@ export default function MapView({
         )}
         <div className="flex flex-col gap-2.5">
           {profiles.map((p) => (
-            <div key={p.id} className="card flex gap-3 p-3">
+            <div
+              key={p.id}
+              onMouseEnter={() => hoverProfile(p.id)}
+              onMouseLeave={() => unhoverProfile(p.id)}
+              className="card flex cursor-pointer gap-3 p-3 transition-colors"
+              style={hoveredId === p.id ? { borderColor: "var(--brand)", background: "var(--sunk)" } : undefined}
+            >
               <span
                 className="avatar h-11 w-11 flex-none text-[13px]"
                 style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-deep))" }}

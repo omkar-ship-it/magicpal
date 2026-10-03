@@ -246,6 +246,15 @@ h1, h2, h3 {
   font-weight: 700;
   font-size: 13px;
   overflow: hidden;
+  transition: box-shadow 0.15s ease;
+  cursor: pointer;
+}
+/* Hovering a pin (or its matching row in the list panel) — a bigger
+   size is already baked into the icon itself via pinIcon()'s `highlighted`
+   flag; this adds the glow that reads as "this one's picked out". */
+.pin-hover {
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--brand) 35%, transparent), 0 10px 22px -6px rgba(0, 0, 0, 0.5);
+  z-index: 10000 !important;
 }
 .pin img { width: 100%; height: 100%; object-fit: cover; }
 .pin-me {
