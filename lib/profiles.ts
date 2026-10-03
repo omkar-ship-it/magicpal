@@ -36,7 +36,8 @@ export type MapProfile = {
  * result set", not "the UI happens to hide it".
  */
 export async function getNearbyProfiles(opts: {
-  excludeUserId: string;
+  /** Omit for a signed-out caller — there's no "self" to exclude. */
+  excludeUserId?: string;
   centerLat: number;
   centerLng: number;
   radiusKm: number;
@@ -70,7 +71,7 @@ export async function getNearbyProfiles(opts: {
         isNotNull(users.lat),
         isNotNull(users.lng),
         isNotNull(users.name), // onboarded
-        ne(users.id, opts.excludeUserId)
+        opts.excludeUserId ? ne(users.id, opts.excludeUserId) : undefined
       )
     );
 

@@ -20,7 +20,7 @@ export default function NavAuth({ user }: { user: SessionUser | null }) {
 
   return (
     <nav className="flex items-center gap-5 text-sm font-medium">
-      <Link href="/map" className="text-[var(--ink-soft)] transition-colors hover:text-[var(--ink)]">
+      <Link href="/" className="text-[var(--ink-soft)] transition-colors hover:text-[var(--ink)]">
         Map
       </Link>
       <Link href="/requests" className="text-[var(--ink-soft)] transition-colors hover:text-[var(--ink)]">

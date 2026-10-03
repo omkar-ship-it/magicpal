@@ -171,6 +171,13 @@ async function main() {
       "radius filter actually excludes people past the chosen distance"
     );
 
+    console.log("\nAnonymous browsing (map-first homepage, no login wall)");
+    const anonNear = await api(`/api/nearby?lat=12.9352&lng=77.6245&radiusKm=10`);
+    assert(anonNear.status === 200, "signed-out visitors can load the map without a 401");
+    assert(anonNear.data.profiles.some((p) => p.name === "Flow Bob"), "signed-out visitors see real nearby profiles");
+    const anonConnect = await api("/api/connections", { method: "POST", body: { toUserId: bobEntry.id } });
+    assert(anonConnect.status === 401, "signed-out visitors still can't send connection requests");
+
     console.log("\nVisibility toggle");
     await api("/api/profile", {
       method: "POST",

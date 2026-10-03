@@ -64,7 +64,24 @@ function DropBadge({ drop, now }: { drop: Drop; now: number }) {
   );
 }
 
-function ActionButton({ p, conn, onConnect }: { p: Profile; conn: ConnState | undefined; onConnect: (id: string) => void }) {
+function ActionButton({
+  p,
+  conn,
+  onConnect,
+  canAct,
+}: {
+  p: Profile;
+  conn: ConnState | undefined;
+  onConnect: (id: string) => void;
+  canAct: boolean;
+}) {
+  if (!canAct) {
+    return (
+      <Link href="/login" className="btn btn-ghost btn-sm w-full">
+        Sign in to connect
+      </Link>
+    );
+  }
   if (!conn || conn.status === "connect") {
     return (
       <button onClick={() => onConnect(p.id)} className="btn btn-primary btn-sm w-full">
@@ -99,12 +116,15 @@ export default function MapView({
   ownName,
   ownPhotoUrl,
   ownVisible,
+  canAct,
 }: {
   ownLat: number | null;
   ownLng: number | null;
   ownName: string;
   ownPhotoUrl: string | null;
   ownVisible: boolean;
+  /** False for a signed-out visitor, or a signed-in person who hasn't finished onboarding. */
+  canAct: boolean;
 }) {
   const [center, setCenter] = useState<{ lat: number; lng: number } | null>(
     ownLat != null && ownLng != null ? { lat: ownLat, lng: ownLng } : null
@@ -131,10 +151,24 @@ export default function MapView({
   }, []);
 
   useEffect(() => {
+    if (!canAct) return;
     fetch("/api/drops")
       .then((r) => r.json())
       .then((d) => setMyDrop(d.drop ?? null))
       .catch(() => {});
+  }, [canAct]);
+
+  // Nobody should have to click a button to see the map do its one job —
+  // if there's no saved location yet (guest, or a profile with none set),
+  // ask the browser immediately rather than waiting for "Use my location".
+  useEffect(() => {
+    if (center || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => {},
+      { timeout: 8000 }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -292,7 +326,11 @@ export default function MapView({
             : "Set a location to see who's active nearby"}
         </div>
 
-        {ownVisible && ownLat != null ? (
+        {!canAct ? (
+          <Link href="/login" className="btn btn-primary btn-sm">
+            Sign in to drop a pin ✦
+          </Link>
+        ) : ownVisible && ownLat != null ? (
           myDrop ? (
             <div className="flex items-center gap-3">
               <span className="text-[12.5px] font-semibold" style={{ color: "var(--gold)" }}>
@@ -399,7 +437,7 @@ export default function MapView({
                       </p>
                       {p.drop && <DropBadge drop={p.drop} now={now} />}
                       <div className="mt-2.5">
-                        <ActionButton p={p} conn={conn[p.id]} onConnect={connectTo} />
+                        <ActionButton p={p} conn={conn[p.id]} onConnect={connectTo} canAct={canAct} />
                       </div>
                     </div>
                   </Popup>
@@ -446,7 +484,7 @@ export default function MapView({
                     </div>
                   )}
                   <div className="mt-2.5">
-                    <ActionButton p={p} conn={conn[p.id]} onConnect={connectTo} />
+                    <ActionButton p={p} conn={conn[p.id]} onConnect={connectTo} canAct={canAct} />
                   </div>
                 </div>
               </div>

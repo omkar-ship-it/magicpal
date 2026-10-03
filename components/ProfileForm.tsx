@@ -133,7 +133,7 @@ export default function ProfileForm({ initial, wasOnboarded }: { initial: Initia
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Couldn't save that.");
       if (!wasOnboarded) {
-        router.push("/map");
+        router.push("/");
         router.refresh();
       } else {
         setSaved(true);

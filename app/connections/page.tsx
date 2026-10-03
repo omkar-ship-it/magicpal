@@ -19,7 +19,7 @@ export default async function ConnectionsPage() {
         {connections.length === 0 && (
           <p className="card p-5 text-[13px] text-[var(--ink-soft)]">
             No connections yet —{" "}
-            <Link href="/map" className="underline">
+            <Link href="/" className="underline">
               find people nearby
             </Link>{" "}
             to get started.
