@@ -59,7 +59,11 @@ export async function sendOtpEmail(to: string, code: string): Promise<SendResult
   return sendMsg91TemplateEmail({
     to,
     templateId: process.env.MSG91_EMAIL_TEMPLATE_ID,
-    variables: { otp: code, company_name: BRAND_NAME },
+    // The `magicpal` MSG91 template's merge tag is spelled OTP_CODE, not the
+    // `otp` key BrandSquare/LetterMail's templates use — each template's own
+    // editor decides this, and a mismatch fails silently (200 OK, blank spot
+    // in the email), so this has to match whatever that template actually has.
+    variables: { OTP_CODE: code, company_name: BRAND_NAME },
     logLabel: "otp",
     devFallbackMessage: `login code for ${to} is ${code}`,
   });
