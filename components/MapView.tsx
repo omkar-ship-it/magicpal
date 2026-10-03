@@ -3,11 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import L from "leaflet";
-import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
+import { MapContainer, Marker, Popup, TileLayer, ZoomControl, useMap } from "react-leaflet";
 import { DROP_DURATION_OPTIONS_MIN, DEFAULT_DROP_DURATION_MIN, MAX_DROP_LABEL } from "@/lib/rules";
+import FloatingAccountMenu from "./FloatingAccountMenu";
 
 const RADIUS_OPTIONS_KM = [5, 10, 25, 50, 100] as const;
 const DEFAULT_RADIUS_KM = 25;
+/** Shown before geolocation resolves (or if it's denied) so the map is never blank. */
+const DEFAULT_CENTER = { lat: 12.9716, lng: 77.5946 };
 
 type Drop = { label: string; expiresAt: string };
 
@@ -110,6 +113,16 @@ function ActionButton({
   );
 }
 
+function TargetIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="7" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export default function MapView({
   ownLat,
   ownLng,
@@ -117,6 +130,7 @@ export default function MapView({
   ownPhotoUrl,
   ownVisible,
   canAct,
+  isSignedIn,
 }: {
   ownLat: number | null;
   ownLng: number | null;
@@ -125,9 +139,10 @@ export default function MapView({
   ownVisible: boolean;
   /** False for a signed-out visitor, or a signed-in person who hasn't finished onboarding. */
   canAct: boolean;
+  isSignedIn: boolean;
 }) {
-  const [center, setCenter] = useState<{ lat: number; lng: number } | null>(
-    ownLat != null && ownLng != null ? { lat: ownLat, lng: ownLng } : null
+  const [center, setCenter] = useState<{ lat: number; lng: number }>(
+    ownLat != null && ownLng != null ? { lat: ownLat, lng: ownLng } : DEFAULT_CENTER
   );
   const [radiusKm, setRadiusKm] = useState<number>(DEFAULT_RADIUS_KM);
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -158,11 +173,12 @@ export default function MapView({
       .catch(() => {});
   }, [canAct]);
 
-  // Nobody should have to click a button to see the map do its one job —
-  // if there's no saved location yet (guest, or a profile with none set),
-  // ask the browser immediately rather than waiting for "Use my location".
+  // The map is already visible (at DEFAULT_CENTER) the instant the page
+  // loads — this just silently recenters it once geolocation resolves,
+  // rather than making anyone wait on a permission dialog before seeing
+  // anything, the way a "set your location first" gate would.
   useEffect(() => {
-    if (center || !navigator.geolocation) return;
+    if ((ownLat != null && ownLng != null) || !navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
       (pos) => setCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
       () => {},
@@ -172,7 +188,6 @@ export default function MapView({
   }, []);
 
   useEffect(() => {
-    if (!center) return;
     let cancelled = false;
     Promise.resolve().then(() => {
       if (!cancelled) setLoading(true);
@@ -269,94 +284,163 @@ export default function MapView({
   const dropCount = profiles.filter((p) => p.drop).length;
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="card flex flex-wrap items-center gap-3 p-4">
-        <div className="relative min-w-[220px] flex-1">
-          <input
-            className="input"
-            placeholder="Jump to a city or neighbourhood…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          {results.length > 0 && (
-            <div className="card absolute z-20 mt-1 w-full overflow-hidden p-1">
-              {results.map((r) => (
-                <button
-                  key={`${r.lat},${r.lng}`}
-                  type="button"
-                  onClick={() => {
-                    setCenter({ lat: r.lat, lng: r.lng });
-                    setQuery(r.label);
-                    setResults([]);
-                  }}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-[var(--sunk)]"
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <button onClick={useMyLocation} disabled={locating} className="btn btn-ghost btn-sm">
-          {locating ? "Locating…" : "Use my location"}
-        </button>
-        <div className="flex items-center gap-1.5">
-          {RADIUS_OPTIONS_KM.map((km) => (
-            <button
-              key={km}
-              onClick={() => setRadiusKm(km)}
-              className="btn btn-sm"
-              style={
-                radiusKm === km
-                  ? { background: "var(--brand)", color: "#fff" }
-                  : { background: "var(--sunk)", color: "var(--ink-soft)" }
-              }
+    <div className="fixed inset-0 overflow-hidden">
+      <MapContainer
+        center={[center.lat, center.lng]}
+        zoom={12}
+        zoomControl={false}
+        style={{ height: "100%", width: "100%" }}
+      >
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <ZoomControl position="bottomright" />
+        <Recenter lat={center.lat} lng={center.lng} />
+        {ownLat != null && ownLng != null && (
+          <Marker
+            position={[ownLat, ownLng]}
+            icon={pinIcon({
+              photoUrl: ownPhotoUrl,
+              initial: ownName.slice(0, 1).toUpperCase(),
+              me: true,
+              drop: Boolean(myDrop),
+            })}
+          >
+            <Popup>
+              <div className="p-3 text-[13px] font-semibold">
+                You
+                {myDrop && <DropBadge drop={myDrop} now={now} />}
+              </div>
+            </Popup>
+          </Marker>
+        )}
+        {profiles.map((p) => (
+          <Marker
+            key={p.id}
+            position={[p.lat, p.lng]}
+            icon={pinIcon({
+              photoUrl: p.photoUrl,
+              initial: p.name.slice(0, 1).toUpperCase(),
+              active: p.active,
+              drop: Boolean(p.drop),
+            })}
+          >
+            <Popup>
+              <div className="w-56 p-3">
+                <p className="text-[14px] font-semibold">{p.name}</p>
+                {p.headline && <p className="text-[12.5px] text-[var(--ink-soft)]">{p.headline}</p>}
+                {p.company && <p className="text-[12px] text-[var(--ink-soft)]">{p.company}</p>}
+                <p className="mt-1 text-[11.5px] text-[var(--ink-soft)]">~{p.distanceKm.toFixed(1)}km away</p>
+                {p.drop && <DropBadge drop={p.drop} now={now} />}
+                <div className="mt-2.5">
+                  <ActionButton p={p} conn={conn[p.id]} onConnect={connectTo} canAct={canAct} />
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+      </MapContainer>
+
+      {/* ---------------------------------------------------- floating chrome */}
+      <div className="pointer-events-none absolute inset-x-3 top-3 z-[1000] flex items-start gap-3 sm:inset-x-5 sm:top-5">
+        <div className="floating-panel pointer-events-auto flex-1 p-3">
+          <div className="flex items-center gap-2">
+            <span
+              className="grid h-8 w-8 flex-none place-items-center rounded-full text-[15px] text-white"
+              style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-deep))" }}
             >
-              {km}km
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="card flex flex-wrap items-center justify-between gap-3 p-4">
-        <div className="flex items-center gap-2 text-[13px] font-medium text-[var(--ink-soft)]">
-          <span className="pulse-dot" />
-          {center
-            ? `${activeCount} active nearby right now${dropCount > 0 ? ` — ${dropCount} open to chat` : ""}`
-            : "Set a location to see who's active nearby"}
-        </div>
-
-        {!canAct ? (
-          <Link href="/login" className="btn btn-primary btn-sm">
-            Sign in to drop a pin ✦
-          </Link>
-        ) : ownVisible && ownLat != null ? (
-          myDrop ? (
-            <div className="flex items-center gap-3">
-              <span className="text-[12.5px] font-semibold" style={{ color: "var(--gold)" }}>
-                🟡 Live: “{myDrop.label}” · {minutesLeft(myDrop.expiresAt, now)}m left
-              </span>
-              <button onClick={endDrop} disabled={dropBusy} className="btn btn-ghost btn-sm">
-                End now
-              </button>
-            </div>
-          ) : dropOpen ? (
-            <form onSubmit={submitDrop} className="flex flex-wrap items-center gap-2">
+              ✦
+            </span>
+            <div className="relative min-w-0 flex-1">
               <input
                 className="input"
-                style={{ width: 220 }}
+                placeholder="Search a city or neighbourhood…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              {results.length > 0 && (
+                <div className="card absolute z-10 mt-1 w-full overflow-hidden p-1">
+                  {results.map((r) => (
+                    <button
+                      key={`${r.lat},${r.lng}`}
+                      type="button"
+                      onClick={() => {
+                        setCenter({ lat: r.lat, lng: r.lng });
+                        setQuery(r.label);
+                        setResults([]);
+                      }}
+                      className="block w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-[var(--sunk)]"
+                    >
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={useMyLocation}
+              disabled={locating}
+              title="Use my location"
+              className="grid h-9 w-9 flex-none place-items-center rounded-full border border-[var(--line)] text-[var(--ink-soft)] transition-colors hover:border-[var(--brand)] hover:text-[var(--brand)]"
+            >
+              <TargetIcon />
+            </button>
+          </div>
+
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+            <select
+              className="chip-select"
+              value={radiusKm}
+              onChange={(e) => setRadiusKm(Number(e.target.value))}
+            >
+              {RADIUS_OPTIONS_KM.map((km) => (
+                <option key={km} value={km}>
+                  {km} km
+                </option>
+              ))}
+            </select>
+
+            <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
+              <span className="pulse-dot" />
+              {activeCount} active{dropCount > 0 ? ` · ${dropCount} open to chat` : ""}
+            </span>
+
+            {!canAct ? (
+              <Link href="/login" className="btn btn-primary btn-sm">
+                Sign in to drop a pin ✦
+              </Link>
+            ) : ownVisible && ownLat != null ? (
+              myDrop ? (
+                <span className="pill" style={{ background: "color-mix(in srgb, var(--gold) 16%, var(--card))", color: "var(--gold)" }}>
+                  🟡 “{myDrop.label}” · {minutesLeft(myDrop.expiresAt, now)}m
+                  <button onClick={endDrop} disabled={dropBusy} className="ml-1 font-bold underline">
+                    end
+                  </button>
+                </span>
+              ) : !dropOpen ? (
+                <button onClick={() => setDropOpen(true)} className="btn btn-primary btn-sm">
+                  Drop a pin ✦
+                </button>
+              ) : null
+            ) : (
+              <Link href="/profile" className="text-[12px] text-[var(--ink-soft)] underline">
+                Set a location to drop a pin
+              </Link>
+            )}
+          </div>
+
+          {dropOpen && (
+            <form onSubmit={submitDrop} className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--line)] pt-2.5">
+              <input
+                className="input min-w-[180px] flex-1"
                 placeholder="At Third Wave, open to chat…"
                 value={dropLabel}
                 onChange={(e) => setDropLabel(e.target.value.slice(0, MAX_DROP_LABEL))}
                 autoFocus
                 required
               />
-              <select
-                className="input"
-                style={{ width: 110 }}
-                value={dropDuration}
-                onChange={(e) => setDropDuration(Number(e.target.value))}
-              >
+              <select className="chip-select" value={dropDuration} onChange={(e) => setDropDuration(Number(e.target.value))}>
                 {DROP_DURATION_OPTIONS_MIN.map((m) => (
                   <option key={m} value={m}>
                     {m}m
@@ -371,127 +455,61 @@ export default function MapView({
               </button>
               {dropError && <p className="w-full text-[12px] font-medium text-[var(--warn)]">{dropError}</p>}
             </form>
-          ) : (
-            <button onClick={() => setDropOpen(true)} className="btn btn-primary btn-sm">
-              Drop a pin ✦
-            </button>
-          )
-        ) : (
-          <Link href="/profile" className="text-[12.5px] text-[var(--ink-soft)] underline">
-            Set a location to drop a pin
-          </Link>
-        )}
+          )}
+        </div>
+
+        <div className="pointer-events-auto">
+          <FloatingAccountMenu isSignedIn={isSignedIn} canAct={canAct} name={ownName} photoUrl={ownPhotoUrl} />
+        </div>
       </div>
 
-      {!center ? (
-        <div className="card p-10 text-center">
-          <p className="text-[14px] text-[var(--ink-soft)]">
-            Search a place above or use your location to see who&apos;s nearby.
-          </p>
-        </div>
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-          <div className="map-wrap h-[480px] lg:h-[560px]">
-            <MapContainer center={[center.lat, center.lng]} zoom={12} style={{ height: "100%", width: "100%" }}>
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-              <Recenter lat={center.lat} lng={center.lng} />
-              {ownLat != null && ownLng != null && (
-                <Marker
-                  position={[ownLat, ownLng]}
-                  icon={pinIcon({
-                    photoUrl: ownPhotoUrl,
-                    initial: ownName.slice(0, 1).toUpperCase(),
-                    me: true,
-                    drop: Boolean(myDrop),
-                  })}
-                >
-                  <Popup>
-                    <div className="p-3 text-[13px] font-semibold">
-                      You
-                      {myDrop && <DropBadge drop={myDrop} now={now} />}
-                    </div>
-                  </Popup>
-                </Marker>
-              )}
-              {profiles.map((p) => (
-                <Marker
-                  key={p.id}
-                  position={[p.lat, p.lng]}
-                  icon={pinIcon({
-                    photoUrl: p.photoUrl,
-                    initial: p.name.slice(0, 1).toUpperCase(),
-                    active: p.active,
-                    drop: Boolean(p.drop),
-                  })}
-                >
-                  <Popup>
-                    <div className="w-56 p-3">
-                      <p className="text-[14px] font-semibold">{p.name}</p>
-                      {p.headline && <p className="text-[12.5px] text-[var(--ink-soft)]">{p.headline}</p>}
-                      {p.company && <p className="text-[12px] text-[var(--ink-soft)]">{p.company}</p>}
-                      <p className="mt-1 text-[11.5px] text-[var(--ink-soft)]">
-                        ~{p.distanceKm.toFixed(1)}km away
-                      </p>
-                      {p.drop && <DropBadge drop={p.drop} now={now} />}
-                      <div className="mt-2.5">
-                        <ActionButton p={p} conn={conn[p.id]} onConnect={connectTo} canAct={canAct} />
-                      </div>
-                    </div>
-                  </Popup>
-                </Marker>
-              ))}
-            </MapContainer>
-          </div>
-
-          <div className="flex max-h-[560px] flex-col gap-3 overflow-y-auto">
-            {loading && <p className="text-[13px] text-[var(--ink-soft)]">Loading nearby people…</p>}
-            {!loading && profiles.length === 0 && (
-              <p className="card p-5 text-[13px] text-[var(--ink-soft)]">
-                No one visible within {radiusKm}km yet. Try a wider radius.
-              </p>
-            )}
-            {profiles.map((p) => (
-              <div key={p.id} className="card flex gap-3 p-4">
-                <span
-                  className="avatar h-11 w-11 text-[13px]"
-                  style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-deep))" }}
-                >
-                  {p.photoUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.photoUrl} alt="" />
-                  ) : (
-                    p.name.slice(0, 1).toUpperCase()
-                  )}
-                </span>
-                <div className="flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <p className="text-[13.5px] font-semibold leading-tight">{p.name}</p>
-                    {p.active && !p.drop && <span className="pulse-dot" title="Active recently" />}
+      {/* ------------------------------------------------- nearby list panel */}
+      <div className="floating-list">
+        {loading && profiles.length === 0 && (
+          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">Loading nearby people…</p>
+        )}
+        {!loading && profiles.length === 0 && (
+          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one visible within {radiusKm}km yet. Try a wider radius.</p>
+        )}
+        <div className="flex flex-col gap-2.5">
+          {profiles.map((p) => (
+            <div key={p.id} className="card flex gap-3 p-3">
+              <span
+                className="avatar h-11 w-11 flex-none text-[13px]"
+                style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-deep))" }}
+              >
+                {p.photoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={p.photoUrl} alt="" />
+                ) : (
+                  p.name.slice(0, 1).toUpperCase()
+                )}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <p className="truncate text-[13.5px] font-semibold leading-tight">{p.name}</p>
+                  {p.active && !p.drop && <span className="pulse-dot flex-none" title="Active recently" />}
+                </div>
+                {p.headline && <p className="truncate text-[12px] text-[var(--ink-soft)]">{p.headline}</p>}
+                <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">~{p.distanceKm.toFixed(1)}km</p>
+                {p.drop && <DropBadge drop={p.drop} now={now} />}
+                {p.skills.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {p.skills.slice(0, 3).map((s) => (
+                      <span key={s} className="skill-tag">
+                        {s}
+                      </span>
+                    ))}
                   </div>
-                  {p.headline && <p className="text-[12px] text-[var(--ink-soft)]">{p.headline}</p>}
-                  <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">~{p.distanceKm.toFixed(1)}km</p>
-                  {p.drop && <DropBadge drop={p.drop} now={now} />}
-                  {p.skills.length > 0 && (
-                    <div className="mt-1.5 flex flex-wrap gap-1">
-                      {p.skills.slice(0, 3).map((s) => (
-                        <span key={s} className="skill-tag">
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  <div className="mt-2.5">
-                    <ActionButton p={p} conn={conn[p.id]} onConnect={connectTo} canAct={canAct} />
-                  </div>
+                )}
+                <div className="mt-2">
+                  <ActionButton p={p} conn={conn[p.id]} onConnect={connectTo} canAct={canAct} />
                 </div>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
-      )}
+      </div>
     </div>
   );
 }

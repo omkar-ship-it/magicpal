@@ -160,13 +160,60 @@ h1, h2, h3 {
 
 /* ------------------------------------------------------------- map */
 
-.map-wrap {
-  position: relative;
-  border-radius: 20px;
-  overflow: hidden;
+/* The map is the whole screen now, not a card on a page — its chrome
+   (search, filters, account, the nearby list) floats directly on top of
+   it, Google-Maps-style, instead of living in a bordered box beside it. */
+.floating-panel {
+  background: color-mix(in srgb, var(--card) 96%, transparent);
+  backdrop-filter: blur(10px);
   border: 1px solid var(--line);
-  box-shadow: var(--shadow);
+  border-radius: 18px;
+  box-shadow: var(--shadow-lift);
 }
+
+.floating-list {
+  position: fixed;
+  z-index: 1000;
+  inset-inline: 0;
+  bottom: 0;
+  max-height: 46vh;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+  border-radius: 22px 22px 0 0;
+  background: var(--bg);
+  padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+  box-shadow: var(--shadow-lift);
+}
+@media (min-width: 1024px) {
+  .floating-list {
+    inset-inline: auto;
+    left: 20px;
+    bottom: auto;
+    top: 180px;
+    width: 360px;
+    max-height: calc(100vh - 200px);
+    border-radius: 18px;
+    border: 1px solid var(--line);
+    padding: 12px;
+  }
+}
+
+.chip-select {
+  appearance: none;
+  border: none;
+  border-radius: 999px;
+  background: var(--sunk);
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 28px 6px 12px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 14px) center, calc(100% - 9px) center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
 .leaflet-container {
   background: var(--sunk);
   font-family: var(--font-inter), ui-sans-serif, sans-serif;
@@ -176,6 +223,13 @@ h1, h2, h3 {
   box-shadow: var(--shadow-lift);
 }
 .leaflet-popup-content { margin: 0; }
+/* Leaflet's own `.leaflet-popup-content a` rule (blue, underlined) outranks
+   our bare `.btn-primary`/`.btn-ghost` classes on specificity alone — these
+   compound selectors are what it actually takes to win back a button that
+   happens to be a Link inside a popup. */
+.leaflet-popup-content a.btn { text-decoration: none; }
+.leaflet-popup-content a.btn-primary { color: #fff; }
+.leaflet-popup-content a.btn-ghost { color: var(--ink); }
 
 /* A person's pin: an avatar-shaped marker rather than a generic teardrop —
    recognisable faces are the entire point of a networking map, so the pin
