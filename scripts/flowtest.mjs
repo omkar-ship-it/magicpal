@@ -245,6 +245,21 @@ async function main() {
     const accept = await api(`/api/connections/${connectionId}/respond`, { method: "POST", jar: b.jar, body: { accept: true } });
     assert(accept.status === 200 && accept.data.status === "accepted", "the recipient can accept");
 
+    console.log("\nWorldwide network view");
+    const networkA = await api("/api/connections/map", { jar: a.jar });
+    assert(networkA.status === 200, "network endpoint responds");
+    const bobInNetwork = networkA.data.points.find((p) => p.name === "Flow Bob");
+    assert(Boolean(bobInNetwork) && typeof bobInNetwork.connectionId === "string", "accepted connection shows up with its connection id");
+    assert(bobInNetwork.lat !== 12.9981 || bobInNetwork.lng !== 77.6245, "network view also jitters coordinates");
+
+    await api("/api/profile", { method: "POST", jar: b.jar, body: { name: "Flow Bob", headline: "Test Designer", skills: ["design"], visibleOnMap: false } });
+    const networkAfterHide = await api("/api/connections/map", { jar: a.jar });
+    assert(!networkAfterHide.data.points.find((p) => p.name === "Flow Bob"), "hiding visibility removes a connection from the network view too");
+    await api("/api/profile", { method: "POST", jar: b.jar, body: { name: "Flow Bob", headline: "Test Designer", skills: ["design"], visibleOnMap: true } });
+
+    const networkAnon = await api("/api/connections/map");
+    assert(networkAnon.status === 401, "signed-out visitors can't fetch someone's network");
+
     console.log("\nMessaging");
     const send = await api("/api/messages", { method: "POST", jar: b.jar, body: { connectionId, body: "hello from bob" } });
     assert(send.status === 200, "message sends once accepted");

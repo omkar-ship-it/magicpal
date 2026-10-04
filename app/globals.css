@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "leaflet/dist/leaflet.css";
+@import "mapbox-gl/dist/mapbox-gl.css";
 
 :root {
   --bg: #faf7f5;
@@ -214,22 +214,19 @@ h1, h2, h3 {
   cursor: pointer;
 }
 
-.leaflet-container {
-  background: var(--sunk);
+.mapboxgl-map {
   font-family: var(--font-inter), ui-sans-serif, sans-serif;
 }
-.leaflet-popup-content-wrapper {
+.mapboxgl-popup-content {
+  padding: 0;
   border-radius: 14px;
   box-shadow: var(--shadow-lift);
+  background: var(--card);
+  color: var(--ink);
+  overflow: hidden;
 }
-.leaflet-popup-content { margin: 0; }
-/* Leaflet's own `.leaflet-popup-content a` rule (blue, underlined) outranks
-   our bare `.btn-primary`/`.btn-ghost` classes on specificity alone — these
-   compound selectors are what it actually takes to win back a button that
-   happens to be a Link inside a popup. */
-.leaflet-popup-content a.btn { text-decoration: none; }
-.leaflet-popup-content a.btn-primary { color: #fff; }
-.leaflet-popup-content a.btn-ghost { color: var(--ink); }
+.mapboxgl-popup-anchor-top .mapboxgl-popup-tip { border-bottom-color: var(--card); }
+.mapboxgl-popup-anchor-bottom .mapboxgl-popup-tip { border-top-color: var(--card); }
 
 /* A person's pin: an avatar-shaped marker rather than a generic teardrop —
    recognisable faces are the entire point of a networking map, so the pin
