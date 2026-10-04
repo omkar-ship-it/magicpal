@@ -486,6 +486,8 @@ export default function MapView({
   /** Click-pinned — stays open through a mouseleave, unlike a hover preview. */
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [mapStyle, setMapStyle] = useState("mapbox://styles/mapbox/light-v11");
+  /** react-map-gl's ref only resolves to a real map instance once Mapbox's own "load" event fires — calling flyTo/fitBounds before that is a silent no-op. */
+  const [mapReady, setMapReady] = useState(false);
   /** The browser's live GPS/network fix — when available, this is "you", not the saved profile pin. */
   const [liveLocation, setLiveLocation] = useState<{ lat: number; lng: number } | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -614,14 +616,14 @@ export default function MapView({
   // zooms out and fits every connection (plus your own pin) into frame —
   // the "zoom out to see your whole world" moment is the point of this view.
   useEffect(() => {
-    if (mode !== "nearby") return;
+    if (mode !== "nearby" || !mapReady) return;
     mapRef.current?.flyTo({ center: [center.lng, center.lat], zoom: 12, duration: 1200 });
-  }, [center, mode]);
+  }, [center, mode, mapReady]);
 
   const connectedProfiles = worldProfiles.filter((p) => conn[p.id]?.status === "accepted");
 
   useEffect(() => {
-    if (mode !== "network" || worldLoading) return;
+    if (mode !== "network" || worldLoading || !mapReady) return;
     const pts: [number, number][] = connectedProfiles.map((p) => [p.lng, p.lat]);
     if (ownLat != null && ownLng != null) pts.push([ownLng, ownLat]);
     if (pts.length === 0) {
@@ -649,7 +651,7 @@ export default function MapView({
       { padding: 120, duration: 1500, maxZoom: 4 }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, worldLoading, ownLat, ownLng]);
+  }, [mode, worldLoading, ownLat, ownLng, mapReady]);
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -838,7 +840,10 @@ export default function MapView({
         // is what actually makes the connection arcs show up correctly.
         projection={mode === "network" ? "mercator" : "globe"}
         style={{ height: "100%", width: "100%" }}
-        onLoad={(e) => e.target.setFog({})}
+        onLoad={(e) => {
+          setMapReady(true);
+          e.target.setFog({});
+        }}
         onClick={() => setPinnedId(null)}
       >
         <NavigationControl position="bottom-right" showCompass={false} />

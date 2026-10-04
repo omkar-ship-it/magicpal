@@ -254,6 +254,135 @@ const PEOPLE = [
     skills: ["product", "growth", "onboarding"],
     lat: 12.9447, lng: 77.5631, locationLabel: "Basavanagudi, Bengaluru",
   },
+  {
+    email: "demo.karthik@example.com",
+    name: "Karthik Subramaniam",
+    headline: "Data Engineer at Harbor",
+    company: "Harbor",
+    bio: "Pipelines and warehousing. Runs a weekend cricket league for the tech crowd.",
+    skills: ["data-engineering", "sql", "airflow"],
+    lat: 12.8452, lng: 77.6602, locationLabel: "Electronic City, Bengaluru",
+  },
+  {
+    email: "demo.megha@example.com",
+    name: "Megha Iyer",
+    headline: "Partnerships Lead at Driftwood",
+    company: "Driftwood",
+    bio: "Bank and NBFC partnerships for embedded finance. Always travelling for work.",
+    skills: ["partnerships", "fintech", "bd"],
+    lat: 13.0358, lng: 77.5970, locationLabel: "Hebbal, Bengaluru",
+  },
+  {
+    email: "demo.suresh@example.com",
+    name: "Suresh Pai",
+    headline: "Founder, developer tools",
+    company: "Stealth",
+    bio: "Building observability tooling for small eng teams. Pre-seed, bootstrapped so far.",
+    skills: ["devtools", "observability", "bootstrapped"],
+    lat: 12.9010, lng: 77.6870, locationLabel: "Sarjapur Road, Bengaluru",
+  },
+];
+
+// Your current city gets its own dense cluster too, not just a single pin —
+// invented people, spread across the same neighbourhoods a real local
+// network would actually be in.
+const HYDERABAD_PEOPLE = [
+  {
+    email: "demo.anika@example.com",
+    name: "Anika Rao",
+    headline: "Engineering Manager at Nimbus",
+    company: "Nimbus",
+    bio: "Leads the payments platform team. Runs an internal 'build in public' demo day.",
+    skills: ["engineering-leadership", "payments", "platform"],
+    linkedinUrl: "https://linkedin.com/in/anika-rao-demo",
+    lat: 17.4474, lng: 78.3762, locationLabel: "Hitech City, Hyderabad",
+  },
+  {
+    email: "demo.imran@example.com",
+    name: "Imran Baig",
+    headline: "Founder, early-stage healthtech",
+    company: "Stealth",
+    bio: "Building diagnostics software for tier-2 city clinics. Raising a seed round.",
+    skills: ["healthtech", "fundraising", "b2b"],
+    lat: 17.4401, lng: 78.3489, locationLabel: "Gachibowli, Hyderabad",
+  },
+  {
+    email: "demo.lavanya@example.com",
+    name: "Lavanya Reddy",
+    headline: "VP Design at Clearline",
+    company: "Clearline",
+    bio: "Design org of 12 across three time zones. Mentors junior designers monthly.",
+    skills: ["design-leadership", "design-systems", "mentoring"],
+    instagramUrl: "https://instagram.com/lavanya.design.demo",
+    lat: 17.4156, lng: 78.4347, locationLabel: "Banjara Hills, Hyderabad",
+  },
+  {
+    email: "demo.farooq@example.com",
+    name: "Farooq Ahmed",
+    headline: "Staff Engineer at Harbor",
+    company: "Harbor",
+    bio: "Search and ranking infra. Previously at a FAANG search team.",
+    skills: ["search", "backend", "ranking"],
+    lat: 17.4239, lng: 78.4738, locationLabel: "Jubilee Hills, Hyderabad",
+  },
+  {
+    email: "demo.swathi@example.com",
+    name: "Swathi Chowdary",
+    headline: "Product Manager at Driftwood",
+    company: "Driftwood",
+    bio: "Lending products for small businesses. Previously founded a fintech startup.",
+    skills: ["product", "lending", "fintech"],
+    linkedinUrl: "https://linkedin.com/in/swathi-chowdary-demo",
+    lat: 17.4483, lng: 78.3915, locationLabel: "Madhapur, Hyderabad",
+  },
+  {
+    email: "demo.naveen@example.com",
+    name: "Naveen Kumar Reddy",
+    headline: "CTO at Fawaza Pay",
+    company: "Fawaza Pay",
+    bio: "Infra and security for a payments startup. Ex-banking tech.",
+    skills: ["cto", "security", "payments"],
+    lat: 17.4474, lng: 78.3652, locationLabel: "Kondapur, Hyderabad",
+  },
+  {
+    email: "demo.pranathi@example.com",
+    name: "Pranathi Rao",
+    headline: "Marketing Lead at Northstar Labs",
+    company: "Northstar Labs",
+    bio: "Brand and performance marketing. Runs a small marketing meetup every month.",
+    skills: ["marketing", "brand", "performance"],
+    websiteUrl: "https://pranathirao-demo.com",
+    lat: 17.4399, lng: 78.4983, locationLabel: "Secunderabad, Hyderabad",
+  },
+  {
+    email: "demo.vikas@example.com",
+    name: "Vikas Goud",
+    headline: "Angel investor, ex-operator",
+    company: null,
+    bio: "Early operator at two unicorns. Now writing checks into Hyderabad-based startups.",
+    skills: ["angel-investing", "operations", "mentoring"],
+    lat: 17.4440, lng: 78.4482, locationLabel: "Begumpet, Hyderabad",
+  },
+  {
+    email: "demo.tejaswini@example.com",
+    name: "Tejaswini Rao",
+    headline: "Senior Designer, freelance",
+    company: null,
+    bio: "Product design for early-stage SaaS. Open to new freelance projects this quarter.",
+    skills: ["design", "freelance", "saas"],
+    instagramUrl: "https://instagram.com/tejaswini.design.demo",
+    lat: 17.4849, lng: 78.4138, locationLabel: "Kukatpally, Hyderabad",
+  },
+  {
+    email: "demo.chandan@example.com",
+    name: "Chandan Reddy",
+    headline: "Founder & CEO, logistics-tech",
+    company: "Stealth",
+    bio: "Last-mile delivery optimization for D2C brands. Series A, scaling the team.",
+    skills: ["logistics", "fundraising", "0-to-1"],
+    linkedinUrl: "https://linkedin.com/in/chandan-reddy-demo",
+    lat: 17.3850, lng: 78.4867, locationLabel: "Ameerpet, Hyderabad",
+  },
 ];
 
 // A second cluster, one per continent-ish, so "My Network" has a genuinely
@@ -372,9 +501,56 @@ const WORLD_PEOPLE = [
     skills: ["robotics", "agritech", "hardware"],
     lat: 43.6532, lng: -79.3832, locationLabel: "Toronto, Canada",
   },
+  {
+    email: "demo.priyanka@example.com",
+    name: "Priyanka Malhotra",
+    headline: "Growth Lead at Groww Logistics",
+    company: "Groww Logistics",
+    bio: "Supply-chain growth across South Asia. Splits time between Mumbai and Singapore.",
+    skills: ["growth", "supply-chain", "southeast-asia"],
+    linkedinUrl: "https://linkedin.com/in/priyanka-malhotra-demo",
+    lat: 19.0760, lng: 72.8777, locationLabel: "Mumbai, India",
+  },
+  {
+    email: "demo.jiwoo@example.com",
+    name: "Jiwoo Kim",
+    headline: "Product Lead at Coupang",
+    company: "Coupang",
+    bio: "Logistics and fulfillment product. Writes about e-commerce ops in Korean and English.",
+    skills: ["product", "logistics", "ecommerce"],
+    lat: 37.5665, lng: 126.978, locationLabel: "Seoul, South Korea",
+  },
+  {
+    email: "demo.elin@example.com",
+    name: "Elin Berg",
+    headline: "Founder at Nordlys Climate",
+    company: "Nordlys Climate",
+    bio: "Carbon-capture hardware, pre-seed. Previously a researcher at KTH.",
+    skills: ["climate-tech", "hardware", "research"],
+    websiteUrl: "https://nordlysclimate-demo.com",
+    lat: 59.3293, lng: 18.0686, locationLabel: "Stockholm, Sweden",
+  },
+  {
+    email: "demo.diego@example.com",
+    name: "Diego Fernández",
+    headline: "Engineering Director at Kavak",
+    company: "Kavak",
+    bio: "Marketplace and trust infra for LatAm's largest used-car platform.",
+    skills: ["engineering-leadership", "marketplace", "latam"],
+    lat: 19.4326, lng: -99.1332, locationLabel: "Mexico City, Mexico",
+  },
+  {
+    email: "demo.yasmin@example.com",
+    name: "Yasmin El-Sayed",
+    headline: "Founder, early-stage edtech",
+    company: "Stealth",
+    bio: "Arabic-first learning platform for K-12. Raising a seed round across MENA.",
+    skills: ["edtech", "fundraising", "mena"],
+    lat: 30.0444, lng: 31.2357, locationLabel: "Cairo, Egypt",
+  },
 ];
 
-const ALL_PEOPLE = [...PEOPLE, ...WORLD_PEOPLE];
+const ALL_PEOPLE = [...PEOPLE, ...HYDERABAD_PEOPLE, ...WORLD_PEOPLE];
 
 // Emails from ALL_PEOPLE that should look "active" (heartbeat within the
 // last few minutes) the moment the seed finishes running.
@@ -384,6 +560,8 @@ const ACTIVE_EMAILS = [
   "demo.dev@example.com",
   "demo.sarah@example.com",
   "demo.aiko@example.com",
+  "demo.anika@example.com",
+  "demo.swathi@example.com",
 ];
 
 // At most one live drop per person — these get an actual row in `drops`.
@@ -391,6 +569,7 @@ const DROPS = [
   { email: "demo.anaya@example.com", label: "At Third Wave, open to chat about fintech", minutes: 90 },
   { email: "demo.aakash@example.com", label: "Grabbing coffee near Domlur, say hi", minutes: 45 },
   { email: "demo.marcus@example.com", label: "At a coffee shop in SoHo, open to chat", minutes: 60 },
+  { email: "demo.lavanya@example.com", label: "At Roastery Coffee House, open to chat about design", minutes: 75 },
 ];
 
 const pool = new pg.Pool({ connectionString: url });
