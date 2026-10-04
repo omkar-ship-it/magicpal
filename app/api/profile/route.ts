@@ -7,6 +7,13 @@ import { MAX_SKILLS } from "@/lib/rules";
 
 const str = (v: unknown, max = 200) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
+/** Accepts "linkedin.com/in/x" as readily as "https://linkedin.com/in/x" — nobody types the scheme. */
+function normalizeUrl(v: unknown, max = 300): string {
+  const s = str(v, max);
+  if (!s) return "";
+  return /^https?:\/\//i.test(s) ? s : `https://${s}`;
+}
+
 /**
  * Create or update the signed-in person's own profile — name, headline,
  * company, bio, skills, location, and the map-visibility toggle, all in one
@@ -25,6 +32,9 @@ export async function POST(req: Request) {
   const headline = str(body?.headline, 120);
   const company = str(body?.company, 120);
   const bio = str(body?.bio, 600);
+  const linkedinUrl = normalizeUrl(body?.linkedinUrl);
+  const instagramUrl = normalizeUrl(body?.instagramUrl);
+  const websiteUrl = normalizeUrl(body?.websiteUrl);
   const locationLabel = str(body?.locationLabel, 160);
   const lat = Number(body?.lat);
   const lng = Number(body?.lng);
@@ -45,6 +55,9 @@ export async function POST(req: Request) {
       headline,
       company: company || null,
       bio: bio || null,
+      linkedinUrl: linkedinUrl || null,
+      instagramUrl: instagramUrl || null,
+      websiteUrl: websiteUrl || null,
       skills,
       // A location is only ever set here from a geocoded search result, so
       // a request with no valid location just leaves whatever was there —

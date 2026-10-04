@@ -20,6 +20,11 @@ export const users = pgTable("users", {
   skills: text("skills").array().notNull().default(sql`'{}'::text[]`),
   photoUrl: text("photo_url"),
 
+  // Optional — shown as icon links on the profile card when set.
+  linkedinUrl: text("linkedin_url"),
+  instagramUrl: text("instagram_url"),
+  websiteUrl: text("website_url"),
+
   // -------------------------------------------------------- location
   // Exact coordinates, never sent to the client as-is for anyone but the
   // profile's own owner — see lib/geo.ts:jitter for what other people see.
@@ -94,6 +99,14 @@ export const connections = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     status: text("status").notNull().default("pending"), // pending | accepted | declined
+    /**
+     * An optional note attached when the request was sent — the one way to
+     * say something to someone before you're connected. Delivered as the
+     * first message the moment the request is accepted (see
+     * lib/connections.ts:respondToConnection); never shown or sendable
+     * after that point, so this column doesn't need its own read/reply UI.
+     */
+    requestNote: text("request_note"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     respondedAt: timestamp("responded_at", { withTimezone: true }),
   },

@@ -30,6 +30,9 @@ export default async function ProfilePage() {
           lat: row?.lat ?? null,
           lng: row?.lng ?? null,
           visibleOnMap: row?.visibleOnMap ?? true,
+          linkedinUrl: row?.linkedinUrl ?? "",
+          instagramUrl: row?.instagramUrl ?? "",
+          websiteUrl: row?.websiteUrl ?? "",
         }}
         wasOnboarded={user.onboarded}
       />

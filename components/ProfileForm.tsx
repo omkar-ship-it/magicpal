@@ -16,6 +16,9 @@ type Initial = {
   lat: number | null;
   lng: number | null;
   visibleOnMap: boolean;
+  linkedinUrl: string;
+  instagramUrl: string;
+  websiteUrl: string;
 };
 
 const MAX_SKILLS = 8;
@@ -30,6 +33,9 @@ export default function ProfileForm({ initial, wasOnboarded }: { initial: Initia
   const [skillInput, setSkillInput] = useState("");
   const [photoUrl, setPhotoUrl] = useState<string | null>(initial.photoUrl);
   const [visibleOnMap, setVisibleOnMap] = useState(initial.visibleOnMap);
+  const [linkedinUrl, setLinkedinUrl] = useState(initial.linkedinUrl);
+  const [instagramUrl, setInstagramUrl] = useState(initial.instagramUrl);
+  const [websiteUrl, setWebsiteUrl] = useState(initial.websiteUrl);
 
   const [locationLabel, setLocationLabel] = useState(initial.locationLabel);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
@@ -128,6 +134,9 @@ export default function ProfileForm({ initial, wasOnboarded }: { initial: Initia
           lat: coords?.lat,
           lng: coords?.lng,
           visibleOnMap,
+          linkedinUrl,
+          instagramUrl,
+          websiteUrl,
         }),
       });
       const data = await res.json();
@@ -233,6 +242,65 @@ export default function ProfileForm({ initial, wasOnboarded }: { initial: Initia
             }}
           />
         )}
+      </div>
+
+      <div>
+        <label className="label">Links (optional)</label>
+        <div className="flex flex-col gap-2">
+          <div className="relative">
+            <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-[var(--ink-soft)]">in</span>
+            <input
+              className="input pl-10"
+              placeholder="linkedin.com/in/you"
+              value={linkedinUrl}
+              onChange={(e) => setLinkedinUrl(e.target.value)}
+              maxLength={300}
+            />
+          </div>
+          <div className="relative">
+            <svg
+              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--ink-soft)]"
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="5" />
+              <circle cx="12" cy="12" r="4" />
+              <circle cx="17.2" cy="6.8" r="0.6" fill="currentColor" stroke="none" />
+            </svg>
+            <input
+              className="input pl-10"
+              placeholder="instagram.com/you"
+              value={instagramUrl}
+              onChange={(e) => setInstagramUrl(e.target.value)}
+              maxLength={300}
+            />
+          </div>
+          <div className="relative">
+            <svg
+              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--ink-soft)]"
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18Z" />
+            </svg>
+            <input
+              className="input pl-10"
+              placeholder="yoursite.com"
+              value={websiteUrl}
+              onChange={(e) => setWebsiteUrl(e.target.value)}
+              maxLength={300}
+            />
+          </div>
+        </div>
       </div>
 
       <div className="relative">

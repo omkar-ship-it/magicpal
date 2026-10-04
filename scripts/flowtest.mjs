@@ -257,6 +257,10 @@ async function main() {
     const accept = await api(`/api/connections/${connectionId}/respond`, { method: "POST", jar: b.jar, body: { accept: true } });
     assert(accept.status === 200 && accept.data.status === "accepted", "the recipient can accept");
 
+    const nearbyAfterAccept = await api(`/api/nearby?lat=12.9352&lng=77.6245&radiusKm=10`, { jar: a.jar });
+    const bobInNearby = nearbyAfterAccept.data.profiles.find((p) => p.name === "Flow Bob");
+    assert(bobInNearby?.connectionStatus === "connected", "Nearby mode shows connection status too, not just My Network");
+
     const worldA = await api("/api/world", { jar: a.jar });
     assert(worldA.status === 200, "world endpoint responds");
     const bobInWorld = worldA.data.profiles.find((p) => p.name === "Flow Bob");
@@ -276,6 +280,27 @@ async function main() {
     assert(read.data.messages?.length === 1 && read.data.messages[0].readAt, "recipient reading the thread marks it read");
 
     const c = await signUp(emailC);
+
+    console.log("\nConnection request notes");
+    const nearAliceFromC = await api(`/api/nearby?lat=12.9352&lng=77.6245&radiusKm=5`, { jar: c.jar });
+    const aliceFromC = nearAliceFromC.data.profiles.find((p) => p.name === "Flow Alice");
+    const noteReq = await api("/api/connections", {
+      method: "POST",
+      jar: c.jar,
+      body: { toUserId: aliceFromC.id, note: "Loved your profile, would love to connect!" },
+    });
+    assert(noteReq.status === 200, "a connection request with a note sends fine");
+
+    const { data: noteConnStatus } = await api(`/api/connections?with=${aliceFromC.id}`, { jar: c.jar });
+    const noteAccept = await api(`/api/connections/${noteConnStatus.connectionId}/respond`, { method: "POST", jar: a.jar, body: { accept: true } });
+    assert(noteAccept.status === 200, "accepting a noted request works like any other");
+
+    const noteThread = await api(`/api/messages?connectionId=${noteConnStatus.connectionId}`, { jar: a.jar });
+    assert(
+      noteThread.data.messages?.length === 1 && noteThread.data.messages[0].body === "Loved your profile, would love to connect!",
+      "the note is auto-delivered as the thread's first message once accepted"
+    );
+
     const snoopRead = await api(`/api/messages?connectionId=${connectionId}`, { jar: c.jar });
     assert(snoopRead.status === 404, "a stranger can't read someone else's thread");
     const snoopSend = await api("/api/messages", { method: "POST", jar: c.jar, body: { connectionId, body: "hi" } });

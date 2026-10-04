@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/session";
 import { getNearbyProfiles } from "@/lib/profiles";
-import { getConnectionStatusMap } from "@/lib/connections";
+import { attachConnectionStatus } from "@/lib/connections";
 
 /**
  * Everyone visible worldwide, nearest-to-`center`-first — no radius limit —
@@ -23,22 +23,6 @@ export async function GET(req: Request) {
   const centerLng = Number.isFinite(lng) ? lng : 0;
 
   const profiles = await getNearbyProfiles({ excludeUserId: user?.id, centerLat, centerLng, radiusKm: 0, global: true });
-  const statusMap = user ? await getConnectionStatusMap(user.id) : new Map();
-
-  const withStatus = profiles.map((p) => {
-    const info = statusMap.get(p.id);
-    // The `connections` table's own vocabulary (pending/accepted/declined)
-    // isn't what the map wants to draw — it only needs "in your circle",
-    // "waiting on an answer", or "nothing yet" (a declined request reads
-    // the same as never having asked).
-    const connectionStatus = info?.status === "accepted" ? "connected" : info?.status === "pending" ? "pending" : "none";
-    return {
-      ...p,
-      connectionStatus,
-      connectionId: info?.connectionId ?? null,
-      mine: info?.mine ?? null,
-    };
-  });
-
+  const withStatus = await attachConnectionStatus(profiles, user?.id);
   return NextResponse.json({ profiles: withStatus });
 }

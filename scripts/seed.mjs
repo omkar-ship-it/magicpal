@@ -174,6 +174,86 @@ const PEOPLE = [
     skills: ["backend", "payments", "reliability"],
     lat: 12.9095, lng: 77.6453, locationLabel: "HSR Sector 7, Bengaluru",
   },
+  {
+    email: "demo.nisha@example.com",
+    name: "Nisha Reddy",
+    headline: "VP Product at Driftwood",
+    company: "Driftwood",
+    bio: "10 years in fintech product. Mentors first-time PMs on Thursdays.",
+    skills: ["product", "fintech", "leadership"],
+    linkedinUrl: "https://linkedin.com/in/nisha-reddy-demo",
+    lat: 12.9718, lng: 77.6190, locationLabel: "Ulsoor, Bengaluru",
+  },
+  {
+    email: "demo.rahul@example.com",
+    name: "Rahul Varma",
+    headline: "Founder, early-stage climate-tech",
+    company: "Stealth",
+    bio: "Building carbon accounting for Indian manufacturers. Pre-seed, raising soon.",
+    skills: ["climate-tech", "fundraising", "b2b"],
+    websiteUrl: "https://rahulvarma-demo.com",
+    lat: 12.9256, lng: 77.5468, locationLabel: "Vijayanagar, Bengaluru",
+  },
+  {
+    email: "demo.pooja@example.com",
+    name: "Pooja Shetty",
+    headline: "ML Engineer at Harbor",
+    company: "Harbor",
+    bio: "Recommender systems and ranking. Writes a small newsletter on applied ML in India.",
+    skills: ["ml", "ranking", "python"],
+    instagramUrl: "https://instagram.com/pooja.demo",
+    lat: 12.9850, lng: 77.5533, locationLabel: "Malleswaram, Bengaluru",
+  },
+  {
+    email: "demo.ananya@example.com",
+    name: "Ananya Krishnan",
+    headline: "Brand Designer, freelance",
+    company: null,
+    bio: "Identity and packaging design for D2C brands. Taking two new clients this quarter.",
+    skills: ["branding", "design", "freelance"],
+    instagramUrl: "https://instagram.com/ananya.design.demo",
+    websiteUrl: "https://ananyakrishnan-demo.com",
+    lat: 12.9180, lng: 77.6408, locationLabel: "Koramangala 8th Block, Bengaluru",
+  },
+  {
+    email: "demo.vivek@example.com",
+    name: "Vivek Pillai",
+    headline: "Site Reliability Engineer at Nimbus",
+    company: "Nimbus",
+    bio: "On-call for payments uptime. Building a home lab Kubernetes cluster for fun.",
+    skills: ["sre", "kubernetes", "payments"],
+    linkedinUrl: "https://linkedin.com/in/vivek-pillai-demo",
+    lat: 13.0049, lng: 77.5694, locationLabel: "Malleswaram West, Bengaluru",
+  },
+  {
+    email: "demo.divya@example.com",
+    name: "Divya Menon",
+    headline: "Chief of Staff at Clearline",
+    company: "Clearline",
+    bio: "Ops, hiring, and the thousand small things that keep a Series B running.",
+    skills: ["operations", "hiring", "strategy"],
+    lat: 12.9634, lng: 77.6963, locationLabel: "Whitefield, Bengaluru",
+  },
+  {
+    email: "demo.rohit@example.com",
+    name: "Rohit Agarwal",
+    headline: "Angel investor, ex-founder",
+    company: null,
+    bio: "Sold my last company in 2023. Now writing small checks into seed-stage B2B SaaS.",
+    skills: ["angel-investing", "b2b-saas", "mentoring"],
+    linkedinUrl: "https://linkedin.com/in/rohit-agarwal-demo",
+    websiteUrl: "https://rohitagarwal-demo.com",
+    lat: 12.9081, lng: 77.6476, locationLabel: "HSR Layout Sector 2, Bengaluru",
+  },
+  {
+    email: "demo.simran@example.com",
+    name: "Simran Kaur",
+    headline: "Growth PM at Northstar Labs",
+    company: "Northstar Labs",
+    bio: "Onboarding and activation. Previously grew a consumer app to 2M MAU.",
+    skills: ["product", "growth", "onboarding"],
+    lat: 12.9447, lng: 77.5631, locationLabel: "Basavanagudi, Bengaluru",
+  },
 ];
 
 // A second cluster, one per continent-ish, so "My Network" has a genuinely
@@ -186,6 +266,8 @@ const WORLD_PEOPLE = [
     company: "Horizon Ventures",
     bio: "Early-stage B2B SaaS. Writes a widely-read newsletter on fundraising mechanics.",
     skills: ["venture-capital", "fundraising", "saas"],
+    linkedinUrl: "https://linkedin.com/in/sarah-chen-demo",
+    websiteUrl: "https://sarahchen-demo.com",
     lat: 37.7749, lng: -122.4194, locationLabel: "San Francisco, USA",
   },
   {
@@ -195,6 +277,7 @@ const WORLD_PEOPLE = [
     company: "Lattice",
     bio: "Platform and infra at scale. Ex-Stripe. Runs a small engineering-leadership book club.",
     skills: ["engineering-leadership", "platform", "scale"],
+    linkedinUrl: "https://linkedin.com/in/marcus-webb-demo",
     lat: 40.7128, lng: -74.006, locationLabel: "New York, USA",
   },
   {
@@ -204,6 +287,8 @@ const WORLD_PEOPLE = [
     company: "Monzo",
     bio: "Fintech design systems. Occasional mentor for design bootcamp grads.",
     skills: ["design", "fintech", "mentoring"],
+    instagramUrl: "https://instagram.com/emma.whitfield.demo",
+    websiteUrl: "https://emmawhitfield-demo.com",
     lat: 51.5072, lng: -0.1276, locationLabel: "London, UK",
   },
   {
@@ -316,11 +401,14 @@ async function main() {
 
   for (const p of ALL_PEOPLE) {
     const res = await pool.query(
-      `insert into users (email, name, headline, company, bio, skills, lat, lng, location_label, visible_on_map)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+      `insert into users (email, name, headline, company, bio, skills, lat, lng, location_label, visible_on_map, linkedin_url, instagram_url, website_url)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, $10, $11, $12)
        on conflict (email) do nothing
        returning id`,
-      [p.email, p.name, p.headline, p.company, p.bio, p.skills, p.lat, p.lng, p.locationLabel]
+      [
+        p.email, p.name, p.headline, p.company, p.bio, p.skills, p.lat, p.lng, p.locationLabel,
+        p.linkedinUrl ?? null, p.instagramUrl ?? null, p.websiteUrl ?? null,
+      ]
     );
     if (res.rowCount) {
       inserted++;

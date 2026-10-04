@@ -1,6 +1,6 @@
 import { and, desc, eq, or } from "drizzle-orm";
 import { db, hasDb } from "./db";
-import { connections, users } from "./db/schema";
+import { connections, messages, users } from "./db/schema";
 import { orderedPair } from "./rules";
 
 export type ConnectionWithStatus = {
@@ -11,6 +11,7 @@ export type ConnectionWithStatus = {
   otherName: string | null;
   otherHeadline: string | null;
   otherPhotoUrl: string | null;
+  requestNote?: string | null;
   createdAt: Date;
 };
 
@@ -30,19 +31,28 @@ export async function getConnectionBetween(userId: string, otherId: string) {
  * Open a request. The unique index on the ordered pair is what actually
  * stops a duplicate — `onConflictDoNothing` just turns that into a quiet
  * no-op instead of a thrown constraint error, so "I already asked" and "I'm
- * asking for the first time" both come back looking like success.
+ * asking for the first time" both come back looking like success. A note on
+ * a request that already exists is silently dropped along with everything
+ * else about the duplicate attempt — the first ask is the one that counts.
  */
-export async function requestConnection(fromId: string, toId: string) {
+export async function requestConnection(fromId: string, toId: string, note?: string) {
   if (!hasDb || !db) return null;
   const [a, b] = orderedPair(fromId, toId);
   const [row] = await db
     .insert(connections)
-    .values({ userAId: a, userBId: b, requesterId: fromId, status: "pending" })
+    .values({ userAId: a, userBId: b, requesterId: fromId, status: "pending", requestNote: note || null })
     .onConflictDoNothing()
     .returning();
   return row ?? (await getConnectionBetween(fromId, toId));
 }
 
+/**
+ * Accepting delivers whatever note came with the request as the first
+ * message in the thread — the one place a note is ever shown. This is the
+ * entire answer to "can I say something before we're connected": a short
+ * note travels with the request, and becomes a real message the instant
+ * it's accepted, rather than needing its own separate read/reply surface.
+ */
 export async function respondToConnection(connectionId: string, userId: string, accept: boolean) {
   if (!hasDb || !db) return null;
   const [row] = await db
@@ -61,6 +71,11 @@ export async function respondToConnection(connectionId: string, userId: string, 
     .set({ status: accept ? "accepted" : "declined", respondedAt: new Date() })
     .where(eq(connections.id, connectionId))
     .returning();
+
+  if (accept && row.requestNote) {
+    await db.insert(messages).values({ connectionId, senderId: row.requesterId, body: row.requestNote });
+  }
+
   return updated;
 }
 
@@ -75,6 +90,7 @@ export async function listIncomingRequests(userId: string): Promise<ConnectionWi
       userAId: connections.userAId,
       userBId: connections.userBId,
       createdAt: connections.createdAt,
+      requestNote: connections.requestNote,
       otherName: users.name,
       otherHeadline: users.headline,
       otherPhotoUrl: users.photoUrl,
@@ -96,6 +112,7 @@ export async function listIncomingRequests(userId: string): Promise<ConnectionWi
       status: r.status,
       requesterId: r.requesterId,
       otherUserId: r.requesterId,
+      requestNote: r.requestNote,
       otherName: r.otherName,
       otherHeadline: r.otherHeadline,
       otherPhotoUrl: r.otherPhotoUrl,
@@ -197,4 +214,28 @@ export async function getConnectionStatusMap(userId: string): Promise<Map<string
     map.set(otherId, { status: r.status, connectionId: r.id, mine: r.requesterId === userId });
   }
   return map;
+}
+
+export type WithConnectionStatus<T> = T & {
+  connectionStatus: "connected" | "pending" | "none";
+  connectionId: string | null;
+  mine: boolean | null;
+};
+
+/**
+ * Annotates any list of profiles with how each one relates to the caller —
+ * shared by /api/nearby and /api/world so "connected" means the same thing,
+ * looks the same color, and is computed the same way everywhere the map
+ * shows other people, not just in the dedicated network view.
+ */
+export async function attachConnectionStatus<T extends { id: string }>(
+  profiles: T[],
+  userId: string | undefined
+): Promise<WithConnectionStatus<T>[]> {
+  const statusMap = userId ? await getConnectionStatusMap(userId) : new Map<string, ConnectionStatusInfo>();
+  return profiles.map((p) => {
+    const info = statusMap.get(p.id);
+    const connectionStatus = info?.status === "accepted" ? "connected" : info?.status === "pending" ? "pending" : "none";
+    return { ...p, connectionStatus, connectionId: info?.connectionId ?? null, mine: info?.mine ?? null };
+  });
 }

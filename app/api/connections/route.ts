@@ -8,6 +8,7 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => null);
   const toUserId = typeof body?.toUserId === "string" ? body.toUserId : "";
+  const note = typeof body?.note === "string" ? body.note.trim().slice(0, 300) : undefined;
   if (!/^[0-9a-f-]{36}$/i.test(toUserId)) {
     return NextResponse.json({ error: "Unknown person." }, { status: 400 });
   }
@@ -15,7 +16,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "You can't connect with yourself." }, { status: 400 });
   }
 
-  const row = await requestConnection(user.id, toUserId);
+  const row = await requestConnection(user.id, toUserId, note);
   if (!row) return NextResponse.json({ error: "Couldn't send that request." }, { status: 500 });
   return NextResponse.json({ ok: true, status: row.status, mine: row.requesterId === user.id });
 }

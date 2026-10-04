@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/session";
 import { getNearbyProfiles } from "@/lib/profiles";
+import { attachConnectionStatus } from "@/lib/connections";
 import { DEFAULT_RADIUS_KM, RADIUS_OPTIONS_KM } from "@/lib/rules";
 
 /**
@@ -23,5 +24,6 @@ export async function GET(req: Request) {
   }
 
   const profiles = await getNearbyProfiles({ excludeUserId: user?.id, centerLat: lat, centerLng: lng, radiusKm });
-  return NextResponse.json({ profiles, radiusKm });
+  const withStatus = await attachConnectionStatus(profiles, user?.id);
+  return NextResponse.json({ profiles: withStatus, radiusKm });
 }

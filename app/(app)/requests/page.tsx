@@ -23,7 +23,7 @@ export default async function RequestsPage() {
             <p className="card p-5 text-[13px] text-[var(--ink-soft)]">Nothing waiting on you right now.</p>
           )}
           {incoming.map((r) => (
-            <RequestRow key={r.id} id={r.id} name={r.otherName} headline={r.otherHeadline} photoUrl={r.otherPhotoUrl} />
+            <RequestRow key={r.id} id={r.id} name={r.otherName} headline={r.otherHeadline} photoUrl={r.otherPhotoUrl} requestNote={r.requestNote} />
           ))}
         </div>
       </section>

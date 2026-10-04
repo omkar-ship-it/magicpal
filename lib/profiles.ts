@@ -9,9 +9,13 @@ export type MapProfile = {
   name: string;
   headline: string | null;
   company: string | null;
+  bio: string | null;
   skills: string[];
   photoUrl: string | null;
   locationLabel: string | null;
+  linkedinUrl: string | null;
+  instagramUrl: string | null;
+  websiteUrl: string | null;
   /** Jittered — never the profile owner's exact coordinates. */
   lat: number;
   lng: number;
@@ -54,9 +58,13 @@ export async function getNearbyProfiles(opts: {
       name: users.name,
       headline: users.headline,
       company: users.company,
+      bio: users.bio,
       skills: users.skills,
       photoUrl: users.photoUrl,
       locationLabel: users.locationLabel,
+      linkedinUrl: users.linkedinUrl,
+      instagramUrl: users.instagramUrl,
+      websiteUrl: users.websiteUrl,
       lat: users.lat,
       lng: users.lng,
       lastActiveAt: users.lastActiveAt,
@@ -90,9 +98,13 @@ export async function getNearbyProfiles(opts: {
         name: r.name!,
         headline: r.headline,
         company: r.company,
+        bio: r.bio,
         skills: r.skills,
         photoUrl: r.photoUrl,
         locationLabel: r.locationLabel,
+        linkedinUrl: r.linkedinUrl,
+        instagramUrl: r.instagramUrl,
+        websiteUrl: r.websiteUrl,
         lat: jittered.lat,
         lng: jittered.lng,
         distanceKm: km,
