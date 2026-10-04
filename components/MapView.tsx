@@ -7,7 +7,6 @@ import type { MapRef } from "react-map-gl/mapbox";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { ArcLayer } from "@deck.gl/layers";
 import { DROP_DURATION_OPTIONS_MIN, DEFAULT_DROP_DURATION_MIN, MAX_DROP_LABEL } from "@/lib/rules";
-import { distanceKm } from "@/lib/geo";
 import FloatingAccountMenu from "./FloatingAccountMenu";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
@@ -18,6 +17,7 @@ const DEFAULT_CENTER = { lat: 12.9716, lng: 77.5946 };
 
 type Mode = "nearby" | "network";
 type Drop = { label: string; expiresAt: string };
+type ConnectionStatus = "connected" | "pending" | "none";
 
 type Profile = {
   id: string;
@@ -32,24 +32,27 @@ type Profile = {
   distanceKm: number;
   active: boolean;
   drop: Drop | null;
+  /** Only present in "My Network" mode — /api/nearby doesn't compute these. */
+  connectionStatus?: ConnectionStatus;
+  connectionId?: string | null;
+  /** True if *I* sent the pending request; false if they sent it to me. */
+  mine?: boolean | null;
 };
 
-type NetworkPoint = {
-  connectionId: string;
-  userId: string;
-  name: string;
-  headline: string | null;
-  company: string | null;
-  photoUrl: string | null;
-  locationLabel: string | null;
-  lat: number;
-  lng: number;
+type ConnState = {
+  status: "connect" | "pending" | "accepted" | "declined";
+  connectionId: string | null;
+  /** A pending request that's waiting on *my* answer, not theirs. */
+  incoming?: boolean;
 };
-
-type ConnState = { status: "connect" | "pending" | "accepted" | "declined"; connectionId: string | null };
 
 function minutesLeft(expiresAt: string, now: number): number {
   return Math.max(0, Math.round((new Date(expiresAt).getTime() - now) / 60_000));
+}
+
+/** Small distances read naturally to one decimal; continental ones read better rounded with a thousands separator. */
+function formatDistance(km: number): string {
+  return km < 100 ? `~${km.toFixed(1)}km away` : `~${Math.round(km).toLocaleString()}km away`;
 }
 
 function Pin({
@@ -59,6 +62,7 @@ function Pin({
   active,
   drop,
   highlighted,
+  connected,
 }: {
   photoUrl: string | null;
   initial: string;
@@ -66,11 +70,13 @@ function Pin({
   active?: boolean;
   drop?: boolean;
   highlighted?: boolean;
+  /** Already in your network — rendered in the same hue as "you", not the discovery gold. */
+  connected?: boolean;
 }) {
   const classes = ["pin", me ? "pin-me" : "", drop ? "pin-drop" : active ? "pin-active" : "", highlighted ? "pin-hover" : ""]
     .filter(Boolean)
     .join(" ");
-  const bg = drop ? "var(--gold)" : me ? "var(--brand)" : "var(--gold)";
+  const bg = drop ? "var(--gold)" : me || connected ? "var(--brand)" : "var(--gold)";
   const size = highlighted ? 46 : 38;
   return (
     <div className={classes} style={{ background: bg, width: size, height: size }}>
@@ -97,11 +103,13 @@ function ActionButton({
   p,
   conn,
   onConnect,
+  onRespond,
   canAct,
 }: {
   p: Profile;
   conn: ConnState | undefined;
   onConnect: (id: string) => void;
+  onRespond: (p: Profile, accept: boolean) => void;
   canAct: boolean;
 }) {
   if (!canAct) {
@@ -116,6 +124,18 @@ function ActionButton({
       <button onClick={() => onConnect(p.id)} className="btn btn-primary btn-sm w-full">
         Connect
       </button>
+    );
+  }
+  if (conn.status === "pending" && conn.incoming) {
+    return (
+      <div className="flex gap-1.5">
+        <button onClick={() => onRespond(p, false)} className="btn btn-ghost btn-sm flex-1">
+          Decline
+        </button>
+        <button onClick={() => onRespond(p, true)} className="btn btn-primary btn-sm flex-1">
+          Accept
+        </button>
+      </div>
     );
   }
   if (conn.status === "pending") {
@@ -136,6 +156,80 @@ function ActionButton({
     <button disabled className="btn btn-ghost btn-sm w-full">
       Not connected
     </button>
+  );
+}
+
+function ProfileListRow({
+  p,
+  conn,
+  hoveredId,
+  now,
+  canAct,
+  onHover,
+  onUnhover,
+  onConnect,
+  onRespond,
+}: {
+  p: Profile;
+  conn: ConnState | undefined;
+  hoveredId: string | null;
+  now: number;
+  canAct: boolean;
+  onHover: (id: string) => void;
+  onUnhover: (id: string) => void;
+  onConnect: (id: string) => void;
+  onRespond: (p: Profile, accept: boolean) => void;
+}) {
+  const connected = conn?.status === "accepted";
+  return (
+    <div
+      onMouseEnter={() => onHover(p.id)}
+      onMouseLeave={() => onUnhover(p.id)}
+      className="card flex cursor-pointer gap-3 p-3 transition-colors"
+      style={hoveredId === p.id ? { borderColor: "var(--brand)", background: "var(--sunk)" } : undefined}
+    >
+      <span
+        className="avatar h-11 w-11 flex-none text-[13px]"
+        style={{ background: `linear-gradient(135deg, ${connected ? "var(--brand)" : "var(--gold)"}, var(--brand-deep))` }}
+      >
+        {p.photoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={p.photoUrl} alt="" />
+        ) : (
+          p.name.slice(0, 1).toUpperCase()
+        )}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <p className="truncate text-[13.5px] font-semibold leading-tight">{p.name}</p>
+          {p.active && !p.drop && <span className="pulse-dot flex-none" title="Active recently" />}
+          {connected && (
+            <span
+              className="pill flex-none"
+              style={{ background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand-deep)", padding: "1px 7px" }}
+            >
+              Connected
+            </span>
+          )}
+        </div>
+        {p.headline && <p className="truncate text-[12px] text-[var(--ink-soft)]">{p.headline}</p>}
+        {p.locationLabel && <p className="truncate text-[11px] text-[var(--ink-soft)]">{p.locationLabel}</p>}
+        <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">{formatDistance(p.distanceKm)}</p>
+        {p.drop && <DropBadge drop={p.drop} now={now} />}
+        {p.skills.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {p.skills.slice(0, 3).map((s) => (
+              <span key={s} className="skill-tag">
+                {s}
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="mt-2">
+          <ActionButton p={p} conn={conn} onConnect={onConnect} onRespond={onRespond} canAct={canAct} />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -180,8 +274,8 @@ export default function MapView({
   );
   const [radiusKm, setRadiusKm] = useState<number>(DEFAULT_RADIUS_KM);
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [networkPoints, setNetworkPoints] = useState<NetworkPoint[]>([]);
-  const [networkLoading, setNetworkLoading] = useState(false);
+  const [worldProfiles, setWorldProfiles] = useState<Profile[]>([]);
+  const [worldLoading, setWorldLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [locating, setLocating] = useState(false);
   const [query, setQuery] = useState("");
@@ -255,23 +349,40 @@ export default function MapView({
   }, [center, radiusKm, mode]);
 
   useEffect(() => {
-    if (mode !== "network" || !canAct) return;
+    if (mode !== "network") return;
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (!cancelled) setNetworkLoading(true);
+      if (!cancelled) setWorldLoading(true);
     });
-    fetch("/api/connections/map")
+    const qs = ownLat != null && ownLng != null ? `?lat=${ownLat}&lng=${ownLng}` : "";
+    fetch(`/api/world${qs}`)
       .then((r) => r.json())
       .then((d) => {
-        if (!cancelled) setNetworkPoints(d.points ?? []);
+        if (cancelled) return;
+        const list: Profile[] = d.profiles ?? [];
+        setWorldProfiles(list);
+        // Seed real status from the server rather than starting every pin as
+        // an unknown "Connect" and only finding out after a click — the
+        // whole point of this view is seeing who's already in your circle.
+        setConn((c) => {
+          const next = { ...c };
+          for (const p of list) {
+            if (!p.connectionStatus || p.connectionStatus === "none") continue;
+            next[p.id] =
+              p.connectionStatus === "connected"
+                ? { status: "accepted", connectionId: p.connectionId ?? null }
+                : { status: "pending", connectionId: p.connectionId ?? null, incoming: p.mine === false };
+          }
+          return next;
+        });
       })
       .finally(() => {
-        if (!cancelled) setNetworkLoading(false);
+        if (!cancelled) setWorldLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [mode, canAct]);
+  }, [mode, ownLat, ownLng]);
 
   // Nearby mode flies back to a street-level view of `center`; network mode
   // zooms out and fits every connection (plus your own pin) into frame —
@@ -281,9 +392,11 @@ export default function MapView({
     mapRef.current?.flyTo({ center: [center.lng, center.lat], zoom: 12, duration: 1200 });
   }, [center, mode]);
 
+  const connectedProfiles = worldProfiles.filter((p) => conn[p.id]?.status === "accepted");
+
   useEffect(() => {
-    if (mode !== "network") return;
-    const pts: [number, number][] = networkPoints.map((p) => [p.lng, p.lat]);
+    if (mode !== "network" || worldLoading) return;
+    const pts: [number, number][] = connectedProfiles.map((p) => [p.lng, p.lat]);
     if (ownLat != null && ownLng != null) pts.push([ownLng, ownLat]);
     if (pts.length === 0) {
       mapRef.current?.flyTo({ center: [0, 20], zoom: 1.3, duration: 1200 });
@@ -309,7 +422,8 @@ export default function MapView({
       ],
       { padding: 120, duration: 1500, maxZoom: 4 }
     );
-  }, [mode, networkPoints, ownLat, ownLng]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, worldLoading, ownLat, ownLng]);
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -354,6 +468,17 @@ export default function MapView({
     }
   }
 
+  async function respondTo(p: Profile, accept: boolean) {
+    const connectionId = conn[p.id]?.connectionId;
+    if (!connectionId) return;
+    setConn((c) => ({ ...c, [p.id]: { status: accept ? "accepted" : "declined", connectionId } }));
+    await fetch(`/api/connections/${connectionId}/respond`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accept }),
+    });
+  }
+
   async function submitDrop(e: React.FormEvent) {
     e.preventDefault();
     setDropBusy(true);
@@ -393,13 +518,13 @@ export default function MapView({
   const dropCount = profiles.filter((p) => p.drop).length;
 
   const arcLayers =
-    mode === "network" && ownLat != null && ownLng != null && networkPoints.length > 0
+    mode === "network" && ownLat != null && ownLng != null && connectedProfiles.length > 0
       ? [
           new ArcLayer({
             id: "network-arcs",
-            data: networkPoints,
+            data: connectedProfiles,
             getSourcePosition: () => [ownLng, ownLat],
-            getTargetPosition: (d: NetworkPoint) => [d.lng, d.lat],
+            getTargetPosition: (d: Profile) => [d.lng, d.lat],
             getSourceColor: [255, 107, 74, 200],
             getTargetColor: [176, 125, 9, 200],
             getWidth: 2,
@@ -420,99 +545,47 @@ export default function MapView({
         )}
         <div className="flex flex-col gap-2.5">
           {profiles.map((p) => (
-            <div
+            <ProfileListRow
               key={p.id}
-              onMouseEnter={() => hoverProfile(p.id)}
-              onMouseLeave={() => unhoverProfile(p.id)}
-              className="card flex cursor-pointer gap-3 p-3 transition-colors"
-              style={hoveredId === p.id ? { borderColor: "var(--brand)", background: "var(--sunk)" } : undefined}
-            >
-              <span
-                className="avatar h-11 w-11 flex-none text-[13px]"
-                style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-deep))" }}
-              >
-                {p.photoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={p.photoUrl} alt="" />
-                ) : (
-                  p.name.slice(0, 1).toUpperCase()
-                )}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <p className="truncate text-[13.5px] font-semibold leading-tight">{p.name}</p>
-                  {p.active && !p.drop && <span className="pulse-dot flex-none" title="Active recently" />}
-                </div>
-                {p.headline && <p className="truncate text-[12px] text-[var(--ink-soft)]">{p.headline}</p>}
-                <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">~{p.distanceKm.toFixed(1)}km</p>
-                {p.drop && <DropBadge drop={p.drop} now={now} />}
-                {p.skills.length > 0 && (
-                  <div className="mt-1.5 flex flex-wrap gap-1">
-                    {p.skills.slice(0, 3).map((s) => (
-                      <span key={s} className="skill-tag">
-                        {s}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <div className="mt-2">
-                  <ActionButton p={p} conn={conn[p.id]} onConnect={connectTo} canAct={canAct} />
-                </div>
-              </div>
-            </div>
+              p={p}
+              conn={conn[p.id]}
+              hoveredId={hoveredId}
+              now={now}
+              canAct={canAct}
+              onHover={hoverProfile}
+              onUnhover={unhoverProfile}
+              onConnect={connectTo}
+              onRespond={respondTo}
+            />
           ))}
         </div>
       </>
     ) : (
       <>
-        {networkLoading && networkPoints.length === 0 && (
-          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">Loading your network…</p>
-        )}
-        {!networkLoading && networkPoints.length === 0 && (
-          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">
-            Your network will show up here once you connect with people — try the Nearby view.
-          </p>
+        {worldLoading && worldProfiles.length === 0 && <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">Loading the world…</p>}
+        {!worldLoading && worldProfiles.length === 0 && (
+          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one else has joined yet — check back soon.</p>
         )}
         <div className="flex flex-col gap-2.5">
-          {networkPoints.map((p) => (
-            <div
-              key={p.userId}
-              onMouseEnter={() => hoverProfile(p.userId)}
-              onMouseLeave={() => unhoverProfile(p.userId)}
-              className="card flex cursor-pointer gap-3 p-3 transition-colors"
-              style={hoveredId === p.userId ? { borderColor: "var(--brand)", background: "var(--sunk)" } : undefined}
-            >
-              <span
-                className="avatar h-11 w-11 flex-none text-[13px]"
-                style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-deep))" }}
-              >
-                {p.photoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={p.photoUrl} alt="" />
-                ) : (
-                  p.name.slice(0, 1).toUpperCase()
-                )}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[13.5px] font-semibold leading-tight">{p.name}</p>
-                {p.headline && <p className="truncate text-[12px] text-[var(--ink-soft)]">{p.headline}</p>}
-                {p.locationLabel && <p className="mt-0.5 truncate text-[11px] text-[var(--ink-soft)]">{p.locationLabel}</p>}
-                {ownLat != null && ownLng != null && (
-                  <p className="text-[11px] text-[var(--ink-soft)]">
-                    ~{Math.round(distanceKm(ownLat, ownLng, p.lat, p.lng)).toLocaleString()}km away
-                  </p>
-                )}
-                <div className="mt-2">
-                  <Link href={`/messages/${p.connectionId}`} className="btn btn-primary btn-sm w-full">
-                    Message
-                  </Link>
-                </div>
-              </div>
-            </div>
+          {worldProfiles.map((p) => (
+            <ProfileListRow
+              key={p.id}
+              p={p}
+              conn={conn[p.id]}
+              hoveredId={hoveredId}
+              now={now}
+              canAct={canAct}
+              onHover={hoverProfile}
+              onUnhover={unhoverProfile}
+              onConnect={connectTo}
+              onRespond={respondTo}
+            />
           ))}
         </div>
       </>
     );
+
+  const activeData = mode === "nearby" ? profiles : worldProfiles;
 
   return (
     <div className="fixed inset-0 overflow-hidden">
@@ -561,8 +634,9 @@ export default function MapView({
           </Marker>
         )}
 
-        {mode === "nearby" &&
-          profiles.map((p) => (
+        {activeData.map((p) => {
+          const connected = mode === "network" && conn[p.id]?.status === "accepted";
+          return (
             <Marker key={p.id} longitude={p.lng} latitude={p.lat} anchor="center">
               <div onClick={() => hoverProfile(p.id)} onMouseEnter={() => hoverProfile(p.id)} onMouseLeave={() => unhoverProfile(p.id)}>
                 <Pin
@@ -571,6 +645,7 @@ export default function MapView({
                   active={p.active}
                   drop={Boolean(p.drop)}
                   highlighted={hoveredId === p.id}
+                  connected={connected}
                 />
               </div>
               {hoveredId === p.id && (
@@ -584,74 +659,51 @@ export default function MapView({
                   onClose={() => unhoverProfile(p.id)}
                 >
                   <div className="w-56 p-3">
-                    <p className="text-[14px] font-semibold">{p.name}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-[14px] font-semibold">{p.name}</p>
+                      {connected && (
+                        <span className="pill" style={{ background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand-deep)", padding: "1px 7px" }}>
+                          Connected
+                        </span>
+                      )}
+                    </div>
                     {p.headline && <p className="text-[12.5px] text-[var(--ink-soft)]">{p.headline}</p>}
                     {p.company && <p className="text-[12px] text-[var(--ink-soft)]">{p.company}</p>}
-                    <p className="mt-1 text-[11.5px] text-[var(--ink-soft)]">~{p.distanceKm.toFixed(1)}km away</p>
-                    {p.drop && <DropBadge drop={p.drop} now={now} />}
-                    <div className="mt-2.5">
-                      <ActionButton p={p} conn={conn[p.id]} onConnect={connectTo} canAct={canAct} />
-                    </div>
-                  </div>
-                </Popup>
-              )}
-            </Marker>
-          ))}
-
-        {mode === "network" &&
-          networkPoints.map((p) => (
-            <Marker key={p.userId} longitude={p.lng} latitude={p.lat} anchor="center">
-              <div
-                onClick={() => hoverProfile(p.userId)}
-                onMouseEnter={() => hoverProfile(p.userId)}
-                onMouseLeave={() => unhoverProfile(p.userId)}
-              >
-                <Pin photoUrl={p.photoUrl} initial={p.name.slice(0, 1).toUpperCase()} highlighted={hoveredId === p.userId} />
-              </div>
-              {hoveredId === p.userId && (
-                <Popup
-                  longitude={p.lng}
-                  latitude={p.lat}
-                  anchor="top"
-                  closeButton={false}
-                  closeOnClick={false}
-                  offset={22}
-                  onClose={() => unhoverProfile(p.userId)}
-                >
-                  <div className="w-56 p-3">
-                    <p className="text-[14px] font-semibold">{p.name}</p>
-                    {p.headline && <p className="text-[12.5px] text-[var(--ink-soft)]">{p.headline}</p>}
                     {p.locationLabel && <p className="text-[12px] text-[var(--ink-soft)]">{p.locationLabel}</p>}
-                    {ownLat != null && ownLng != null && (
-                      <p className="mt-1 text-[11.5px] text-[var(--ink-soft)]">
-                        ~{Math.round(distanceKm(ownLat, ownLng, p.lat, p.lng)).toLocaleString()}km away
-                      </p>
+                    <p className="mt-1 text-[11.5px] text-[var(--ink-soft)]">{formatDistance(p.distanceKm)}</p>
+                    {p.drop && <DropBadge drop={p.drop} now={now} />}
+                    {p.skills.length > 0 && (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {p.skills.slice(0, 4).map((s) => (
+                          <span key={s} className="skill-tag">
+                            {s}
+                          </span>
+                        ))}
+                      </div>
                     )}
                     <div className="mt-2.5">
-                      <Link href={`/messages/${p.connectionId}`} className="btn btn-primary btn-sm w-full">
-                        Message
-                      </Link>
+                      <ActionButton p={p} conn={conn[p.id]} onConnect={connectTo} onRespond={respondTo} canAct={canAct} />
                     </div>
                   </div>
                 </Popup>
               )}
             </Marker>
-          ))}
+          );
+        })}
       </Map>
 
       {/* ---------------------------------------------------- floating chrome */}
       <div className="pointer-events-none absolute inset-x-3 top-3 z-[1000] flex items-start justify-between gap-3 sm:inset-x-5 sm:top-5">
         <div className="flex w-full max-w-[600px] flex-col gap-3">
-        <div className="floating-panel pointer-events-auto p-3">
-          <div className="flex items-center gap-2">
-            <span
-              className="grid h-8 w-8 flex-none place-items-center rounded-full text-[15px] text-white"
-              style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-deep))" }}
-            >
-              ✦
-            </span>
+          <div className="floating-panel pointer-events-auto p-3">
+            <div className="flex items-center gap-2">
+              <span
+                className="grid h-8 w-8 flex-none place-items-center rounded-full text-[15px] text-white"
+                style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-deep))" }}
+              >
+                ✦
+              </span>
 
-            {canAct && (
               <div className="flex flex-none items-center gap-0.5 rounded-full p-0.5" style={{ background: "var(--sunk)" }}>
                 <button
                   onClick={() => setMode("nearby")}
@@ -668,145 +720,154 @@ export default function MapView({
                   My Network
                 </button>
               </div>
-            )}
 
-            {mode === "nearby" && (
-              <div className="relative min-w-0 flex-1">
-                <svg
-                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--ink-soft)]"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
+              {mode === "nearby" && (
+                <div className="relative min-w-0 flex-1">
+                  <svg
+                    className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--ink-soft)]"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                  >
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="m20 20-3.5-3.5" strokeLinecap="round" />
+                  </svg>
+                  <input
+                    className="input pl-9"
+                    placeholder="Search a city or neighbourhood…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                  {results.length > 0 && (
+                    <div className="card absolute z-10 mt-1 w-full overflow-hidden p-1">
+                      {results.map((r) => (
+                        <button
+                          key={`${r.lat},${r.lng}`}
+                          type="button"
+                          onClick={() => {
+                            setCenter({ lat: r.lat, lng: r.lng });
+                            setQuery(r.label);
+                            setResults([]);
+                          }}
+                          className="block w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-[var(--sunk)]"
+                        >
+                          {r.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {mode === "nearby" && (
+                <button
+                  onClick={useMyLocation}
+                  disabled={locating}
+                  title="Use my location"
+                  className="grid h-9 w-9 flex-none place-items-center rounded-full border border-[var(--line)] text-[var(--ink-soft)] transition-colors hover:border-[var(--brand)] hover:text-[var(--brand)]"
                 >
-                  <circle cx="11" cy="11" r="7" />
-                  <path d="m20 20-3.5-3.5" strokeLinecap="round" />
-                </svg>
-                <input
-                  className="input pl-9"
-                  placeholder="Search a city or neighbourhood…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                />
-                {results.length > 0 && (
-                  <div className="card absolute z-10 mt-1 w-full overflow-hidden p-1">
-                    {results.map((r) => (
-                      <button
-                        key={`${r.lat},${r.lng}`}
-                        type="button"
-                        onClick={() => {
-                          setCenter({ lat: r.lat, lng: r.lng });
-                          setQuery(r.label);
-                          setResults([]);
-                        }}
-                        className="block w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-[var(--sunk)]"
-                      >
-                        {r.label}
-                      </button>
-                    ))}
-                  </div>
+                  <TargetIcon />
+                </button>
+              )}
+            </div>
+
+            {mode === "nearby" ? (
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                <select className="chip-select" value={radiusKm} onChange={(e) => setRadiusKm(Number(e.target.value))}>
+                  {RADIUS_OPTIONS_KM.map((km) => (
+                    <option key={km} value={km}>
+                      {km} km
+                    </option>
+                  ))}
+                </select>
+
+                {activeCount > 0 && (
+                  <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
+                    <span className="pulse-dot" />
+                    {activeCount} active{dropCount > 0 ? ` · ${dropCount} open to chat` : ""}
+                  </span>
                 )}
+
+                {!canAct ? (
+                  <Link href="/login" className="btn btn-primary btn-sm">
+                    Sign in to drop a pin ✦
+                  </Link>
+                ) : ownVisible && ownLat != null ? (
+                  myDrop ? (
+                    <span className="pill" style={{ background: "color-mix(in srgb, var(--gold) 16%, var(--card))", color: "var(--gold)" }}>
+                      🟡 “{myDrop.label}” · {minutesLeft(myDrop.expiresAt, now)}m
+                      <button onClick={endDrop} disabled={dropBusy} className="ml-1 font-bold underline">
+                        end
+                      </button>
+                    </span>
+                  ) : !dropOpen ? (
+                    <button onClick={() => setDropOpen(true)} className="btn btn-primary btn-sm">
+                      Drop a pin ✦
+                    </button>
+                  ) : null
+                ) : (
+                  <Link href="/profile" className="text-[12px] text-[var(--ink-soft)] underline">
+                    Set a location to drop a pin
+                  </Link>
+                )}
+              </div>
+            ) : (
+              <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
+                  🌍 {worldProfiles.length} worldwide · {connectedProfiles.length} connected
+                </span>
+                <span className="flex items-center gap-3 text-[11px] text-[var(--ink-soft)]">
+                  <span className="flex items-center gap-1.5">
+                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--brand)" }} />
+                    connected
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--gold)" }} />
+                    not yet
+                  </span>
+                </span>
               </div>
             )}
 
-            {mode === "nearby" && (
-              <button
-                onClick={useMyLocation}
-                disabled={locating}
-                title="Use my location"
-                className="grid h-9 w-9 flex-none place-items-center rounded-full border border-[var(--line)] text-[var(--ink-soft)] transition-colors hover:border-[var(--brand)] hover:text-[var(--brand)]"
-              >
-                <TargetIcon />
-              </button>
+            {mode === "nearby" && dropOpen && (
+              <form onSubmit={submitDrop} className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--line)] pt-2.5">
+                <input
+                  className="input min-w-[180px] flex-1"
+                  placeholder="At Third Wave, open to chat…"
+                  value={dropLabel}
+                  onChange={(e) => setDropLabel(e.target.value.slice(0, MAX_DROP_LABEL))}
+                  autoFocus
+                  required
+                />
+                <select className="chip-select" value={dropDuration} onChange={(e) => setDropDuration(Number(e.target.value))}>
+                  {DROP_DURATION_OPTIONS_MIN.map((m) => (
+                    <option key={m} value={m}>
+                      {m}m
+                    </option>
+                  ))}
+                </select>
+                <button type="submit" disabled={dropBusy} className="btn btn-primary btn-sm">
+                  Go live
+                </button>
+                <button type="button" onClick={() => setDropOpen(false)} className="btn btn-ghost btn-sm">
+                  Cancel
+                </button>
+                {dropError && <p className="w-full text-[12px] font-medium text-[var(--warn)]">{dropError}</p>}
+              </form>
             )}
           </div>
 
-          {mode === "nearby" ? (
-            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-              <select className="chip-select" value={radiusKm} onChange={(e) => setRadiusKm(Number(e.target.value))}>
-                {RADIUS_OPTIONS_KM.map((km) => (
-                  <option key={km} value={km}>
-                    {km} km
-                  </option>
-                ))}
-              </select>
-
-              {activeCount > 0 && (
-                <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
-                  <span className="pulse-dot" />
-                  {activeCount} active{dropCount > 0 ? ` · ${dropCount} open to chat` : ""}
-                </span>
-              )}
-
-              {!canAct ? (
-                <Link href="/login" className="btn btn-primary btn-sm">
-                  Sign in to drop a pin ✦
-                </Link>
-              ) : ownVisible && ownLat != null ? (
-                myDrop ? (
-                  <span className="pill" style={{ background: "color-mix(in srgb, var(--gold) 16%, var(--card))", color: "var(--gold)" }}>
-                    🟡 “{myDrop.label}” · {minutesLeft(myDrop.expiresAt, now)}m
-                    <button onClick={endDrop} disabled={dropBusy} className="ml-1 font-bold underline">
-                      end
-                    </button>
-                  </span>
-                ) : !dropOpen ? (
-                  <button onClick={() => setDropOpen(true)} className="btn btn-primary btn-sm">
-                    Drop a pin ✦
-                  </button>
-                ) : null
-              ) : (
-                <Link href="/profile" className="text-[12px] text-[var(--ink-soft)] underline">
-                  Set a location to drop a pin
-                </Link>
-              )}
-            </div>
-          ) : (
-            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-              <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
-                🌍 {networkPoints.length} {networkPoints.length === 1 ? "connection" : "connections"} worldwide
-              </span>
-            </div>
-          )}
-
-          {mode === "nearby" && dropOpen && (
-            <form onSubmit={submitDrop} className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--line)] pt-2.5">
-              <input
-                className="input min-w-[180px] flex-1"
-                placeholder="At Third Wave, open to chat…"
-                value={dropLabel}
-                onChange={(e) => setDropLabel(e.target.value.slice(0, MAX_DROP_LABEL))}
-                autoFocus
-                required
-              />
-              <select className="chip-select" value={dropDuration} onChange={(e) => setDropDuration(Number(e.target.value))}>
-                {DROP_DURATION_OPTIONS_MIN.map((m) => (
-                  <option key={m} value={m}>
-                    {m}m
-                  </option>
-                ))}
-              </select>
-              <button type="submit" disabled={dropBusy} className="btn btn-primary btn-sm">
-                Go live
-              </button>
-              <button type="button" onClick={() => setDropOpen(false)} className="btn btn-ghost btn-sm">
-                Cancel
-              </button>
-              {dropError && <p className="w-full text-[12px] font-medium text-[var(--warn)]">{dropError}</p>}
-            </form>
-          )}
-        </div>
-
-        {/* Desktop only — nested directly under the toolbar it belongs to,
-            not independently positioned with a guessed pixel offset. */}
-        <div
-          className="pointer-events-auto hidden max-h-[calc(100vh-220px)] w-[360px] overflow-y-auto rounded-2xl border border-[var(--line)] p-3 lg:block"
-          style={{ background: "var(--bg)", boxShadow: "var(--shadow-lift)" }}
-        >
-          {listBody}
-        </div>
+          {/* Desktop only — nested directly under the toolbar it belongs to,
+              not independently positioned with a guessed pixel offset. */}
+          <div
+            className="pointer-events-auto hidden max-h-[calc(100vh-220px)] w-[360px] overflow-y-auto rounded-2xl border border-[var(--line)] p-3 lg:block"
+            style={{ background: "var(--bg)", boxShadow: "var(--shadow-lift)" }}
+          >
+            {listBody}
+          </div>
         </div>
 
         <div className="pointer-events-auto">

@@ -1,7 +1,6 @@
 import { and, desc, eq, or } from "drizzle-orm";
 import { db, hasDb } from "./db";
 import { connections, users } from "./db/schema";
-import { jitterLocation } from "./geo";
 import { orderedPair } from "./rules";
 
 export type ConnectionWithStatus = {
@@ -178,51 +177,24 @@ export async function listAcceptedConnections(userId: string): Promise<Connectio
   });
 }
 
-export type NetworkPoint = {
-  connectionId: string;
-  userId: string;
-  name: string;
-  headline: string | null;
-  company: string | null;
-  photoUrl: string | null;
-  locationLabel: string | null;
-  lat: number;
-  lng: number;
-};
+export type ConnectionStatusInfo = { status: string; connectionId: string; mine: boolean };
 
 /**
- * Every accepted connection with a placeable point on the world map — same
- * `visibleOnMap` + "has a location" rule as the nearby map, so a connection
- * who's turned visibility off disappears from here too rather than this
- * view quietly becoming a second, looser privacy model.
+ * Every relationship row touching this person, keyed by the *other*
+ * person's id — one query, used to annotate a whole page of profiles with
+ * "connected / pending / none" instead of N+1 lookups per pin.
  */
-export async function listNetworkMapPoints(userId: string): Promise<NetworkPoint[]> {
-  if (!hasDb || !db) return [];
+export async function getConnectionStatusMap(userId: string): Promise<Map<string, ConnectionStatusInfo>> {
+  if (!hasDb || !db) return new Map();
   const rows = await db
-    .select({ id: connections.id, userAId: connections.userAId, userBId: connections.userBId })
+    .select()
     .from(connections)
-    .where(and(eq(connections.status, "accepted"), or(eq(connections.userAId, userId), eq(connections.userBId, userId))));
+    .where(or(eq(connections.userAId, userId), eq(connections.userBId, userId)));
 
-  const otherIds = rows.map((r) => (r.userAId === userId ? r.userBId : r.userAId));
-  if (otherIds.length === 0) return [];
-
-  const others = await db.select().from(users).where(or(...otherIds.map((id) => eq(users.id, id))));
-  const connectionIdByOtherId = new Map(rows.map((r) => [r.userAId === userId ? r.userBId : r.userAId, r.id]));
-
-  return others
-    .filter((o) => o.visibleOnMap && o.lat != null && o.lng != null && o.name)
-    .map((o) => {
-      const jittered = jitterLocation(o.id, o.lat!, o.lng!);
-      return {
-        connectionId: connectionIdByOtherId.get(o.id)!,
-        userId: o.id,
-        name: o.name!,
-        headline: o.headline,
-        company: o.company,
-        photoUrl: o.photoUrl,
-        locationLabel: o.locationLabel,
-        lat: jittered.lat,
-        lng: jittered.lng,
-      };
-    });
+  const map = new Map<string, ConnectionStatusInfo>();
+  for (const r of rows) {
+    const otherId = r.userAId === userId ? r.userBId : r.userAId;
+    map.set(otherId, { status: r.status, connectionId: r.id, mine: r.requesterId === userId });
+  }
+  return map;
 }

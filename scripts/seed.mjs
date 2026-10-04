@@ -176,14 +176,136 @@ const PEOPLE = [
   },
 ];
 
-// Emails from PEOPLE above that should look "active" (heartbeat within the
+// A second cluster, one per continent-ish, so "My Network" has a genuinely
+// worldwide set of people to discover — not just the Bengaluru crowd above.
+const WORLD_PEOPLE = [
+  {
+    email: "demo.sarah@example.com",
+    name: "Sarah Chen",
+    headline: "Partner at Horizon Ventures",
+    company: "Horizon Ventures",
+    bio: "Early-stage B2B SaaS. Writes a widely-read newsletter on fundraising mechanics.",
+    skills: ["venture-capital", "fundraising", "saas"],
+    lat: 37.7749, lng: -122.4194, locationLabel: "San Francisco, USA",
+  },
+  {
+    email: "demo.marcus@example.com",
+    name: "Marcus Webb",
+    headline: "Eng Director at Lattice",
+    company: "Lattice",
+    bio: "Platform and infra at scale. Ex-Stripe. Runs a small engineering-leadership book club.",
+    skills: ["engineering-leadership", "platform", "scale"],
+    lat: 40.7128, lng: -74.006, locationLabel: "New York, USA",
+  },
+  {
+    email: "demo.emma@example.com",
+    name: "Emma Whitfield",
+    headline: "Head of Design at Monzo",
+    company: "Monzo",
+    bio: "Fintech design systems. Occasional mentor for design bootcamp grads.",
+    skills: ["design", "fintech", "mentoring"],
+    lat: 51.5072, lng: -0.1276, locationLabel: "London, UK",
+  },
+  {
+    email: "demo.lukas@example.com",
+    name: "Lukas Richter",
+    headline: "Founder at Sonnenlicht",
+    company: "Sonnenlicht",
+    bio: "Climate-tech, pre-seed. Previously built and sold a logistics startup.",
+    skills: ["climate-tech", "fundraising", "logistics"],
+    lat: 52.52, lng: 13.405, locationLabel: "Berlin, Germany",
+  },
+  {
+    email: "demo.aiko@example.com",
+    name: "Aiko Tanaka",
+    headline: "Product Lead at Mercari",
+    company: "Mercari",
+    bio: "Marketplace growth and trust & safety. Speaks regularly at product meetups.",
+    skills: ["product", "marketplace", "growth"],
+    lat: 35.6762, lng: 139.6503, locationLabel: "Tokyo, Japan",
+  },
+  {
+    email: "demo.wei@example.com",
+    name: "Wei Zhang",
+    headline: "CTO at Groww Logistics",
+    company: "Groww Logistics",
+    bio: "Supply-chain systems across Southeast Asia. Angel investing on the side.",
+    skills: ["supply-chain", "cto", "angel-investing"],
+    lat: 1.3521, lng: 103.8198, locationLabel: "Singapore",
+  },
+  {
+    email: "demo.olivia@example.com",
+    name: "Olivia Bennett",
+    headline: "Growth Lead at Canva",
+    company: "Canva",
+    bio: "Lifecycle marketing at scale. Runs a small newsletter for APAC growth folks.",
+    skills: ["growth", "lifecycle", "marketing"],
+    lat: -33.8688, lng: 151.2093, locationLabel: "Sydney, Australia",
+  },
+  {
+    email: "demo.kwame@example.com",
+    name: "Kwame Asante",
+    headline: "Founder at Fawaza Pay",
+    company: "Fawaza Pay",
+    bio: "Mobile payments for informal markets. Raising a seed round across three countries.",
+    skills: ["fintech", "payments", "fundraising"],
+    lat: 6.5244, lng: 3.3792, locationLabel: "Lagos, Nigeria",
+  },
+  {
+    email: "demo.amara@example.com",
+    name: "Amara Njoroge",
+    headline: "Head of Partnerships at Flux",
+    company: "Flux",
+    bio: "Ecosystem partnerships across East Africa's fintech scene.",
+    skills: ["partnerships", "fintech", "ecosystem"],
+    lat: -1.2921, lng: 36.8219, locationLabel: "Nairobi, Kenya",
+  },
+  {
+    email: "demo.gabriel@example.com",
+    name: "Gabriel Souza",
+    headline: "Staff Engineer at Nubank",
+    company: "Nubank",
+    bio: "Core banking infra at scale. Writes about distributed systems in Portuguese and English.",
+    skills: ["backend", "distributed-systems", "fintech"],
+    lat: -23.5505, lng: -46.6333, locationLabel: "São Paulo, Brazil",
+  },
+  {
+    email: "demo.hana@example.com",
+    name: "Hana Al-Rashid",
+    headline: "Investment Associate at Scale Gulf",
+    company: "Scale Gulf",
+    bio: "Seed-stage investing across MENA. Previously operator at a logistics unicorn.",
+    skills: ["venture-capital", "mena", "logistics"],
+    lat: 25.2048, lng: 55.2708, locationLabel: "Dubai, UAE",
+  },
+  {
+    email: "demo.noah@example.com",
+    name: "Noah Fortin",
+    headline: "Founder at Boreal Robotics",
+    company: "Boreal Robotics",
+    bio: "Agri-robotics for cold climates. Fresh off a Series A.",
+    skills: ["robotics", "agritech", "hardware"],
+    lat: 43.6532, lng: -79.3832, locationLabel: "Toronto, Canada",
+  },
+];
+
+const ALL_PEOPLE = [...PEOPLE, ...WORLD_PEOPLE];
+
+// Emails from ALL_PEOPLE that should look "active" (heartbeat within the
 // last few minutes) the moment the seed finishes running.
-const ACTIVE_EMAILS = ["demo.rohan@example.com", "demo.priya@example.com", "demo.dev@example.com"];
+const ACTIVE_EMAILS = [
+  "demo.rohan@example.com",
+  "demo.priya@example.com",
+  "demo.dev@example.com",
+  "demo.sarah@example.com",
+  "demo.aiko@example.com",
+];
 
 // At most one live drop per person — these get an actual row in `drops`.
 const DROPS = [
   { email: "demo.anaya@example.com", label: "At Third Wave, open to chat about fintech", minutes: 90 },
   { email: "demo.aakash@example.com", label: "Grabbing coffee near Domlur, say hi", minutes: 45 },
+  { email: "demo.marcus@example.com", label: "At a coffee shop in SoHo, open to chat", minutes: 60 },
 ];
 
 const pool = new pg.Pool({ connectionString: url });
@@ -192,7 +314,7 @@ async function main() {
   let inserted = 0;
   const idByEmail = new Map();
 
-  for (const p of PEOPLE) {
+  for (const p of ALL_PEOPLE) {
     const res = await pool.query(
       `insert into users (email, name, headline, company, bio, skills, lat, lng, location_label, visible_on_map)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
@@ -216,7 +338,7 @@ async function main() {
   for (const d of DROPS) {
     const userId = idByEmail.get(d.email);
     if (!userId) continue;
-    const person = PEOPLE.find((p) => p.email === d.email);
+    const person = ALL_PEOPLE.find((p) => p.email === d.email);
     await pool.query(`delete from drops where user_id = $1`, [userId]);
     await pool.query(
       `insert into drops (user_id, lat, lng, label, expires_at) values ($1, $2, $3, $4, now() + ($5 || ' minutes')::interval)`,
@@ -224,7 +346,7 @@ async function main() {
     );
   }
 
-  console.log(`Seeded ${inserted} new demo profile(s) (${PEOPLE.length - inserted} already existed).`);
+  console.log(`Seeded ${inserted} new demo profile(s) (${ALL_PEOPLE.length - inserted} already existed).`);
   console.log(`Marked ${ACTIVE_EMAILS.length} as active, refreshed ${DROPS.length} live drop(s).`);
   await pool.end();
 }

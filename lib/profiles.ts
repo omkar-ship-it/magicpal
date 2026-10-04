@@ -41,6 +41,8 @@ export async function getNearbyProfiles(opts: {
   centerLat: number;
   centerLng: number;
   radiusKm: number;
+  /** Skip the radius filter entirely — everyone visible, worldwide, nearest-first. */
+  global?: boolean;
 }): Promise<MapProfile[]> {
   if (!hasDb || !db) return [];
 
@@ -98,7 +100,7 @@ export async function getNearbyProfiles(opts: {
         drop: r.dropExpiresAt ? { label: r.dropLabel!, expiresAt: r.dropExpiresAt.toISOString() } : null,
       };
     })
-    .filter((p) => p.distanceKm <= opts.radiusKm)
+    .filter((p) => opts.global || p.distanceKm <= opts.radiusKm)
     .sort((a, b) => a.distanceKm - b.distanceKm)
     .slice(0, MAX_MAP_RESULTS);
 }
