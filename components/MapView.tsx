@@ -486,8 +486,16 @@ export default function MapView({
   /** Click-pinned — stays open through a mouseleave, unlike a hover preview. */
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [mapStyle, setMapStyle] = useState("mapbox://styles/mapbox/light-v11");
+  /** The browser's live GPS/network fix — when available, this is "you", not the saved profile pin. */
+  const [liveLocation, setLiveLocation] = useState<{ lat: number; lng: number } | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapRef = useRef<MapRef>(null);
+
+  // Own marker position: prefer the live fix (it's genuinely where you are
+  // right now) and fall back to the saved profile location for anyone whose
+  // browser hasn't granted location yet.
+  const myLat = liveLocation?.lat ?? ownLat;
+  const myLng = liveLocation?.lng ?? ownLng;
 
   // Seed real connection status from the server rather than starting every
   // pin as an unknown "Connect" and only finding out after a click — used
@@ -530,16 +538,30 @@ export default function MapView({
   }, [canAct]);
 
   // The map is already visible (at DEFAULT_CENTER) the instant the page
-  // loads — this just silently recenters it once geolocation resolves,
-  // rather than making anyone wait on a permission dialog before seeing
-  // anything, the way a "set your location first" gate would.
+  // loads, so there's no "waiting on a permission dialog" gate — this just
+  // keeps a live fix flowing in and quietly recenters the view the first
+  // time one arrives, for anyone with no saved profile location yet.
+  //
+  // watchPosition, not a one-shot getCurrentPosition: "let it change as my
+  // location changes" means an actual live position, the way a map app's
+  // own blue dot works, not a single snapshot taken on page load.
+  // enableHighAccuracy is deliberately off — this is a networking map, not
+  // turn-by-turn navigation, and GPS-grade precision isn't worth the extra
+  // battery draw over wifi/cell-tower accuracy.
   useEffect(() => {
-    if ((ownLat != null && ownLng != null) || !navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => setCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+    if (!navigator.geolocation) return;
+    let gotFirstFix = false;
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setLiveLocation(loc);
+        if (!gotFirstFix && ownLat == null && ownLng == null) setCenter(loc);
+        gotFirstFix = true;
+      },
       () => {},
-      { timeout: 8000 }
+      { enableHighAccuracy: false, maximumAge: 30_000, timeout: 10_000 }
     );
+    return () => navigator.geolocation.clearWatch(watchId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -796,6 +818,11 @@ export default function MapView({
     );
 
   const activeData = mode === "nearby" ? profiles : worldProfiles;
+  // Nearby shows the live "you are here" fix; My Network keeps the stable
+  // profile/home-base location, since arcs and distances in that view are
+  // about your established base, not wherever you happen to be this second.
+  const meLat = mode === "nearby" ? myLat : ownLat;
+  const meLng = mode === "nearby" ? myLng : ownLng;
 
   return (
     <div className="fixed inset-0 overflow-hidden">
@@ -817,8 +844,8 @@ export default function MapView({
         <NavigationControl position="bottom-right" showCompass={false} />
         {arcLayers.length > 0 && <ArcOverlay layers={arcLayers} />}
 
-        {ownLat != null && ownLng != null && (
-          <Marker longitude={ownLng} latitude={ownLat} anchor="center">
+        {meLat != null && meLng != null && (
+          <Marker longitude={meLng} latitude={meLat} anchor="center">
             <div
               onClick={(e) => {
                 e.stopPropagation();
@@ -831,8 +858,8 @@ export default function MapView({
             </div>
             {(hoveredId === "__me" || pinnedId === "__me") && (
               <Popup
-                longitude={ownLng}
-                latitude={ownLat}
+                longitude={meLng}
+                latitude={meLat}
                 anchor="top"
                 closeButton={false}
                 closeOnClick={false}
@@ -841,6 +868,12 @@ export default function MapView({
               >
                 <div className="p-3 text-[13px] font-semibold">
                   You
+                  {mode === "nearby" && liveLocation && (
+                    <p className="mt-0.5 flex items-center gap-1.5 text-[11px] font-normal text-[var(--ink-soft)]">
+                      <span className="pulse-dot" />
+                      Live location
+                    </p>
+                  )}
                   {myDrop && <DropBadge drop={myDrop} now={now} />}
                 </div>
               </Popup>
