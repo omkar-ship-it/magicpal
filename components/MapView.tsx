@@ -957,8 +957,19 @@ export default function MapView({
   const activeData = mode === "nearby" ? profiles : worldProfiles;
   // Prototype-only group filter — mockGroupsForName is a deterministic
   // client-side guess, not real membership data (see lib/prototypeData.ts).
-  const groupFiltered =
-    groupFilter === "all" ? activeData : activeData.filter((p) => mockGroupsForName(p.name).some((g) => g.type === groupFilter));
+  // "Alumni" narrows to *your* specific alumni affiliation when you have
+  // one (mocked from your own name, same as everyone else's) — "my alumni
+  // network" should mean people who share your actual school, not every
+  // alumni network at once. Falls back to the broad alumni bucket for
+  // anyone without a mock affiliation of their own (e.g. signed out).
+  const myAlumniGroup = mockGroupsForName(ownName).find((g) => g.type === "alumni");
+  const groupFiltered = activeData.filter((p) => {
+    if (groupFilter === "all") return true;
+    if (groupFilter === "alumni" && myAlumniGroup) {
+      return mockGroupsForName(p.name).some((g) => g.id === myAlumniGroup.id);
+    }
+    return mockGroupsForName(p.name).some((g) => g.type === groupFilter);
+  });
   const peopleOnMap = showPeopleLayer ? groupFiltered : [];
 
   // Rendered twice below — as a mobile bottom sheet, and nested directly
@@ -1370,46 +1381,51 @@ export default function MapView({
             )}
 
             {/* Experience prototype — map layers + group filter are mock
-                data (lib/prototypeData.ts), not a real feature yet. */}
-            {mode === "nearby" && (
-              <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-[var(--line)] pt-2.5">
-                <span
-                  onClick={() => setShowPeopleLayer((v) => !v)}
-                  className="chip-toggle"
-                  data-on={showPeopleLayer}
-                  style={showPeopleLayer ? { borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" } : undefined}
-                >
-                  👤 People
-                </span>
-                <span
-                  onClick={() => setShowEventsLayer((v) => !v)}
-                  className="chip-toggle"
-                  data-on={showEventsLayer}
-                  style={showEventsLayer ? { borderColor: "var(--layer-event)", background: "color-mix(in srgb, var(--layer-event) 12%, var(--card))", color: "var(--layer-event)" } : undefined}
-                >
-                  <CalendarIcon /> Events
-                </span>
-                <span
-                  onClick={() => setShowCompaniesLayer((v) => !v)}
-                  className="chip-toggle"
-                  data-on={showCompaniesLayer}
-                  style={showCompaniesLayer ? { borderColor: "var(--layer-company)", background: "color-mix(in srgb, var(--layer-company) 12%, var(--card))", color: "var(--layer-company)" } : undefined}
-                >
-                  <BriefcaseIcon /> Companies
-                </span>
-                <select
-                  className="chip-select"
-                  value={groupFilter}
-                  onChange={(e) => setGroupFilter(e.target.value as "all" | GroupType)}
-                  title="Filter people by group"
-                >
-                  <option value="all">All people</option>
-                  <option value="alumni">🎓 Alumni only</option>
-                  <option value="community">👥 Communities only</option>
-                  <option value="group">⛺ Groups only</option>
-                </select>
-              </div>
-            )}
+                data (lib/prototypeData.ts), not a real feature yet. Layers
+                are location-based (nearby only); the group filter works in
+                both modes — "my alumni network" is a worldwide thing, not
+                a nearby one. */}
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-[var(--line)] pt-2.5">
+              {mode === "nearby" && (
+                <>
+                  <span
+                    onClick={() => setShowPeopleLayer((v) => !v)}
+                    className="chip-toggle"
+                    data-on={showPeopleLayer}
+                    style={showPeopleLayer ? { borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" } : undefined}
+                  >
+                    👤 People
+                  </span>
+                  <span
+                    onClick={() => setShowEventsLayer((v) => !v)}
+                    className="chip-toggle"
+                    data-on={showEventsLayer}
+                    style={showEventsLayer ? { borderColor: "var(--layer-event)", background: "color-mix(in srgb, var(--layer-event) 12%, var(--card))", color: "var(--layer-event)" } : undefined}
+                  >
+                    <CalendarIcon /> Events
+                  </span>
+                  <span
+                    onClick={() => setShowCompaniesLayer((v) => !v)}
+                    className="chip-toggle"
+                    data-on={showCompaniesLayer}
+                    style={showCompaniesLayer ? { borderColor: "var(--layer-company)", background: "color-mix(in srgb, var(--layer-company) 12%, var(--card))", color: "var(--layer-company)" } : undefined}
+                  >
+                    <BriefcaseIcon /> Companies
+                  </span>
+                </>
+              )}
+              <select
+                className="chip-select"
+                value={groupFilter}
+                onChange={(e) => setGroupFilter(e.target.value as "all" | GroupType)}
+                title="Filter people by group"
+              >
+                <option value="all">All people</option>
+                <option value="alumni">{myAlumniGroup ? `🎓 My alumni network — ${myAlumniGroup.name}` : "🎓 Alumni only"}</option>
+                <option value="community">👥 Communities only</option>
+                <option value="group">⛺ Groups only</option>
+              </select>
+            </div>
 
             {mode === "nearby" && dropOpen && (
               <form onSubmit={submitDrop} className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--line)] pt-2.5">
