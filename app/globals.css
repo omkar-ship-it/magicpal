@@ -13,6 +13,12 @@
   --gold: #b07d09;
   --good: #1f8a5f;
   --warn: #c2410c;
+  /* Connection-status scheme: green = connected, amber = pending, orange = not yet connected. */
+  --pending: #d99a00;
+  --status-new: #f0591a;
+  /* Map-layer accents — distinct from the people/connection palette above. */
+  --layer-event: #7c5cff;
+  --layer-company: #0ea5b8;
   --shadow: 0 16px 36px -22px rgba(90, 40, 20, 0.35);
   --shadow-lift: 0 24px 54px -26px rgba(90, 40, 20, 0.5);
 }
@@ -30,6 +36,10 @@
     --gold: #e7ab26;
     --good: #45c98b;
     --warn: #ff9252;
+    --pending: #f0c330;
+    --status-new: #ff8257;
+    --layer-event: #a996ff;
+    --layer-company: #4fd4e6;
     --shadow: 0 16px 36px -20px rgba(0, 0, 0, 0.7);
     --shadow-lift: 0 26px 60px -26px rgba(0, 0, 0, 0.85);
   }
@@ -46,6 +56,10 @@
   --gold: #e7ab26;
   --good: #45c98b;
   --warn: #ff9252;
+  --pending: #f0c330;
+  --status-new: #ff8257;
+  --layer-event: #a996ff;
+  --layer-company: #4fd4e6;
   --shadow: 0 16px 36px -20px rgba(0, 0, 0, 0.7);
   --shadow-lift: 0 26px 60px -26px rgba(0, 0, 0, 0.85);
 }
@@ -62,6 +76,10 @@
   --color-gold: var(--gold);
   --color-good: var(--good);
   --color-warn: var(--warn);
+  --color-pending: var(--pending);
+  --color-status-new: var(--status-new);
+  --color-layer-event: var(--layer-event);
+  --color-layer-company: var(--layer-company);
   --font-sans: var(--font-inter);
 }
 
@@ -324,4 +342,44 @@ h1, h2, h3 {
 .chip-toggle[data-on="false"] {
   border-color: var(--line);
   color: var(--ink-soft);
+}
+
+/* ------------------------------------------------- layer & group pins */
+
+/* Events/Companies markers — a rounded-square badge (vs. the circular
+   people avatar) so the three layers read apart by silhouette, not color
+   alone, even for a colorblind viewer or a black-and-white screenshot. */
+.layer-pin {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 2.5px solid #fff;
+  box-shadow: 0 6px 16px -4px rgba(0, 0, 0, 0.4);
+  color: #fff;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.layer-pin.layer-pin-hover {
+  box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 30%, transparent), 0 10px 22px -6px rgba(0, 0, 0, 0.5);
+  transform: scale(1.08);
+  z-index: 10000 !important;
+}
+
+.sidebar-collapse-toggle {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink-soft);
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.sidebar-collapse-toggle:hover {
+  border-color: var(--brand);
+  color: var(--brand);
 }

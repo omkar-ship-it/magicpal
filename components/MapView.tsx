@@ -7,6 +7,17 @@ import type { MapRef } from "react-map-gl/mapbox";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { ArcLayer } from "@deck.gl/layers";
 import { DROP_DURATION_OPTIONS_MIN, DEFAULT_DROP_DURATION_MIN, MAX_DROP_LABEL } from "@/lib/rules";
+import { avatarUrl } from "@/lib/avatar";
+import {
+  MOCK_EVENTS,
+  MOCK_COMPANIES,
+  mockConnectionCount,
+  mockGroupsForName,
+  countPeopleAtCompany,
+  type MockEvent,
+  type MockCompany,
+  type GroupType,
+} from "@/lib/prototypeData";
 import FloatingAccountMenu from "./FloatingAccountMenu";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
@@ -51,6 +62,13 @@ type ConnState = {
   incoming?: boolean;
 };
 
+/** Green/amber/orange status for a pin or avatar, derived from the same ConnState everywhere a person is rendered. */
+function pinStatusOf(c: ConnState | undefined): "connected" | "pending" | "new" {
+  if (c?.status === "accepted") return "connected";
+  if (c?.status === "pending") return "pending";
+  return "new";
+}
+
 function minutesLeft(expiresAt: string, now: number): number {
   return Math.max(0, Math.round((new Date(expiresAt).getTime() - now) / 60_000));
 }
@@ -68,40 +86,55 @@ function CheckIcon() {
   );
 }
 
+function ClockIcon() {
+  return (
+    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3.5 2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Green = connected, amber = a pending request (either direction), orange = not yet connected. */
+type PinStatus = "connected" | "pending" | "new";
+function statusColor(status: PinStatus): string {
+  if (status === "connected") return "var(--good)";
+  if (status === "pending") return "var(--pending)";
+  return "var(--status-new)";
+}
+
 function Pin({
   photoUrl,
-  initial,
+  seed,
   me,
   active,
   drop,
   highlighted,
-  connected,
+  status,
 }: {
   photoUrl: string | null;
-  initial: string;
+  /** Used to generate a deterministic round avatar when there's no uploaded photo. */
+  seed: string;
   me?: boolean;
   active?: boolean;
   drop?: boolean;
   highlighted?: boolean;
-  /** Already in your network — rendered in the same hue as "you", not the discovery gold, plus a checkmark badge so the signal isn't color-only. */
-  connected?: boolean;
+  /** Omitted for "me" — my own pin isn't rated against myself. */
+  status?: PinStatus;
 }) {
   const classes = ["pin", me ? "pin-me" : "", drop ? "pin-drop" : active ? "pin-active" : "", highlighted ? "pin-hover" : ""]
     .filter(Boolean)
     .join(" ");
-  const bg = drop ? "var(--gold)" : me || connected ? "var(--brand)" : "var(--gold)";
+  const bg = drop ? "var(--gold)" : me ? "var(--brand)" : statusColor(status ?? "new");
   const size = highlighted ? 46 : 38;
+  const img = photoUrl ?? avatarUrl(seed);
   return (
     <div style={{ position: "relative" }}>
       <div className={classes} style={{ background: bg, width: size, height: size }}>
-        {photoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={photoUrl} alt="" />
-        ) : (
-          <span>{initial}</span>
-        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={img} alt="" />
       </div>
-      {connected && !me && (
+      {!me && status === "connected" && (
         <span
           className="grid place-items-center rounded-full text-white"
           style={{
@@ -116,6 +149,23 @@ function Pin({
           title="Connected"
         >
           <CheckIcon />
+        </span>
+      )}
+      {!me && status === "pending" && (
+        <span
+          className="grid place-items-center rounded-full text-white"
+          style={{
+            position: "absolute",
+            bottom: -2,
+            right: -2,
+            width: 15,
+            height: 15,
+            background: "var(--pending)",
+            border: "2px solid var(--card)",
+          }}
+          title="Pending request"
+        >
+          <ClockIcon />
         </span>
       )}
     </div>
@@ -283,20 +333,17 @@ function ProfileCard({
   onConnect: (id: string, note?: string) => void;
   onRespond: (p: Profile, accept: boolean) => void;
 }) {
-  const connected = conn?.status === "accepted";
+  const status = pinStatusOf(conn);
+  const groups = mockGroupsForName(p.name);
   return (
     <div className="w-72 p-3.5">
       <div className="flex items-start gap-3">
         <span
           className="avatar h-13 w-13 flex-none text-[16px]"
-          style={{ width: 52, height: 52, background: `linear-gradient(135deg, ${connected ? "var(--brand)" : "var(--gold)"}, var(--brand-deep))` }}
+          style={{ width: 52, height: 52, background: `linear-gradient(135deg, ${statusColor(status)}, var(--brand-deep))` }}
         >
-          {p.photoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={p.photoUrl} alt="" />
-          ) : (
-            p.name.slice(0, 1).toUpperCase()
-          )}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={p.photoUrl ?? avatarUrl(p.id)} alt="" />
         </span>
         <div className="min-w-0 flex-1 pt-0.5">
           <div className="flex items-center gap-1.5">
@@ -305,10 +352,11 @@ function ProfileCard({
           </div>
           {p.headline && <p className="truncate text-[12.5px] text-[var(--ink-soft)]">{p.headline}</p>}
           {p.company && <p className="truncate text-[12px] text-[var(--ink-soft)]">{p.company}</p>}
+          <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">{mockConnectionCount(p.id).toLocaleString()} connections</p>
         </div>
       </div>
 
-      {connected && (
+      {status === "connected" && (
         <span
           className="mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"
           style={{ background: "color-mix(in srgb, var(--good) 14%, var(--card))", color: "var(--good)" }}
@@ -318,6 +366,34 @@ function ProfileCard({
           </span>
           Connected
         </span>
+      )}
+      {status === "pending" && (
+        <span
+          className="mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+          style={{ background: "color-mix(in srgb, var(--pending) 16%, var(--card))", color: "var(--pending)" }}
+        >
+          <span className="grid h-3 w-3 place-items-center rounded-full text-white" style={{ background: "var(--pending)" }}>
+            <ClockIcon />
+          </span>
+          {conn?.incoming ? "Wants to connect" : "Request pending"}
+        </span>
+      )}
+
+      {groups.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {groups.map((g) => (
+            <span
+              key={g.id}
+              className="skill-tag"
+              style={{
+                background: g.type === "alumni" ? "color-mix(in srgb, var(--layer-event) 14%, var(--card))" : undefined,
+                color: g.type === "alumni" ? "var(--layer-event)" : undefined,
+              }}
+            >
+              {g.type === "alumni" ? "🎓" : g.type === "community" ? "👥" : "⛺"} {g.name}
+            </span>
+          ))}
+        </div>
       )}
 
       <div className="mt-2 flex items-center gap-1 text-[11.5px] text-[var(--ink-soft)]">
@@ -349,6 +425,63 @@ function ProfileCard({
   );
 }
 
+/** Prototype-only popup for a mock event pin — no RSVP backend yet, so the button just confirms locally. */
+function EventCard({ ev }: { ev: MockEvent }) {
+  const [rsvped, setRsvped] = useState(false);
+  return (
+    <div className="w-64 p-3.5">
+      <span
+        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold"
+        style={{ background: "color-mix(in srgb, var(--layer-event) 14%, var(--card))", color: "var(--layer-event)" }}
+      >
+        <CalendarIcon /> Event
+      </span>
+      <p className="mt-1.5 text-[14.5px] font-semibold leading-tight">{ev.name}</p>
+      <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">{ev.dateLabel}</p>
+      <p className="text-[12px] text-[var(--ink-soft)]">
+        {ev.venue}, {ev.city}
+      </p>
+      <p className="mt-1.5 text-[11.5px] text-[var(--ink-soft)]">{ev.attendeesMock} people attending</p>
+      <button
+        onClick={() => setRsvped((v) => !v)}
+        className={rsvped ? "btn btn-ghost btn-sm mt-3 w-full" : "btn btn-primary btn-sm mt-3 w-full"}
+      >
+        {rsvped ? "You're going ✓" : "RSVP"}
+      </button>
+    </div>
+  );
+}
+
+/** Prototype-only popup for a mock company pin — "people here" is a real count over the loaded nearby list, everything else is mock. */
+function CompanyCard({ co, peopleHere }: { co: MockCompany; peopleHere: number }) {
+  const [following, setFollowing] = useState(false);
+  return (
+    <div className="w-60 p-3.5">
+      <span
+        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold"
+        style={{ background: "color-mix(in srgb, var(--layer-company) 14%, var(--card))", color: "var(--layer-company)" }}
+      >
+        <BriefcaseIcon /> Company
+      </span>
+      <p className="mt-1.5 text-[14.5px] font-semibold leading-tight">{co.name}</p>
+      <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">
+        {co.industry} · {co.city}
+      </p>
+      {peopleHere > 0 && (
+        <p className="mt-1.5 text-[11.5px] text-[var(--ink-soft)]">
+          {peopleHere} {peopleHere === 1 ? "person" : "people"} here in your network view
+        </p>
+      )}
+      <button
+        onClick={() => setFollowing((v) => !v)}
+        className={following ? "btn btn-ghost btn-sm mt-3 w-full" : "btn btn-primary btn-sm mt-3 w-full"}
+      >
+        {following ? "Following ✓" : "Follow"}
+      </button>
+    </div>
+  );
+}
+
 function ProfileListRow({
   p,
   conn,
@@ -370,7 +503,8 @@ function ProfileListRow({
   onConnect: (id: string, note?: string) => void;
   onRespond: (p: Profile, accept: boolean) => void;
 }) {
-  const connected = conn?.status === "accepted";
+  const status = pinStatusOf(conn);
+  const groups = mockGroupsForName(p.name);
   return (
     <div
       onMouseEnter={() => onHover(p.id)}
@@ -378,22 +512,15 @@ function ProfileListRow({
       className="card flex cursor-pointer gap-3 p-3 transition-colors"
       style={hoveredId === p.id ? { borderColor: "var(--brand)", background: "var(--sunk)" } : undefined}
     >
-      <span
-        className="avatar h-11 w-11 flex-none text-[13px]"
-        style={{ background: `linear-gradient(135deg, ${connected ? "var(--brand)" : "var(--gold)"}, var(--brand-deep))` }}
-      >
-        {p.photoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={p.photoUrl} alt="" />
-        ) : (
-          p.name.slice(0, 1).toUpperCase()
-        )}
+      <span className="avatar h-11 w-11 flex-none text-[13px]" style={{ background: `linear-gradient(135deg, ${statusColor(status)}, var(--brand-deep))` }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={p.photoUrl ?? avatarUrl(p.id)} alt="" />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <p className="truncate text-[13.5px] font-semibold leading-tight">{p.name}</p>
           {p.active && !p.drop && <span className="pulse-dot flex-none" title="Active recently" />}
-          {connected && (
+          {status === "connected" && (
             <span
               className="flex flex-none items-center gap-1 rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold"
               style={{ background: "color-mix(in srgb, var(--good) 14%, var(--card))", color: "var(--good)" }}
@@ -404,11 +531,33 @@ function ProfileListRow({
               Connected
             </span>
           )}
+          {status === "pending" && (
+            <span
+              className="flex flex-none items-center gap-1 rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold"
+              style={{ background: "color-mix(in srgb, var(--pending) 16%, var(--card))", color: "var(--pending)" }}
+            >
+              <span className="grid h-2.5 w-2.5 place-items-center rounded-full text-white" style={{ background: "var(--pending)" }}>
+                <ClockIcon />
+              </span>
+              Pending
+            </span>
+          )}
         </div>
         {p.headline && <p className="truncate text-[12px] text-[var(--ink-soft)]">{p.headline}</p>}
         {p.locationLabel && <p className="truncate text-[11px] text-[var(--ink-soft)]">{p.locationLabel}</p>}
-        <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">{formatDistance(p.distanceKm)}</p>
+        <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">
+          {formatDistance(p.distanceKm)} · {mockConnectionCount(p.id).toLocaleString()} connections
+        </p>
         {p.drop && <DropBadge drop={p.drop} now={now} />}
+        {groups.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {groups.map((g) => (
+              <span key={g.id} className="skill-tag">
+                {g.type === "alumni" ? "🎓" : g.type === "community" ? "👥" : "⛺"} {g.name}
+              </span>
+            ))}
+          </div>
+        )}
         {p.skills.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1">
             {p.skills.slice(0, 3).map((s) => (
@@ -432,6 +581,34 @@ function TargetIcon() {
       <circle cx="12" cy="12" r="7" />
       <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
       <path d="M12 2v3M12 19v3M2 12h3M19 12h3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PanelIcon({ open }: { open: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="4" width="18" height="16" rx="3" />
+      <path d="M9 4v16" />
+      {open ? <path d="M14 10l-2 2 2 2" strokeLinecap="round" strokeLinejoin="round" /> : <path d="M12 10l2 2-2 2" strokeLinecap="round" strokeLinejoin="round" />}
+    </svg>
+  );
+}
+
+function CalendarIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="5" width="18" height="16" rx="3" />
+      <path d="M3 10h18M8 3v4M16 3v4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function BriefcaseIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="7" width="18" height="13" rx="2.5" />
+      <path d="M8 7V5.5A2.5 2.5 0 0 1 10.5 3h3A2.5 2.5 0 0 1 16 5.5V7M3 12h18" strokeLinecap="round" />
     </svg>
   );
 }
@@ -490,6 +667,16 @@ export default function MapView({
   const [mapReady, setMapReady] = useState(false);
   /** The browser's live GPS/network fix — when available, this is "you", not the saved profile pin. */
   const [liveLocation, setLiveLocation] = useState<{ lat: number; lng: number } | null>(null);
+  /** Desktop-only — hides the left list panel so the map can have the full width. */
+  const [listCollapsed, setListCollapsed] = useState(false);
+  // --- Experience prototype only, below: layers + groups are mock/hardcoded
+  // (see lib/prototypeData.ts) — no backend behind any of these yet.
+  const [showPeopleLayer, setShowPeopleLayer] = useState(true);
+  const [showEventsLayer, setShowEventsLayer] = useState(true);
+  const [showCompaniesLayer, setShowCompaniesLayer] = useState(true);
+  const [groupFilter, setGroupFilter] = useState<"all" | GroupType>("all");
+  const [pinnedExtraId, setPinnedExtraId] = useState<string | null>(null);
+  const [hoveredExtraId, setHoveredExtraId] = useState<string | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapRef = useRef<MapRef>(null);
 
@@ -767,6 +954,13 @@ export default function MapView({
         ]
       : [];
 
+  const activeData = mode === "nearby" ? profiles : worldProfiles;
+  // Prototype-only group filter — mockGroupsForName is a deterministic
+  // client-side guess, not real membership data (see lib/prototypeData.ts).
+  const groupFiltered =
+    groupFilter === "all" ? activeData : activeData.filter((p) => mockGroupsForName(p.name).some((g) => g.type === groupFilter));
+  const peopleOnMap = showPeopleLayer ? groupFiltered : [];
+
   // Rendered twice below — as a mobile bottom sheet, and nested directly
   // under the toolbar as a desktop sidebar — so the two responsive layouts
   // don't duplicate the actual list markup, just where it's mounted.
@@ -777,8 +971,11 @@ export default function MapView({
         {!loading && profiles.length === 0 && (
           <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one visible within {radiusKm}km yet. Try a wider radius.</p>
         )}
+        {!loading && profiles.length > 0 && groupFiltered.length === 0 && (
+          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one nearby matches that filter yet.</p>
+        )}
         <div className="flex flex-col gap-2.5">
-          {profiles.map((p) => (
+          {groupFiltered.map((p) => (
             <ProfileListRow
               key={p.id}
               p={p}
@@ -800,8 +997,11 @@ export default function MapView({
         {!worldLoading && worldProfiles.length === 0 && (
           <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one else has joined yet — check back soon.</p>
         )}
+        {!worldLoading && worldProfiles.length > 0 && groupFiltered.length === 0 && (
+          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one matches that filter yet.</p>
+        )}
         <div className="flex flex-col gap-2.5">
-          {worldProfiles.map((p) => (
+          {groupFiltered.map((p) => (
             <ProfileListRow
               key={p.id}
               p={p}
@@ -819,7 +1019,6 @@ export default function MapView({
       </>
     );
 
-  const activeData = mode === "nearby" ? profiles : worldProfiles;
   // Nearby shows the live "you are here" fix; My Network keeps the stable
   // profile/home-base location, since arcs and distances in that view are
   // about your established base, not wherever you happen to be this second.
@@ -859,7 +1058,7 @@ export default function MapView({
               onMouseEnter={() => hoverProfile("__me")}
               onMouseLeave={() => unhoverProfile("__me")}
             >
-              <Pin photoUrl={ownPhotoUrl} initial={ownName.slice(0, 1).toUpperCase()} me drop={Boolean(myDrop)} />
+              <Pin photoUrl={ownPhotoUrl} seed={ownName || "me"} me drop={Boolean(myDrop)} />
             </div>
             {(hoveredId === "__me" || pinnedId === "__me") && (
               <Popup
@@ -886,8 +1085,8 @@ export default function MapView({
           </Marker>
         )}
 
-        {activeData.map((p) => {
-          const connected = conn[p.id]?.status === "accepted";
+        {peopleOnMap.map((p) => {
+          const status = pinStatusOf(conn[p.id]);
           const open = hoveredId === p.id || pinnedId === p.id;
           return (
             <Marker key={p.id} longitude={p.lng} latitude={p.lat} anchor="center">
@@ -901,11 +1100,11 @@ export default function MapView({
               >
                 <Pin
                   photoUrl={p.photoUrl}
-                  initial={p.name.slice(0, 1).toUpperCase()}
+                  seed={p.id}
                   active={p.active}
                   drop={Boolean(p.drop)}
                   highlighted={open}
-                  connected={connected}
+                  status={status}
                 />
               </div>
               {open && (
@@ -943,6 +1142,79 @@ export default function MapView({
             </Marker>
           );
         })}
+
+        {/* Experience-prototype layers — Events & Companies are mock
+            data (lib/prototypeData.ts), shown only in Nearby mode. */}
+        {mode === "nearby" &&
+          showEventsLayer &&
+          MOCK_EVENTS.map((ev) => {
+            const open = hoveredExtraId === ev.id || pinnedExtraId === ev.id;
+            return (
+              <Marker key={ev.id} longitude={ev.lng} latitude={ev.lat} anchor="center">
+                <div
+                  className={`layer-pin${open ? " layer-pin-hover" : ""}`}
+                  style={{ background: "var(--layer-event)" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPinnedExtraId((cur) => (cur === ev.id ? null : ev.id));
+                  }}
+                  onMouseEnter={() => setHoveredExtraId(ev.id)}
+                  onMouseLeave={() => setHoveredExtraId((cur) => (cur === ev.id ? null : cur))}
+                >
+                  <CalendarIcon />
+                </div>
+                {open && (
+                  <Popup
+                    longitude={ev.lng}
+                    latitude={ev.lat}
+                    anchor="top"
+                    closeButton={false}
+                    closeOnClick={false}
+                    offset={20}
+                    onClose={() => setPinnedExtraId((cur) => (cur === ev.id ? null : cur))}
+                  >
+                    <EventCard ev={ev} />
+                  </Popup>
+                )}
+              </Marker>
+            );
+          })}
+
+        {mode === "nearby" &&
+          showCompaniesLayer &&
+          MOCK_COMPANIES.map((co) => {
+            const open = hoveredExtraId === co.id || pinnedExtraId === co.id;
+            const peopleHere = countPeopleAtCompany(profiles, co.name);
+            return (
+              <Marker key={co.id} longitude={co.lng} latitude={co.lat} anchor="center">
+                <div
+                  className={`layer-pin${open ? " layer-pin-hover" : ""}`}
+                  style={{ background: "var(--layer-company)" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPinnedExtraId((cur) => (cur === co.id ? null : co.id));
+                  }}
+                  onMouseEnter={() => setHoveredExtraId(co.id)}
+                  onMouseLeave={() => setHoveredExtraId((cur) => (cur === co.id ? null : cur))}
+                >
+                  <BriefcaseIcon />
+                </div>
+                {open && (
+                  <Popup
+                    longitude={co.lng}
+                    latitude={co.lat}
+                    anchor="top"
+                    closeButton={false}
+                    closeOnClick={false}
+                    offset={20}
+                    onClose={() => setPinnedExtraId((cur) => (cur === co.id ? null : cur))}
+                  >
+                    <CompanyCard co={co} peopleHere={peopleHere} />
+                  </Popup>
+                )}
+              </Marker>
+            );
+          })}
       </Map>
 
       {/* ---------------------------------------------------- floating chrome */}
@@ -1025,6 +1297,14 @@ export default function MapView({
                   <TargetIcon />
                 </button>
               )}
+
+              <button
+                onClick={() => setListCollapsed((c) => !c)}
+                title={listCollapsed ? "Show the people list" : "Hide the people list"}
+                className="sidebar-collapse-toggle hidden lg:grid"
+              >
+                <PanelIcon open={!listCollapsed} />
+              </button>
             </div>
 
             {mode === "nearby" ? (
@@ -1074,14 +1354,60 @@ export default function MapView({
                 </span>
                 <span className="flex items-center gap-3 text-[11px] text-[var(--ink-soft)]">
                   <span className="flex items-center gap-1.5">
-                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--brand)" }} />
+                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--good)" }} />
                     connected
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--gold)" }} />
+                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--pending)" }} />
+                    pending
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--status-new)" }} />
                     not yet
                   </span>
                 </span>
+              </div>
+            )}
+
+            {/* Experience prototype — map layers + group filter are mock
+                data (lib/prototypeData.ts), not a real feature yet. */}
+            {mode === "nearby" && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-[var(--line)] pt-2.5">
+                <span
+                  onClick={() => setShowPeopleLayer((v) => !v)}
+                  className="chip-toggle"
+                  data-on={showPeopleLayer}
+                  style={showPeopleLayer ? { borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" } : undefined}
+                >
+                  👤 People
+                </span>
+                <span
+                  onClick={() => setShowEventsLayer((v) => !v)}
+                  className="chip-toggle"
+                  data-on={showEventsLayer}
+                  style={showEventsLayer ? { borderColor: "var(--layer-event)", background: "color-mix(in srgb, var(--layer-event) 12%, var(--card))", color: "var(--layer-event)" } : undefined}
+                >
+                  <CalendarIcon /> Events
+                </span>
+                <span
+                  onClick={() => setShowCompaniesLayer((v) => !v)}
+                  className="chip-toggle"
+                  data-on={showCompaniesLayer}
+                  style={showCompaniesLayer ? { borderColor: "var(--layer-company)", background: "color-mix(in srgb, var(--layer-company) 12%, var(--card))", color: "var(--layer-company)" } : undefined}
+                >
+                  <BriefcaseIcon /> Companies
+                </span>
+                <select
+                  className="chip-select"
+                  value={groupFilter}
+                  onChange={(e) => setGroupFilter(e.target.value as "all" | GroupType)}
+                  title="Filter people by group"
+                >
+                  <option value="all">All people</option>
+                  <option value="alumni">🎓 Alumni only</option>
+                  <option value="community">👥 Communities only</option>
+                  <option value="group">⛺ Groups only</option>
+                </select>
               </div>
             )}
 
@@ -1115,12 +1441,14 @@ export default function MapView({
 
           {/* Desktop only — nested directly under the toolbar it belongs to,
               not independently positioned with a guessed pixel offset. */}
-          <div
-            className="pointer-events-auto hidden max-h-[calc(100vh-220px)] w-[360px] overflow-y-auto rounded-2xl border border-[var(--line)] p-3 lg:block"
-            style={{ background: "var(--bg)", boxShadow: "var(--shadow-lift)" }}
-          >
-            {listBody}
-          </div>
+          {!listCollapsed && (
+            <div
+              className="pointer-events-auto hidden max-h-[calc(100vh-220px)] w-[360px] overflow-y-auto rounded-2xl border border-[var(--line)] p-3 lg:block"
+              style={{ background: "var(--bg)", boxShadow: "var(--shadow-lift)" }}
+            >
+              {listBody}
+            </div>
+          )}
         </div>
 
         <div className="pointer-events-auto">
