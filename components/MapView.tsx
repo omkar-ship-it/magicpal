@@ -408,6 +408,112 @@ export default function MapView({
         ]
       : [];
 
+  // Rendered twice below — as a mobile bottom sheet, and nested directly
+  // under the toolbar as a desktop sidebar — so the two responsive layouts
+  // don't duplicate the actual list markup, just where it's mounted.
+  const listBody =
+    mode === "nearby" ? (
+      <>
+        {loading && profiles.length === 0 && <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">Loading nearby people…</p>}
+        {!loading && profiles.length === 0 && (
+          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one visible within {radiusKm}km yet. Try a wider radius.</p>
+        )}
+        <div className="flex flex-col gap-2.5">
+          {profiles.map((p) => (
+            <div
+              key={p.id}
+              onMouseEnter={() => hoverProfile(p.id)}
+              onMouseLeave={() => unhoverProfile(p.id)}
+              className="card flex cursor-pointer gap-3 p-3 transition-colors"
+              style={hoveredId === p.id ? { borderColor: "var(--brand)", background: "var(--sunk)" } : undefined}
+            >
+              <span
+                className="avatar h-11 w-11 flex-none text-[13px]"
+                style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-deep))" }}
+              >
+                {p.photoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={p.photoUrl} alt="" />
+                ) : (
+                  p.name.slice(0, 1).toUpperCase()
+                )}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <p className="truncate text-[13.5px] font-semibold leading-tight">{p.name}</p>
+                  {p.active && !p.drop && <span className="pulse-dot flex-none" title="Active recently" />}
+                </div>
+                {p.headline && <p className="truncate text-[12px] text-[var(--ink-soft)]">{p.headline}</p>}
+                <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">~{p.distanceKm.toFixed(1)}km</p>
+                {p.drop && <DropBadge drop={p.drop} now={now} />}
+                {p.skills.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {p.skills.slice(0, 3).map((s) => (
+                      <span key={s} className="skill-tag">
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-2">
+                  <ActionButton p={p} conn={conn[p.id]} onConnect={connectTo} canAct={canAct} />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </>
+    ) : (
+      <>
+        {networkLoading && networkPoints.length === 0 && (
+          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">Loading your network…</p>
+        )}
+        {!networkLoading && networkPoints.length === 0 && (
+          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">
+            Your network will show up here once you connect with people — try the Nearby view.
+          </p>
+        )}
+        <div className="flex flex-col gap-2.5">
+          {networkPoints.map((p) => (
+            <div
+              key={p.userId}
+              onMouseEnter={() => hoverProfile(p.userId)}
+              onMouseLeave={() => unhoverProfile(p.userId)}
+              className="card flex cursor-pointer gap-3 p-3 transition-colors"
+              style={hoveredId === p.userId ? { borderColor: "var(--brand)", background: "var(--sunk)" } : undefined}
+            >
+              <span
+                className="avatar h-11 w-11 flex-none text-[13px]"
+                style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-deep))" }}
+              >
+                {p.photoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={p.photoUrl} alt="" />
+                ) : (
+                  p.name.slice(0, 1).toUpperCase()
+                )}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13.5px] font-semibold leading-tight">{p.name}</p>
+                {p.headline && <p className="truncate text-[12px] text-[var(--ink-soft)]">{p.headline}</p>}
+                {p.locationLabel && <p className="mt-0.5 truncate text-[11px] text-[var(--ink-soft)]">{p.locationLabel}</p>}
+                {ownLat != null && ownLng != null && (
+                  <p className="text-[11px] text-[var(--ink-soft)]">
+                    ~{Math.round(distanceKm(ownLat, ownLng, p.lat, p.lng)).toLocaleString()}km away
+                  </p>
+                )}
+                <div className="mt-2">
+                  <Link href={`/messages/${p.connectionId}`} className="btn btn-primary btn-sm w-full">
+                    Message
+                  </Link>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </>
+    );
+
   return (
     <div className="fixed inset-0 overflow-hidden">
       <Map
@@ -534,8 +640,9 @@ export default function MapView({
       </Map>
 
       {/* ---------------------------------------------------- floating chrome */}
-      <div className="pointer-events-none absolute inset-x-3 top-3 z-[1000] flex items-start gap-3 sm:inset-x-5 sm:top-5">
-        <div className="floating-panel pointer-events-auto flex-1 p-3">
+      <div className="pointer-events-none absolute inset-x-3 top-3 z-[1000] flex items-start justify-between gap-3 sm:inset-x-5 sm:top-5">
+        <div className="flex w-full max-w-[600px] flex-col gap-3">
+        <div className="floating-panel pointer-events-auto p-3">
           <div className="flex items-center gap-2">
             <span
               className="grid h-8 w-8 flex-none place-items-center rounded-full text-[15px] text-white"
@@ -626,10 +733,12 @@ export default function MapView({
                 ))}
               </select>
 
-              <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
-                <span className="pulse-dot" />
-                {activeCount} active{dropCount > 0 ? ` · ${dropCount} open to chat` : ""}
-              </span>
+              {activeCount > 0 && (
+                <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
+                  <span className="pulse-dot" />
+                  {activeCount} active{dropCount > 0 ? ` · ${dropCount} open to chat` : ""}
+                </span>
+              )}
 
               {!canAct ? (
                 <Link href="/login" className="btn btn-primary btn-sm">
@@ -690,115 +799,23 @@ export default function MapView({
           )}
         </div>
 
+        {/* Desktop only — nested directly under the toolbar it belongs to,
+            not independently positioned with a guessed pixel offset. */}
+        <div
+          className="pointer-events-auto hidden max-h-[calc(100vh-220px)] w-[360px] overflow-y-auto rounded-2xl border border-[var(--line)] p-3 lg:block"
+          style={{ background: "var(--bg)", boxShadow: "var(--shadow-lift)" }}
+        >
+          {listBody}
+        </div>
+        </div>
+
         <div className="pointer-events-auto">
           <FloatingAccountMenu isSignedIn={isSignedIn} canAct={canAct} name={ownName} photoUrl={ownPhotoUrl} />
         </div>
       </div>
 
-      {/* ------------------------------------------------- nearby / network list panel */}
-      <div className="floating-list">
-        {mode === "nearby" ? (
-          <>
-            {loading && profiles.length === 0 && <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">Loading nearby people…</p>}
-            {!loading && profiles.length === 0 && (
-              <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one visible within {radiusKm}km yet. Try a wider radius.</p>
-            )}
-            <div className="flex flex-col gap-2.5">
-              {profiles.map((p) => (
-                <div
-                  key={p.id}
-                  onMouseEnter={() => hoverProfile(p.id)}
-                  onMouseLeave={() => unhoverProfile(p.id)}
-                  className="card flex cursor-pointer gap-3 p-3 transition-colors"
-                  style={hoveredId === p.id ? { borderColor: "var(--brand)", background: "var(--sunk)" } : undefined}
-                >
-                  <span
-                    className="avatar h-11 w-11 flex-none text-[13px]"
-                    style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-deep))" }}
-                  >
-                    {p.photoUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.photoUrl} alt="" />
-                    ) : (
-                      p.name.slice(0, 1).toUpperCase()
-                    )}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <p className="truncate text-[13.5px] font-semibold leading-tight">{p.name}</p>
-                      {p.active && !p.drop && <span className="pulse-dot flex-none" title="Active recently" />}
-                    </div>
-                    {p.headline && <p className="truncate text-[12px] text-[var(--ink-soft)]">{p.headline}</p>}
-                    <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">~{p.distanceKm.toFixed(1)}km</p>
-                    {p.drop && <DropBadge drop={p.drop} now={now} />}
-                    {p.skills.length > 0 && (
-                      <div className="mt-1.5 flex flex-wrap gap-1">
-                        {p.skills.slice(0, 3).map((s) => (
-                          <span key={s} className="skill-tag">
-                            {s}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <div className="mt-2">
-                      <ActionButton p={p} conn={conn[p.id]} onConnect={connectTo} canAct={canAct} />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        ) : (
-          <>
-            {networkLoading && networkPoints.length === 0 && (
-              <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">Loading your network…</p>
-            )}
-            {!networkLoading && networkPoints.length === 0 && (
-              <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">
-                Your network will show up here once you connect with people — try the Nearby view.
-              </p>
-            )}
-            <div className="flex flex-col gap-2.5">
-              {networkPoints.map((p) => (
-                <div
-                  key={p.userId}
-                  onMouseEnter={() => hoverProfile(p.userId)}
-                  onMouseLeave={() => unhoverProfile(p.userId)}
-                  className="card flex cursor-pointer gap-3 p-3 transition-colors"
-                  style={hoveredId === p.userId ? { borderColor: "var(--brand)", background: "var(--sunk)" } : undefined}
-                >
-                  <span
-                    className="avatar h-11 w-11 flex-none text-[13px]"
-                    style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-deep))" }}
-                  >
-                    {p.photoUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.photoUrl} alt="" />
-                    ) : (
-                      p.name.slice(0, 1).toUpperCase()
-                    )}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13.5px] font-semibold leading-tight">{p.name}</p>
-                    {p.headline && <p className="truncate text-[12px] text-[var(--ink-soft)]">{p.headline}</p>}
-                    {p.locationLabel && <p className="mt-0.5 truncate text-[11px] text-[var(--ink-soft)]">{p.locationLabel}</p>}
-                    {ownLat != null && ownLng != null && (
-                      <p className="text-[11px] text-[var(--ink-soft)]">
-                        ~{Math.round(distanceKm(ownLat, ownLng, p.lat, p.lng)).toLocaleString()}km away
-                      </p>
-                    )}
-                    <div className="mt-2">
-                      <Link href={`/messages/${p.connectionId}`} className="btn btn-primary btn-sm w-full">
-                        Message
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+      {/* Mobile only — bottom sheet, pinned to the viewport regardless of the toolbar's height. */}
+      <div className="floating-list lg:hidden">{listBody}</div>
     </div>
   );
 }

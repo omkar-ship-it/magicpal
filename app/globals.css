@@ -184,20 +184,6 @@ h1, h2, h3 {
   padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
   box-shadow: var(--shadow-lift);
 }
-@media (min-width: 1024px) {
-  .floating-list {
-    inset-inline: auto;
-    left: 20px;
-    bottom: auto;
-    top: 180px;
-    width: 360px;
-    max-height: calc(100vh - 200px);
-    border-radius: 18px;
-    border: 1px solid var(--line);
-    padding: 12px;
-  }
-}
-
 .chip-select {
   appearance: none;
   border: none;
