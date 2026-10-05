@@ -25,22 +25,23 @@ import {
 } from "./MapPrimitives";
 import { MOCK_EVENTS, MOCK_COMPANIES, countPeopleAtCompany } from "@/lib/prototypeData";
 import {
-  MOCK_NETWORKS,
   MOCK_POSTS,
-  NETWORK_KIND_EMOJI,
-  NETWORK_KIND_LABEL,
+  PLACED_ENTITIES,
   PUBLIC_ENTITY_ID,
-  getMyGroupIds,
-  getMyNetworkIds,
-  networkById,
-  networksForName,
-  setMyGroupIds,
-  setMyNetworkIds,
-  type MockNetwork,
+  TOP_NETWORKS,
+  ancestorsOf,
+  entityById,
+  entityIdsForName,
+  expandMembership,
+  getMyEntityIds,
+  setMyEntityIds,
+  type MockEntity,
   type MockPost,
 } from "@/lib/networks";
+import { MOCK_ACCEPTED_NAMES } from "@/lib/chatData";
 import FloatingAccountMenu from "./FloatingAccountMenu";
-import EntityPanel, { type PanelRef } from "./EntityPanel";
+import EntityPanel, { type PanelSize } from "./EntityPanel";
+import ChatWindow, { type ChatWindowState } from "./ChatWindow";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 const RADIUS_OPTIONS_KM = [5, 10, 25, 50, 100] as const;
@@ -70,22 +71,22 @@ function PanelIcon({ open }: { open: boolean }) {
   );
 }
 
-/** The popup for a network that has a real place — a campus or an office. Networks without one (professional networks) have no pin; you reach them from the selector or anyone's profile chips. */
-function NetworkCard({ net, onOpen }: { net: MockNetwork; onOpen: (id: string) => void }) {
+/** The popup for any node with a real place — a campus, an office, or a TiE chapter city. Nodes without one are reached from the selector or anyone's profile chips. */
+function NetworkCard({ net, onOpen }: { net: MockEntity; onOpen: (id: string) => void }) {
   return (
     <div className="w-60 p-3.5">
       <span
         className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold"
         style={{ background: "color-mix(in srgb, var(--layer-institution) 14%, var(--card))", color: "var(--layer-institution)" }}
       >
-        <InstitutionIcon /> {NETWORK_KIND_LABEL[net.kind]}
+        <InstitutionIcon /> {net.label}
       </span>
       <p className="mt-1.5 text-[14.5px] font-semibold leading-tight">{net.name}</p>
       <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">
         {net.place?.city} · {net.memberCountMock.toLocaleString()} members
       </p>
       <button onClick={() => onOpen(net.id)} className="btn btn-primary btn-sm mt-3 w-full">
-        Open network →
+        Open {net.label.toLowerCase()} →
       </button>
     </div>
   );
@@ -155,8 +156,11 @@ export default function MapView({
   const [showInstitutionsLayer, setShowInstitutionsLayer] = useState(true);
   /** null = the all-encompassing Public Network. Otherwise exactly one network at a time. */
   const [selectedNetworkId, setSelectedNetworkId] = useState<string | null>(null);
-  const [myNetworkIds, setMyNetworkIdsState] = useState<string[]>(() => getMyNetworkIds());
-  const [myGroupIds, setMyGroupIdsState] = useState<string[]>(() => getMyGroupIds());
+  const [myEntityIds, setMyEntityIdsState] = useState<string[]>(() => getMyEntityIds());
+  const [panelSize, setPanelSize] = useState<PanelSize>("side");
+  const [panelWidth, setPanelWidth] = useState(430);
+  const [chatWith, setChatWith] = useState<Profile | null>(null);
+  const [chatState, setChatState] = useState<ChatWindowState>("expanded");
   /** Posts you write this session, on top of the seeded ones. Prototype-only — never leaves the browser. */
   const [myPosts, setMyPosts] = useState<MockPost[]>([]);
   const [pinnedExtraId, setPinnedExtraId] = useState<string | null>(null);
@@ -168,10 +172,10 @@ export default function MapView({
    * closing step) as a lazy initializer, so there's no flash of a closed
    * panel first. `typeof window` guards SSR.
    */
-  const [panelStack, setPanelStack] = useState<PanelRef[]>(() => {
+  const [panelStack, setPanelStack] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     const qp = new URLSearchParams(window.location.search).get("previewGroup");
-    return qp ? [{ kind: "network", id: qp }] : [];
+    return qp ? [qp] : [];
   });
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapRef = useRef<MapRef>(null);
@@ -458,35 +462,39 @@ export default function MapView({
   // hash plus a curated roster, not real data. Selecting a network narrows
   // the map to just that network's people, anywhere in the world; "All
   // networks" is the Public Network — everyone, no membership needed.
-  const selectedNetwork = selectedNetworkId ? networkById(selectedNetworkId) : undefined;
+  const selectedNetwork = selectedNetworkId ? entityById(selectedNetworkId) : undefined;
+  // Selecting a network narrows the map to everyone beneath it — a member of
+  // TiE Bangalore counts as a member of TiE Global, so picking the parent
+  // shows the whole tree's people.
   const networkFiltered = selectedNetworkId
-    ? activeData.filter((p) => networksForName(p.name).some((n) => n.id === selectedNetworkId))
+    ? activeData.filter((p) => entityIdsForName(p.name).has(selectedNetworkId))
     : activeData;
   const peopleOnMap = showPeopleLayer ? networkFiltered : [];
-  const myNetworks = MOCK_NETWORKS.filter((n) => myNetworkIds.includes(n.id));
+  const myMembership = expandMembership(myEntityIds);
+  const myNetworks = TOP_NETWORKS.filter((n) => myMembership.has(n.id));
 
-  const openEntity = (kind: "network" | "group", id: string) => setPanelStack((st) => [...st, { kind, id } as PanelRef]);
-  const topPanel = panelStack[panelStack.length - 1];
+  const openEntity = (id: string) => setPanelStack((st) => (st[st.length - 1] === id ? st : [...st, id]));
+  const topPanelId = panelStack[panelStack.length - 1];
 
-  function toggleMembership(panel: PanelRef) {
-    if (panel.kind === "public") return;
-    if (panel.kind === "network") {
-      const next = myNetworkIds.includes(panel.id) ? myNetworkIds.filter((x) => x !== panel.id) : [...myNetworkIds, panel.id];
-      setMyNetworkIdsState(next);
-      setMyNetworkIds(next);
-      // Leaving a network you're currently filtered to drops you back to the public view.
-      if (!next.includes(panel.id) && selectedNetworkId === panel.id) setSelectedNetworkId(null);
-      return;
+  /**
+   * Joining a node joins its whole ancestry — you can't be in Class of 2019
+   * without being in PGP and ISB. Leaving drops its descendants with it.
+   */
+  function toggleMembership(id: string) {
+    if (id === PUBLIC_ENTITY_ID) return;
+    let next: string[];
+    if (myEntityIds.includes(id)) {
+      next = myEntityIds.filter((x) => x !== id && !ancestorsOf(x).some((a) => a.id === id));
+    } else {
+      next = Array.from(new Set([...myEntityIds, id]));
     }
-    const next = myGroupIds.includes(panel.id) ? myGroupIds.filter((x) => x !== panel.id) : [...myGroupIds, panel.id];
-    setMyGroupIdsState(next);
-    setMyGroupIds(next);
+    setMyEntityIdsState(next);
+    setMyEntityIds(next);
+    if (selectedNetworkId && !expandMembership(next).has(selectedNetworkId)) setSelectedNetworkId(null);
   }
 
-  function isMemberOf(panel: PanelRef): boolean {
-    if (panel.kind === "public") return true;
-    if (panel.kind === "network") return myNetworkIds.includes(panel.id);
-    return myGroupIds.includes(panel.id);
+  function isMemberOf(id: string): boolean {
+    return id === PUBLIC_ENTITY_ID || myMembership.has(id);
   }
 
   function addPost(entityId: string, body: string) {
@@ -498,6 +506,22 @@ export default function MapView({
 
   function postsFor(entityId: string): MockPost[] {
     return [...myPosts.filter((p) => p.entityId === entityId), ...MOCK_POSTS.filter((p) => p.entityId === entityId)];
+  }
+
+  /**
+   * A handful of connections are already accepted in the prototype so there's
+   * someone to actually talk to. They read as connected everywhere — green
+   * pin, "Message" instead of "Connect" — and open the floating chat window
+   * rather than the real messages page, since the thread itself is mocked.
+   */
+  function connFor(p: Profile): ConnState | undefined {
+    if (MOCK_ACCEPTED_NAMES.includes(p.name)) return { status: "accepted", connectionId: null };
+    return conn[p.id];
+  }
+
+  function openChat(p: Profile) {
+    setChatWith(p);
+    setChatState("expanded");
   }
 
   // Rendered twice below — as a mobile bottom sheet, and nested directly
@@ -518,7 +542,7 @@ export default function MapView({
             <ProfileListRow
               key={p.id}
               p={p}
-              conn={conn[p.id]}
+              conn={connFor(p)}
               hoveredId={hoveredId}
               now={now}
               canAct={canAct}
@@ -527,6 +551,7 @@ export default function MapView({
               onConnect={connectTo}
               onRespond={respondTo}
               onOpenEntity={openEntity}
+              onMessage={openChat}
             />
           ))}
         </div>
@@ -545,7 +570,7 @@ export default function MapView({
             <ProfileListRow
               key={p.id}
               p={p}
-              conn={conn[p.id]}
+              conn={connFor(p)}
               hoveredId={hoveredId}
               now={now}
               canAct={canAct}
@@ -554,6 +579,7 @@ export default function MapView({
               onConnect={connectTo}
               onRespond={respondTo}
               onOpenEntity={openEntity}
+              onMessage={openChat}
             />
           ))}
         </div>
@@ -627,7 +653,7 @@ export default function MapView({
         )}
 
         {peopleOnMap.map((p) => {
-          const status = pinStatusOf(conn[p.id]);
+          const status = pinStatusOf(connFor(p));
           const open = hoveredId === p.id || pinnedId === p.id;
           return (
             <Marker key={p.id} longitude={p.lng} latitude={p.lat} anchor="center">
@@ -669,7 +695,7 @@ export default function MapView({
                     </button>
                     <ProfileCard
                       p={p}
-                      conn={conn[p.id]}
+                      conn={connFor(p)}
                       now={now}
                       canAct={canAct}
                       note={notes[p.id] ?? ""}
@@ -677,6 +703,7 @@ export default function MapView({
                       onConnect={connectTo}
                       onRespond={respondTo}
                       onOpenEntity={openEntity}
+                      onMessage={openChat}
                     />
                   </div>
                 </Popup>
@@ -760,7 +787,7 @@ export default function MapView({
 
         {mode === "nearby" &&
           showInstitutionsLayer &&
-          MOCK_NETWORKS.filter((n) => n.place).map((net) => {
+          PLACED_ENTITIES.map((net) => {
             const open = hoveredExtraId === net.id || pinnedExtraId === net.id;
             const place = net.place!;
             return (
@@ -791,7 +818,7 @@ export default function MapView({
                       net={net}
                       onOpen={(id) => {
                         setPinnedExtraId(null);
-                        openEntity("network", id);
+                        openEntity(id);
                       }}
                     />
                   </Popup>
@@ -1006,37 +1033,15 @@ export default function MapView({
                 title="Show one network at a time, or the whole public network"
               >
                 <option value="all">🌍 All networks — Public</option>
-                <optgroup label="Universities">
-                  {myNetworks
-                    .filter((n) => n.kind === "institution")
-                    .map((n) => (
-                      <option key={n.id} value={n.id}>
-                        {NETWORK_KIND_EMOJI[n.kind]} {n.name}
-                      </option>
-                    ))}
-                </optgroup>
-                <optgroup label="Employer alumni">
-                  {myNetworks
-                    .filter((n) => n.kind === "employer")
-                    .map((n) => (
-                      <option key={n.id} value={n.id}>
-                        {NETWORK_KIND_EMOJI[n.kind]} {n.name}
-                      </option>
-                    ))}
-                </optgroup>
-                <optgroup label="Professional networks">
-                  {myNetworks
-                    .filter((n) => n.kind === "professional")
-                    .map((n) => (
-                      <option key={n.id} value={n.id}>
-                        {NETWORK_KIND_EMOJI[n.kind]} {n.name}
-                      </option>
-                    ))}
-                </optgroup>
+                {myNetworks.map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {n.emoji} {n.name}
+                  </option>
+                ))}
               </select>
 
               <button
-                onClick={() => setPanelStack(selectedNetworkId ? [{ kind: "network", id: selectedNetworkId }] : [{ kind: "public" }])}
+                onClick={() => setPanelStack(selectedNetworkId ? [selectedNetworkId] : [PUBLIC_ENTITY_ID])}
                 className="btn btn-ghost btn-sm"
               >
                 {selectedNetwork ? `Open ${selectedNetwork.name} →` : "Open public feed →"}
@@ -1095,24 +1100,41 @@ export default function MapView({
       {/* Mobile only — bottom sheet, pinned to the viewport regardless of the toolbar's height. */}
       <div className="floating-list lg:hidden">{listBody}</div>
 
-      {topPanel && (
+      {topPanelId && (
         <EntityPanel
-          panel={topPanel}
+          entityId={topPanelId}
           depth={panelStack.length}
           people={worldProfiles}
           loading={worldLoading && worldProfiles.length === 0}
-          posts={postsFor(topPanel.kind === "public" ? PUBLIC_ENTITY_ID : topPanel.id)}
+          posts={postsFor(topPanelId)}
           onPost={addPost}
-          isMember={isMemberOf(topPanel)}
-          onToggleMembership={() => toggleMembership(topPanel)}
-          onOpen={(next) => setPanelStack((st) => [...st, next])}
+          isMember={isMemberOf(topPanelId)}
+          onToggleMembership={() => toggleMembership(topPanelId)}
+          onOpen={openEntity}
           onBack={() => setPanelStack((st) => st.slice(0, -1))}
           onClose={() => setPanelStack([])}
-          conn={conn}
+          size={panelSize}
+          onSize={setPanelSize}
+          width={panelWidth}
+          onWidth={setPanelWidth}
+          conn={Object.fromEntries(worldProfiles.map((p) => [p.id, connFor(p)]).filter(([, c]) => c) as [string, ConnState][])}
           onConnect={connectTo}
           onRespond={respondTo}
+          onMessage={openChat}
           canAct={canAct}
           now={now}
+        />
+      )}
+
+      {chatWith && (
+        <ChatWindow
+          key={chatWith.id}
+          name={chatWith.name}
+          photoUrl={chatWith.photoUrl}
+          headline={chatWith.headline}
+          windowState={chatState}
+          onWindowState={setChatState}
+          onClose={() => setChatWith(null)}
         />
       )}
     </div>

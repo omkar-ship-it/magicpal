@@ -2,23 +2,18 @@
 
 import { useState } from "react";
 import {
-  ALL_GROUPS_AND_CLUBS,
-  MOCK_NETWORKS,
-  NETWORK_KIND_EMOJI,
-  NETWORK_KIND_LABEL,
-  getMyGroupIds,
-  getMyNetworkIds,
-  isClub,
-  networkById,
-  setMyGroupIds,
-  setMyNetworkIds,
-  type NetworkKind,
+  TOP_CLUBS,
+  TOP_NETWORKS,
+  ancestorsOf,
+  childrenOf,
+  expandMembership,
+  getMyEntityIds,
+  setMyEntityIds,
+  type MockEntity,
 } from "@/lib/networks";
 
-const KIND_ORDER: NetworkKind[] = ["institution", "employer", "professional"];
-
 /**
- * Your networks, and the groups and clubs inside them. Prototype only —
+ * Your networks and everything you're in beneath them. Prototype only —
  * membership lives in this browser's localStorage, not your account, since
  * there's no memberships table behind any of this yet.
  *
@@ -27,80 +22,85 @@ const KIND_ORDER: NetworkKind[] = ["institution", "employer", "professional"];
  * networks you're part of and can filter the map by.
  */
 export default function AffiliationsEditor() {
-  const [networkIds, setNetworkIds] = useState<string[]>(() => getMyNetworkIds());
-  const [groupIds, setGroupIds] = useState<string[]>(() => getMyGroupIds());
+  const [ids, setIds] = useState<string[]>(() => getMyEntityIds());
+  const [open, setOpen] = useState<Set<string>>(new Set());
 
-  function toggleNetwork(id: string) {
-    const next = networkIds.includes(id) ? networkIds.filter((x) => x !== id) : [...networkIds, id];
-    setNetworkIds(next);
-    setMyNetworkIds(next);
+  const membership = expandMembership(ids);
+
+  function toggle(id: string) {
+    const next = ids.includes(id)
+      ? ids.filter((x) => x !== id && !ancestorsOf(x).some((a) => a.id === id))
+      : Array.from(new Set([...ids, id]));
+    setIds(next);
+    setMyEntityIds(next);
   }
 
-  function toggleGroup(id: string) {
-    const next = groupIds.includes(id) ? groupIds.filter((x) => x !== id) : [...groupIds, id];
-    setGroupIds(next);
-    setMyGroupIds(next);
+  function toggleOpen(id: string) {
+    setOpen((cur) => {
+      const n = new Set(cur);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+
+  function Row({ e, level }: { e: MockEntity; level: number }) {
+    const kids = childrenOf(e.id);
+    const isOpen = open.has(e.id);
+    const joined = membership.has(e.id);
+    const direct = ids.includes(e.id);
+    return (
+      <div>
+        <div className="flex items-center gap-1.5 py-0.5" style={{ paddingLeft: level * 16 }}>
+          {kids.length > 0 ? (
+            <button
+              onClick={() => toggleOpen(e.id)}
+              className="grid h-5 w-5 flex-none place-items-center rounded text-[11px] text-[var(--ink-soft)] hover:bg-[var(--sunk)]"
+              title={isOpen ? "Collapse" : "Expand"}
+            >
+              {isOpen ? "▾" : "▸"}
+            </button>
+          ) : (
+            <span className="h-5 w-5 flex-none" />
+          )}
+          <label className="chip-toggle" data-on={joined}>
+            <input type="checkbox" className="hidden" checked={joined} onChange={() => toggle(e.id)} />
+            {e.emoji} {e.name}
+            <span className="text-[11px] font-normal text-[var(--ink-soft)]">
+              {e.label}
+              {joined && !direct ? " · via a child" : ""}
+              {kids.length > 0 ? ` · ${kids.length} ${(e.childLabel ?? "groups").toLowerCase()}` : ""}
+            </span>
+          </label>
+        </div>
+        {isOpen && kids.map((k) => <Row key={k.id} e={k} level={level + 1} />)}
+      </div>
+    );
   }
 
   return (
-    <div className="card mt-6 flex flex-col gap-5 p-6">
+    <div className="card mt-6 flex flex-col gap-4 p-6">
       <div>
         <h2 className="text-[15px] font-semibold">Your networks</h2>
         <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">
-          You&apos;re in {networkIds.length} of {MOCK_NETWORKS.length}. Each is a separate network you can select on the map one at a
-          time. Prototype — stored in this browser, not saved to your account.
+          Expand a network to find its chapters, programmes, classes or groups — each institution names its own levels. Joining
+          something joins everything above it. Prototype — stored in this browser, not saved to your account.
         </p>
       </div>
 
-      {KIND_ORDER.map((kind) => {
-        const nets = MOCK_NETWORKS.filter((n) => n.kind === kind);
-        if (nets.length === 0) return null;
-        return (
-          <div key={kind}>
-            <p className="label">{NETWORK_KIND_LABEL[kind]}</p>
-            <div className="flex flex-wrap gap-1.5">
-              {nets.map((n) => (
-                <label key={n.id} className="chip-toggle" data-on={networkIds.includes(n.id)}>
-                  <input type="checkbox" className="hidden" checked={networkIds.includes(n.id)} onChange={() => toggleNetwork(n.id)} />
-                  {NETWORK_KIND_EMOJI[n.kind]} {n.name}
-                </label>
-              ))}
-            </div>
-          </div>
-        );
-      })}
+      <div className="flex flex-col">
+        {TOP_NETWORKS.map((n) => (
+          <Row key={n.id} e={n} level={0} />
+        ))}
+      </div>
 
       <div className="border-t border-[var(--line)] pt-4">
-        <p className="label">Groups &amp; clubs</p>
-        <p className="mb-2 text-[12px] text-[var(--ink-soft)]">
-          A group belongs to one of your networks. A club is independent — it belongs to no network at all.
-        </p>
-        <div className="flex flex-col gap-1.5">
-          {ALL_GROUPS_AND_CLUBS.map((g) => {
-            const parent = g.networkId ? networkById(g.networkId) : undefined;
-            const reachable = isClub(g) || (g.networkId != null && networkIds.includes(g.networkId));
-            return (
-              <label
-                key={g.id}
-                className="chip-toggle w-fit"
-                data-on={groupIds.includes(g.id)}
-                style={reachable ? undefined : { opacity: 0.45 }}
-                title={reachable ? undefined : `Join ${parent?.name ?? "its network"} first`}
-              >
-                <input
-                  type="checkbox"
-                  className="hidden"
-                  checked={groupIds.includes(g.id)}
-                  disabled={!reachable}
-                  onChange={() => toggleGroup(g.id)}
-                />
-                {isClub(g) ? "⛺" : "👥"} {g.name}
-                <span className="text-[11px] font-normal text-[var(--ink-soft)]">
-                  {isClub(g) ? "independent club" : `in ${parent?.name ?? "—"}`}
-                </span>
-              </label>
-            );
-          })}
+        <p className="label">Independent clubs</p>
+        <p className="mb-2 text-[12px] text-[var(--ink-soft)]">These belong to no network at all — anyone can join.</p>
+        <div className="flex flex-col">
+          {TOP_CLUBS.map((c) => (
+            <Row key={c.id} e={c} level={0} />
+          ))}
         </div>
       </div>
     </div>

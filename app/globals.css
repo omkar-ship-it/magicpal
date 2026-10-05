@@ -371,6 +371,25 @@ h1, h2, h3 {
   z-index: 10000 !important;
 }
 
+/* Window chrome shared by the entity panel and the chat window — minimise,
+   expand, full screen, close. Small, quiet, and out of the way until hovered. */
+.win-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 8px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.win-btn:hover {
+  background: var(--sunk);
+  color: var(--ink);
+}
+
 .sidebar-collapse-toggle {
   display: grid;
   place-items: center;

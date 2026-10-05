@@ -3,9 +3,19 @@
 import { useState } from "react";
 import Link from "next/link";
 import { InstitutionIcon } from "@/components/MapPrimitives";
-import type { NetworkKind } from "@/lib/networks";
 
-type Step = "intro" | "create" | "brand" | "invite" | "done";
+
+type Step = "intro" | "create" | "levels" | "brand" | "invite" | "done";
+
+type NetworkKind = "institution" | "employer" | "professional";
+
+/** Preset hierarchies institutions actually use — picked as a starting point, then edited. */
+const LEVEL_PRESETS: Array<{ id: string; name: string; levels: string[] }> = [
+  { id: "tie", name: "Global org with chapters", levels: ["Regions", "Chapters", "Programmes"] },
+  { id: "school", name: "Business school", levels: ["Programmes", "Classes"] },
+  { id: "university", name: "University with chapters", levels: ["Chapters", "Groups"] },
+  { id: "flat", name: "Single level", levels: ["Groups"] },
+];
 
 const KIND_LABEL: Record<NetworkKind, string> = {
   institution: "University",
@@ -15,9 +25,9 @@ const KIND_LABEL: Record<NetworkKind, string> = {
 
 /** Which already-seeded demo community the walkthrough deep-links into at the end — this whole page is a clickthrough prototype, not a real onboarding backend, so there's nothing to actually create. */
 const DEMO_NETWORK_FOR_KIND: Record<NetworkKind, string> = {
-  institution: "net-iitb",
-  employer: "net-exgoogle",
-  professional: "net-design-leaders",
+  institution: "isb",
+  employer: "exgoogle",
+  professional: "tie-global",
 };
 
 const SWATCHES = ["#2a5db0", "#7c5cff", "#0ea5b8", "#c2410c", "#1f8a5f"];
@@ -31,7 +41,7 @@ function slugify(s: string): string {
   return base || "network";
 }
 
-const STEPS: Step[] = ["intro", "create", "brand", "invite", "done"];
+const STEPS: Step[] = ["intro", "create", "levels", "brand", "invite", "done"];
 
 function StepDots({ step }: { step: Step }) {
   const i = STEPS.indexOf(step);
@@ -57,6 +67,8 @@ export default function InstitutionsPage() {
   const [kind, setKind] = useState<NetworkKind>("institution");
   const [mission, setMission] = useState("");
   const [color, setColor] = useState(SWATCHES[0]);
+  const [preset, setPreset] = useState(LEVEL_PRESETS[0].id);
+  const [levels, setLevels] = useState<string[]>(LEVEL_PRESETS[0].levels);
   const [copied, setCopied] = useState(false);
 
   const slug = slugify(name);
@@ -155,7 +167,87 @@ export default function InstitutionsPage() {
             <button onClick={() => setStep("intro")} className="btn btn-ghost">
               Back
             </button>
-            <button onClick={() => setStep("brand")} disabled={!name.trim()} className="btn btn-primary">
+            <button onClick={() => setStep("levels")} disabled={!name.trim()} className="btn btn-primary">
+              Next
+            </button>
+          </div>
+        </>
+      )}
+
+      {step === "levels" && (
+        <>
+          <h1 className="text-2xl font-bold">Name your levels</h1>
+          <p className="mt-1.5 text-[13.5px] text-[var(--ink-soft)]">
+            There&apos;s no fixed hierarchy — you decide how deep {name || "your network"} goes and what each level is called.
+          </p>
+
+          <div className="card mt-6 flex flex-col gap-4 p-6">
+            <div>
+              <label className="label">Start from</label>
+              <div className="flex flex-wrap gap-1.5">
+                {LEVEL_PRESETS.map((pr) => (
+                  <button
+                    key={pr.id}
+                    type="button"
+                    onClick={() => {
+                      setPreset(pr.id);
+                      setLevels(pr.levels);
+                    }}
+                    className="pill"
+                    style={
+                      preset === pr.id
+                        ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)", border: "1px solid var(--brand)" }
+                        : { background: "var(--sunk)", color: "var(--ink-soft)", border: "1px solid transparent" }
+                    }
+                  >
+                    {pr.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              {levels.map((lvl, i) => (
+                <div key={i} className="flex items-center gap-2" style={{ paddingLeft: i * 18 }}>
+                  <span className="text-[12px] text-[var(--ink-soft)]">{i === 0 ? "contains" : "↳ each contains"}</span>
+                  <input
+                    className="input"
+                    value={lvl}
+                    onChange={(e) => setLevels(levels.map((x, xi) => (xi === i ? e.target.value : x)))}
+                    maxLength={24}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setLevels(levels.filter((_, xi) => xi !== i))}
+                    className="text-[13px] text-[var(--ink-soft)] hover:text-[var(--warn)]"
+                    title="Remove this level"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {levels.length < 4 && (
+                <button type="button" onClick={() => setLevels([...levels, "Groups"])} className="btn btn-ghost btn-sm w-fit">
+                  + Add a level
+                </button>
+              )}
+            </div>
+
+            <div className="rounded-2xl p-4 text-[12.5px]" style={{ background: "var(--sunk)" }}>
+              <p className="font-semibold">{name || "Your network"}</p>
+              {levels.map((lvl, i) => (
+                <p key={i} style={{ paddingLeft: (i + 1) * 14 }} className="mt-1 text-[var(--ink-soft)]">
+                  ↳ {lvl}
+                </p>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-5 flex gap-2">
+            <button onClick={() => setStep("create")} className="btn btn-ghost">
+              Back
+            </button>
+            <button onClick={() => setStep("brand")} className="btn btn-primary">
               Next
             </button>
           </div>
@@ -192,7 +284,7 @@ export default function InstitutionsPage() {
               <span className="text-[22px] leading-none">{kind === "institution" ? "🎓" : kind === "employer" ? "🏢" : "🧭"}</span>
               <h2 className="mt-1.5 text-[16px] font-bold leading-tight">{name || "Your network"}</h2>
               <span className="pill mt-1.5" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
-                Member count grows as people join
+                {levels[0] ?? "Groups"} · member count grows as people join
               </span>
               <p className="mt-2.5 text-[12.5px] leading-5 text-[var(--ink)]">
                 {mission || "Add a one-line mission to tell members what this network is for."}
@@ -201,7 +293,7 @@ export default function InstitutionsPage() {
           </div>
 
           <div className="mt-5 flex gap-2">
-            <button onClick={() => setStep("create")} className="btn btn-ghost">
+            <button onClick={() => setStep("levels")} className="btn btn-ghost">
               Back
             </button>
             <button onClick={() => setStep("invite")} className="btn btn-primary">

@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { avatarUrl } from "@/lib/avatar";
 import { mockConnectionCount, type MockEvent, type MockCompany } from "@/lib/prototypeData";
-import { NETWORK_KIND_EMOJI, groupsForName, isClub, networksForName } from "@/lib/networks";
+import { directEntitiesForName, networksForName } from "@/lib/networks";
 
 const MAX_NOTE = 300;
 
@@ -250,12 +250,15 @@ export function ActionButton({
   note,
   onNoteChange,
   communityName,
+  onMessage,
 }: {
   p: Profile;
   conn: ConnState | undefined;
   onConnect: (id: string, note?: string) => void;
   onRespond: (p: Profile, accept: boolean) => void;
   canAct: boolean;
+  /** Opens the floating chat window instead of navigating to the messages page. */
+  onMessage?: (p: Profile) => void;
   /** The popup card shows a note field before connecting; the compact list row doesn't. */
   detailed?: boolean;
   note?: string;
@@ -322,6 +325,13 @@ export function ActionButton({
     );
   }
   if (conn.status === "accepted") {
+    if (onMessage) {
+      return (
+        <button onClick={() => onMessage(p)} className="btn btn-primary btn-sm w-full">
+          Message
+        </button>
+      );
+    }
     return (
       <Link href={conn.connectionId ? `/messages/${conn.connectionId}` : "/connections"} className="btn btn-primary btn-sm w-full">
         Message
@@ -336,8 +346,9 @@ export function ActionButton({
 }
 
 /**
- * A person's affiliations: the networks they're in, then the groups/clubs
- * inside them. Each chip is a door into that entity's panel.
+ * A person's affiliations: the top-level networks they're in, then the
+ * specific nodes underneath (a chapter, a class, a club). Each chip is a
+ * door into that node's panel.
  */
 function AffiliationChips({
   name,
@@ -345,12 +356,12 @@ function AffiliationChips({
   maxNetworks = 3,
 }: {
   name: string;
-  onOpenEntity?: (kind: "network" | "group", id: string) => void;
+  onOpenEntity?: (id: string) => void;
   maxNetworks?: number;
 }) {
   const networks = networksForName(name);
-  const groups = groupsForName(name);
-  if (networks.length === 0 && groups.length === 0) return null;
+  const direct = directEntitiesForName(name).filter((e) => e.parentId !== null);
+  if (networks.length === 0 && direct.length === 0) return null;
   const shown = networks.slice(0, maxNetworks);
   const hidden = networks.length - shown.length;
   return (
@@ -359,7 +370,7 @@ function AffiliationChips({
         <span
           key={n.id}
           className="skill-tag"
-          onClick={onOpenEntity ? () => onOpenEntity("network", n.id) : undefined}
+          onClick={onOpenEntity ? () => onOpenEntity(n.id) : undefined}
           style={{
             cursor: onOpenEntity ? "pointer" : undefined,
             background: "color-mix(in srgb, var(--layer-event) 14%, var(--card))",
@@ -367,19 +378,19 @@ function AffiliationChips({
           }}
           title={onOpenEntity ? `Open ${n.name}` : undefined}
         >
-          {NETWORK_KIND_EMOJI[n.kind]} {n.name}
+          {n.emoji} {n.name}
         </span>
       ))}
       {hidden > 0 && <span className="skill-tag">+{hidden} more</span>}
-      {groups.slice(0, 2).map((g) => (
+      {direct.slice(0, 2).map((e) => (
         <span
-          key={g.id}
+          key={e.id}
           className="skill-tag"
-          onClick={onOpenEntity ? () => onOpenEntity("group", g.id) : undefined}
+          onClick={onOpenEntity ? () => onOpenEntity(e.id) : undefined}
           style={{ cursor: onOpenEntity ? "pointer" : undefined }}
-          title={onOpenEntity ? `Open ${g.name}` : undefined}
+          title={onOpenEntity ? `Open ${e.name}` : undefined}
         >
-          {isClub(g) ? "⛺" : "👥"} {g.name}
+          {e.emoji} {e.name}
         </span>
       ))}
     </div>
@@ -397,6 +408,7 @@ export function ProfileCard({
   onConnect,
   onRespond,
   onOpenEntity,
+  onMessage,
 }: {
   p: Profile;
   conn: ConnState | undefined;
@@ -407,7 +419,8 @@ export function ProfileCard({
   onConnect: (id: string, note?: string) => void;
   onRespond: (p: Profile, accept: boolean) => void;
   /** Lets an affiliation chip open that network/group's panel — omit to render chips as plain labels. */
-  onOpenEntity?: (kind: "network" | "group", id: string) => void;
+  onOpenEntity?: (id: string) => void;
+  onMessage?: (p: Profile) => void;
 }) {
   const status = pinStatusOf(conn);
   return (
@@ -479,7 +492,7 @@ export function ProfileCard({
       <SocialLinks p={p} />
 
       <div className="mt-3 border-t border-[var(--line)] pt-3">
-        <ActionButton p={p} conn={conn} onConnect={onConnect} onRespond={onRespond} canAct={canAct} detailed note={note} onNoteChange={onNoteChange} />
+        <ActionButton p={p} conn={conn} onConnect={onConnect} onRespond={onRespond} canAct={canAct} detailed note={note} onNoteChange={onNoteChange} onMessage={onMessage} />
       </div>
     </div>
   );
@@ -553,6 +566,7 @@ export function ProfileListRow({
   onConnect,
   onRespond,
   onOpenEntity,
+  onMessage,
   communityName,
 }: {
   p: Profile;
@@ -565,7 +579,8 @@ export function ProfileListRow({
   onConnect: (id: string, note?: string) => void;
   onRespond: (p: Profile, accept: boolean) => void;
   /** Lets an affiliation chip open that network/group's panel — omit to render chips as plain labels. */
-  onOpenEntity?: (kind: "network" | "group", id: string) => void;
+  onOpenEntity?: (id: string) => void;
+  onMessage?: (p: Profile) => void;
   /** Set inside a Community Hub's member list — gives ActionButton the warmer "fellow member" connect CTA. */
   communityName?: string;
 }) {
@@ -625,7 +640,7 @@ export function ProfileListRow({
           </div>
         )}
         <div className="mt-2">
-          <ActionButton p={p} conn={conn} onConnect={onConnect} onRespond={onRespond} canAct={canAct} communityName={communityName} />
+          <ActionButton p={p} conn={conn} onConnect={onConnect} onRespond={onRespond} canAct={canAct} communityName={communityName} onMessage={onMessage} />
         </div>
       </div>
     </div>
