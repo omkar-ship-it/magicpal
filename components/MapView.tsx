@@ -24,8 +24,9 @@ import {
   CompanyCard,
 } from "./MapPrimitives";
 import { MOCK_EVENTS, MOCK_COMPANIES, countPeopleAtCompany, companyById, eventById } from "@/lib/prototypeData";
+import { MOCK_POSTS, type MockPost, type PostKind } from "@/lib/feedData";
 import {
-  MOCK_POSTS,
+  HOME_FEED_ID,
   PLACED_ENTITIES,
   PUBLIC_ENTITY_ID,
   TOP_NETWORKS,
@@ -33,10 +34,12 @@ import {
   entityById,
   entityIdsForName,
   expandMembership,
+  getMyAdminIds,
   getMyEntityIds,
+  getMyPendingIds,
   setMyEntityIds,
+  setMyPendingIds,
   type MockEntity,
-  type MockPost,
 } from "@/lib/networks";
 import { MOCK_ACCEPTED_NAMES } from "@/lib/chatData";
 import FloatingAccountMenu from "./FloatingAccountMenu";
@@ -54,6 +57,43 @@ const DEFAULT_RADIUS_KM = 25;
 const DEFAULT_CENTER = { lat: 12.9716, lng: 77.5946 };
 
 type Mode = "nearby" | "network";
+
+/**
+ * Role filters, derived from real seeded profile data (headline, company,
+ * skills) rather than invented — "founders and investors near me" is the
+ * first thing anyone actually wants from a map like this.
+ */
+const ROLE_FILTERS: Array<{ id: string; label: string; emoji: string; match: (p: Profile) => boolean }> = [
+  { id: "all", label: "Everyone", emoji: "🌍", match: () => true },
+  {
+    id: "founder",
+    label: "Founders",
+    emoji: "🚀",
+    match: (p) => /founder|ceo|co-founder/i.test(`${p.headline ?? ""}`) || /stealth/i.test(`${p.company ?? ""}`),
+  },
+  {
+    id: "investor",
+    label: "Investors",
+    emoji: "💰",
+    match: (p) =>
+      /investor|partner|angel|venture|capital/i.test(`${p.headline ?? ""}`) ||
+      p.skills.some((s) => /venture|angel|investing/i.test(s)),
+  },
+  {
+    id: "product",
+    label: "Product",
+    emoji: "📦",
+    match: (p) => /product|pm\b/i.test(`${p.headline ?? ""}`) || p.skills.some((s) => /product/i.test(s)),
+  },
+  {
+    id: "engineer",
+    label: "Engineers",
+    emoji: "⚙️",
+    match: (p) => /engineer|cto|infra|platform|developer|devrel/i.test(`${p.headline ?? ""}`),
+  },
+  { id: "design", label: "Design", emoji: "🎨", match: (p) => /design/i.test(`${p.headline ?? ""}`) || p.skills.some((s) => /design/i.test(s)) },
+  { id: "hiring", label: "Hiring", emoji: "📣", match: (p) => p.skills.some((s) => /hiring/i.test(s)) || /hiring/i.test(`${p.bio ?? ""}`) },
+];
 
 /** One open window over the map. Entity tabs carry their own drill-down stack. */
 type OpenTab = { key: string; kind: "entity"; stack: string[] } | { key: string; kind: "event" | "company"; id: string };
@@ -173,6 +213,12 @@ export default function MapView({
   const [chatState, setChatState] = useState<ChatWindowState>("expanded");
   /** Posts you write this session, on top of the seeded ones. Prototype-only — never leaves the browser. */
   const [myPosts, setMyPosts] = useState<MockPost[]>([]);
+  const [likes, setLikes] = useState<Set<string>>(new Set());
+  const [extraComments, setExtraComments] = useState<Record<string, MockPost["comments"]>>({});
+  const [votes, setVotes] = useState<Record<string, string>>({});
+  const [myAdminIds] = useState<string[]>(() => getMyAdminIds());
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [myPendingIds, setMyPendingIdsState] = useState<string[]>(() => getMyPendingIds());
   const [pinnedExtraId, setPinnedExtraId] = useState<string | null>(null);
   const [hoveredExtraId, setHoveredExtraId] = useState<string | null>(null);
   /**
@@ -486,9 +532,10 @@ export default function MapView({
   // Selecting a network narrows the map to everyone beneath it — a member of
   // TiE Bangalore counts as a member of TiE Global, so picking the parent
   // shows the whole tree's people.
-  const networkFiltered = selectedNetworkId
-    ? activeData.filter((p) => entityIdsForName(p.name).has(selectedNetworkId))
-    : activeData;
+  const role = ROLE_FILTERS.find((r) => r.id === roleFilter) ?? ROLE_FILTERS[0];
+  const networkFiltered = (selectedNetworkId ? activeData.filter((p) => entityIdsForName(p.name).has(selectedNetworkId)) : activeData).filter(
+    role.match
+  );
   const peopleOnMap = showPeopleLayer ? networkFiltered : [];
   const myMembership = expandMembership(myEntityIds);
   const myNetworks = TOP_NETWORKS.filter((n) => myMembership.has(n.id));
@@ -565,15 +612,69 @@ export default function MapView({
     return id === PUBLIC_ENTITY_ID || myMembership.has(id);
   }
 
-  function addPost(entityId: string, body: string) {
+  function isAdminOf(id: string): boolean {
+    return myAdminIds.includes(id);
+  }
+
+  /** Approval-gated communities don't let you in on the spot — the request sits with their admins. */
+  function requestAccess(id: string) {
+    const next = Array.from(new Set([...myPendingIds, id]));
+    setMyPendingIdsState(next);
+    setMyPendingIds(next);
+  }
+
+  /**
+   * The aggregated "catch up" feed: everything posted anywhere you're a
+   * member or an admin, newest first, each post tagged with where it came
+   * from. This is the home feed — the thing you open first.
+   */
+  function homeFeedPosts(): MockPost[] {
+    const mine = new Set([...myMembership, ...myAdminIds, PUBLIC_ENTITY_ID]);
+    return [...myPosts, ...MOCK_POSTS].filter((p) => mine.has(p.entityId)).sort((a, b) => a.minutesAgo - b.minutesAgo);
+  }
+
+  function addPost(entityId: string, body: string, kind: PostKind = "update") {
     setMyPosts((cur) => [
-      { id: `my-${Date.now()}`, entityId, author: ownName || "You", body, dateLabel: "just now" },
+      {
+        id: `my-${Date.now()}`,
+        entityId,
+        author: ownName || "You",
+        authorHeadline: "You",
+        kind,
+        body,
+        minutesAgo: 0,
+        likes: 0,
+        comments: [],
+      },
       ...cur,
     ]);
   }
 
+  function toggleLike(id: string) {
+    setLikes((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function addComment(id: string, body: string) {
+    const text = body.trim();
+    if (!text) return;
+    const comment = { id: `c-${Date.now()}`, author: ownName || "You", authorHeadline: "You", body: text, minutesAgo: 0 };
+    setExtraComments((cur) => ({ ...cur, [id]: [...(cur[id] ?? []), comment] }));
+  }
+
+  function castVote(id: string, optionId: string) {
+    setVotes((cur) => ({ ...cur, [id]: optionId }));
+  }
+
   function postsFor(entityId: string): MockPost[] {
-    return [...myPosts.filter((p) => p.entityId === entityId), ...MOCK_POSTS.filter((p) => p.entityId === entityId)];
+    if (entityId === HOME_FEED_ID) return homeFeedPosts();
+    return [...myPosts.filter((p) => p.entityId === entityId), ...MOCK_POSTS.filter((p) => p.entityId === entityId)].sort(
+      (a, b) => a.minutesAgo - b.minutesAgo
+    );
   }
 
   /**
@@ -600,15 +701,37 @@ export default function MapView({
   // Rendered twice below — as a mobile bottom sheet, and nested directly
   // under the toolbar as a desktop sidebar — so the two responsive layouts
   // don't duplicate the actual list markup, just where it's mounted.
+  const roleChips = (
+    <div className="mb-2.5 flex flex-wrap gap-1.5 border-b border-[var(--line)] pb-2.5">
+      {ROLE_FILTERS.map((r) => (
+        <button
+          key={r.id}
+          onClick={() => setRoleFilter(r.id)}
+          className="pill"
+          style={
+            roleFilter === r.id
+              ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)", border: "1px solid var(--brand)" }
+              : { background: "var(--sunk)", color: "var(--ink-soft)", border: "1px solid transparent" }
+          }
+        >
+          {r.emoji} {r.label}
+        </button>
+      ))}
+    </div>
+  );
+
   const listBody =
     mode === "nearby" ? (
       <>
+        {roleChips}
         {loading && profiles.length === 0 && <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">Loading nearby people…</p>}
         {!loading && profiles.length === 0 && (
           <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one visible within {radiusKm}km yet. Try a wider radius.</p>
         )}
         {!loading && profiles.length > 0 && networkFiltered.length === 0 && (
-          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one nearby is in {selectedNetwork?.name ?? "that network"} yet.</p>
+          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">
+            No {roleFilter === "all" ? "one" : role.label.toLowerCase()} nearby in {selectedNetwork?.name ?? "this view"} yet.
+          </p>
         )}
         <div className="flex flex-col gap-2.5">
           {networkFiltered.map((p) => (
@@ -631,12 +754,15 @@ export default function MapView({
       </>
     ) : (
       <>
+        {roleChips}
         {worldLoading && worldProfiles.length === 0 && <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">Loading the world…</p>}
         {!worldLoading && worldProfiles.length === 0 && (
           <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one else has joined yet — check back soon.</p>
         )}
         {!worldLoading && worldProfiles.length > 0 && networkFiltered.length === 0 && (
-          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one in {selectedNetwork?.name ?? "that network"} yet.</p>
+          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">
+            No {roleFilter === "all" ? "one" : role.label.toLowerCase()} in {selectedNetwork?.name ?? "this view"} yet.
+          </p>
         )}
         <div className="flex flex-col gap-2.5">
           {networkFiltered.map((p) => (
@@ -1126,11 +1252,12 @@ export default function MapView({
                 ))}
               </select>
 
-              <button
-                onClick={() => openEntityTab(selectedNetworkId ?? PUBLIC_ENTITY_ID)}
-                className="btn btn-ghost btn-sm"
-              >
-                {selectedNetwork ? `Open ${selectedNetwork.name} →` : "Open public feed →"}
+              <button onClick={() => openEntityTab(HOME_FEED_ID)} className="btn btn-primary btn-sm">
+                Your feed
+              </button>
+
+              <button onClick={() => openEntityTab(selectedNetworkId ?? PUBLIC_ENTITY_ID)} className="btn btn-ghost btn-sm">
+                {selectedNetwork ? `Open ${selectedNetwork.name} →` : "Public network →"}
               </button>
 
               <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
@@ -1191,8 +1318,10 @@ export default function MapView({
           tabs={tabs.map((t): DockTab => {
             if (t.kind === "entity") {
               const id = t.stack[t.stack.length - 1];
-              const e = id === PUBLIC_ENTITY_ID ? undefined : entityById(id);
-              return { key: t.key, emoji: id === PUBLIC_ENTITY_ID ? "🌍" : (e?.emoji ?? "👥"), title: id === PUBLIC_ENTITY_ID ? "Public Network" : (e?.name ?? "Network") };
+              if (id === HOME_FEED_ID) return { key: t.key, emoji: "🏠", title: "Your feed" };
+              if (id === PUBLIC_ENTITY_ID) return { key: t.key, emoji: "🌍", title: "Public Network" };
+              const e = entityById(id);
+              return { key: t.key, emoji: e?.emoji ?? "👥", title: e?.name ?? "Network" };
             }
             if (t.kind === "event") return { key: t.key, emoji: "📅", title: eventById(t.id)?.name ?? "Event" };
             return { key: t.key, emoji: "🏢", title: companyById(t.id)?.name ?? "Company" };
@@ -1217,6 +1346,15 @@ export default function MapView({
               loading={worldLoading && worldProfiles.length === 0}
               posts={postsFor(activeTab.stack[activeTab.stack.length - 1])}
               onPost={addPost}
+              likes={likes}
+              comments={extraComments}
+              votes={votes}
+              onToggleLike={toggleLike}
+              onComment={addComment}
+              onVote={castVote}
+              isAdmin={isAdminOf(activeTab.stack[activeTab.stack.length - 1])}
+              isPending={myPendingIds.includes(activeTab.stack[activeTab.stack.length - 1])}
+              onRequestAccess={requestAccess}
               isMember={isMemberOf(activeTab.stack[activeTab.stack.length - 1])}
               membershipTier={paidMemberships[activeTab.stack[activeTab.stack.length - 1]]}
               onJoin={joinEntity}

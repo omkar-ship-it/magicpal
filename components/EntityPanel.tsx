@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { avatarUrl } from "@/lib/avatar";
 import {
+  HOME_FEED_ID,
   PUBLIC_ENTITY_ID,
   TOP_CLUBS,
   ancestorsOf,
@@ -11,6 +13,7 @@ import {
   type MockPost,
 } from "@/lib/networks";
 import { MOCK_EVENTS } from "@/lib/prototypeData";
+import { MOCK_JOIN_REQUESTS, type PostKind } from "@/lib/feedData";
 import { type Profile, type ConnState, ProfileListRow, CalendarIcon } from "./MapPrimitives";
 import Feed from "./Feed";
 import Checkout, { type CheckoutResult } from "./Checkout";
@@ -31,7 +34,16 @@ export default function EntityPanel({
   loading,
   posts,
   onPost,
+  likes,
+  comments,
+  votes,
+  onToggleLike,
+  onComment,
+  onVote,
   isMember,
+  isAdmin,
+  isPending,
+  onRequestAccess,
   membershipTier,
   onJoin,
   onLeave,
@@ -51,8 +63,19 @@ export default function EntityPanel({
   people: Profile[];
   loading?: boolean;
   posts: MockPost[];
-  onPost: (entityId: string, body: string) => void;
+  onPost: (entityId: string, body: string, kind: PostKind) => void;
+  likes: Set<string>;
+  comments: Record<string, import("@/lib/feedData").MockPost["comments"]>;
+  votes: Record<string, string>;
+  onToggleLike: (id: string) => void;
+  onComment: (id: string, body: string) => void;
+  onVote: (id: string, optionId: string) => void;
   isMember: boolean;
+  /** You run this one — you get the admin strip and post in the community's name. */
+  isAdmin: boolean;
+  /** You've asked to join an approval-gated community and are waiting. */
+  isPending: boolean;
+  onRequestAccess: (id: string) => void;
   /** Set when this is a paid community you've already paid to join. */
   membershipTier?: CheckoutResult;
   onJoin: (id: string, paid?: CheckoutResult) => void;
@@ -70,21 +93,33 @@ export default function EntityPanel({
 }) {
   const [hoveredMemberId, setHoveredMemberId] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
+  /** Admin decisions on join requests — prototype-only, resets with the session. */
+  const [handled, setHandled] = useState<Record<string, "in" | "out">>({});
 
-  const isPublic = entityId === PUBLIC_ENTITY_ID;
+  const isHome = entityId === HOME_FEED_ID;
+  const isPublic = entityId === PUBLIC_ENTITY_ID || isHome;
   const entity = isPublic ? undefined : entityById(entityId);
   if (!isPublic && !entity) return null;
 
-  const title = isPublic ? "Public Network" : entity!.name;
-  const emoji = isPublic ? "🌍" : entity!.emoji;
-  const blurb = isPublic ? "Every professional visible on MagicPal, anywhere in the world." : entity!.blurbMock;
+  const title = isHome ? "Your feed" : isPublic ? "Public Network" : entity!.name;
+  const emoji = isHome ? "🏠" : isPublic ? "🌍" : entity!.emoji;
+  const blurb = isHome
+    ? "Everything from the networks, chapters, classes and clubs you're part of — newest first."
+    : isPublic
+      ? "Every professional visible on MagicPal, anywhere in the world."
+      : entity!.blurbMock;
   const memberCount = isPublic ? null : entity!.memberCountMock;
   const trail = isPublic ? [] : ancestorsOf(entityId);
-  const children = isPublic ? TOP_CLUBS : childrenOf(entityId);
+  const children = isHome ? [] : isPublic ? TOP_CLUBS : childrenOf(entityId);
   const childLabel = isPublic ? "Independent clubs" : (entity!.childLabel ?? "Groups");
-  const members = membersOfEntity(people, entityId);
-  const events = MOCK_EVENTS.filter((e) => e.hostEntityId === entityId);
+  const members = isHome ? [] : membersOfEntity(people, entityId);
+  const events = isHome ? [] : MOCK_EVENTS.filter((e) => e.hostEntityId === entityId);
   const tiers = entity?.membershipTiers;
+  const access = entity?.access ?? "open";
+  // Approval-gated communities keep their feed and member list private until
+  // you're in — you can see that Class of 2021 exists, not what's inside it.
+  const locked = !isPublic && !isMember && !isAdmin && access === "request";
+  const pendingRequests = isAdmin ? MOCK_JOIN_REQUESTS.filter((r) => r.entityId === entityId) : [];
 
   return (
     <div>
@@ -110,7 +145,11 @@ export default function EntityPanel({
       <span className="text-[26px] leading-none">{emoji}</span>
       <h2 className="mt-1.5 text-[19px] font-bold leading-tight">{title}</h2>
       <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">
-        {isPublic ? "Everyone on the map — no membership needed" : `${entity!.label}${entity!.place ? ` · ${entity!.place.city}` : ""}`}
+        {isHome
+          ? "Across every community you're in"
+          : isPublic
+            ? "Everyone on the map — no membership needed"
+            : `${entity!.label}${entity!.place ? ` · ${entity!.place.city}` : ""}`}
       </p>
 
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -124,14 +163,28 @@ export default function EntityPanel({
             {membershipTier.tier.name}
           </span>
         )}
+        {isAdmin && (
+          <span className="pill" style={{ background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)" }}>
+            ⭐ You run this
+          </span>
+        )}
         {!isPublic &&
+          !isAdmin &&
           (isMember ? (
             <button onClick={() => onLeave(entityId)} className="btn btn-ghost btn-sm">
               Joined ✓
             </button>
+          ) : isPending ? (
+            <button disabled className="btn btn-ghost btn-sm">
+              Request pending
+            </button>
           ) : tiers ? (
             <button onClick={() => setJoining(true)} className="btn btn-primary btn-sm">
               Join — from {tiers[0].priceLabel}
+            </button>
+          ) : access === "request" ? (
+            <button onClick={() => onRequestAccess(entityId)} className="btn btn-primary btn-sm">
+              Request access
             </button>
           ) : (
             <button onClick={() => onJoin(entityId)} className="btn btn-primary btn-sm">
@@ -158,10 +211,96 @@ export default function EntityPanel({
 
       <p className="mt-3 text-[13.5px] leading-5 text-[var(--ink)]">{blurb}</p>
 
-      <div className="mt-5 border-t border-[var(--line)] pt-4">
-        <h3 className="mb-2.5 text-[12.5px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Feed</h3>
-        <Feed posts={posts} entityName={title} canPost={isPublic || isMember} onPost={(body) => onPost(entityId, body)} />
-      </div>
+      {isAdmin && (
+        <div className="mt-5 rounded-2xl border p-4" style={{ borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 5%, var(--card))" }}>
+          <h3 className="text-[12.5px] font-semibold uppercase tracking-wide" style={{ color: "var(--brand)" }}>
+            Admin · {title}
+          </h3>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <span className="pill" style={{ background: "var(--card)", color: "var(--ink-soft)" }}>
+              {memberCount?.toLocaleString()} members
+            </span>
+            <span className="pill" style={{ background: "var(--card)", color: "var(--ink-soft)" }}>
+              {posts.length} posts
+            </span>
+            <span className="pill" style={{ background: "var(--card)", color: "var(--ink-soft)" }}>
+              {pendingRequests.filter((r) => !handled[r.id]).length} pending requests
+            </span>
+          </div>
+
+          {pendingRequests.length > 0 && (
+            <div className="mt-3 flex flex-col gap-2">
+              <p className="label">Join requests</p>
+              {pendingRequests.map((r) => (
+                <div key={r.id} className="card p-3">
+                  <div className="flex items-start gap-2.5">
+                    <span className="avatar h-9 w-9 flex-none text-[11px]">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={avatarUrl(r.name)} alt="" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-semibold leading-tight">{r.name}</p>
+                      <p className="truncate text-[11.5px] text-[var(--ink-soft)]">{r.headline}</p>
+                      <p className="mt-1 text-[12px] leading-5">{r.note}</p>
+                    </div>
+                  </div>
+                  {handled[r.id] ? (
+                    <p className="mt-2 text-[12px] font-semibold" style={{ color: handled[r.id] === "in" ? "var(--good)" : "var(--ink-soft)" }}>
+                      {handled[r.id] === "in" ? "Approved — they're in" : "Declined"}
+                    </p>
+                  ) : (
+                    <div className="mt-2 flex gap-1.5">
+                      <button onClick={() => setHandled((h) => ({ ...h, [r.id]: "out" }))} className="btn btn-ghost btn-sm flex-1">
+                        Decline
+                      </button>
+                      <button onClick={() => setHandled((h) => ({ ...h, [r.id]: "in" }))} className="btn btn-primary btn-sm flex-1">
+                        Approve
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {locked ? (
+        <div className="mt-5 rounded-2xl border border-[var(--line)] p-6 text-center">
+          <p className="text-[26px] leading-none">🔒</p>
+          <p className="mt-2 text-[14px] font-semibold">{isPending ? "Your request is with the admins" : `${title} is members only`}</p>
+          <p className="mt-1 text-[12.5px] text-[var(--ink-soft)]">
+            {isPending
+              ? "You'll get access to the feed and member list once someone approves it."
+              : `The feed and member list are private to ${entity!.label.toLowerCase()} members.`}
+          </p>
+          {!isPending && (
+            <button onClick={() => onRequestAccess(entityId)} className="btn btn-primary btn-sm mt-3">
+              Request access
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="mt-5 border-t border-[var(--line)] pt-4">
+          <h3 className="mb-2.5 text-[12.5px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Feed</h3>
+          <Feed
+            posts={posts}
+            showSource={isHome}
+            entityName={isHome ? "your networks" : title}
+            canPost={isPublic || isMember || isAdmin}
+            likes={likes}
+            comments={comments}
+            votes={votes}
+            onPost={(body, kind) => onPost(entityId, body, kind)}
+            onToggleLike={onToggleLike}
+            onComment={onComment}
+            onVote={onVote}
+            onOpenEvent={onOpenEvent}
+            onOpenEntity={onOpen}
+            postingAs={isAdmin ? title : undefined}
+          />
+        </div>
+      )}
 
       {children.length > 0 && (
         <div className="mt-5 border-t border-[var(--line)] pt-4">
@@ -176,6 +315,7 @@ export default function EntityPanel({
                 </p>
                 <p className="mt-0.5 line-clamp-2 text-[12px] text-[var(--ink-soft)]">{c.blurbMock}</p>
                 <p className="mt-1 text-[11px] text-[var(--ink-soft)]">
+                  {(c.access ?? "open") === "request" && "🔒 "}
                   {c.memberCountMock.toLocaleString()} members
                   {c.childLabel ? ` · ${childrenOf(c.id).length} ${c.childLabel.toLowerCase()}` : ""} →
                 </p>
@@ -211,6 +351,7 @@ export default function EntityPanel({
         </div>
       )}
 
+      {!locked && (
       <div className="mt-5 border-t border-[var(--line)] pt-4">
         <h3 className="text-[12.5px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
           Members worldwide {members.length > 0 ? `(${members.length})` : ""}
@@ -241,6 +382,7 @@ export default function EntityPanel({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

@@ -17,6 +17,8 @@
  */
 
 import { hashSeed, type PriceTier } from "./prototypeData";
+export { MOCK_POSTS } from "./feedData";
+export type { MockPost } from "./feedData";
 
 export type MockEntity = {
   id: string;
@@ -34,9 +36,20 @@ export type MockEntity = {
   place?: { city: string; lat: number; lng: number };
   /** Paid communities ask you to pick a tier before you're in. Absent = free to join. */
   membershipTiers?: PriceTier[];
+  /**
+   * How you get in:
+   *  open    — join instantly (default)
+   *  request — an admin approves you; feed and members stay hidden until then
+   *  paid    — pick a tier and pay
+   * Classes, cohorts and closed groups are "request", which is why you can
+   * see that Class of 2021 exists without being able to read it.
+   */
+  access?: "open" | "request" | "paid";
 };
 
 export const PUBLIC_ENTITY_ID = "public";
+/** The aggregated feed across everything you're in — not a node in the tree. */
+export const HOME_FEED_ID = "__home";
 
 function node(
   id: string,
@@ -46,7 +59,7 @@ function node(
   emoji: string,
   memberCountMock: number,
   blurbMock: string,
-  opts: { childLabel?: string; place?: { city: string; lat: number; lng: number }; membershipTiers?: PriceTier[] } = {}
+  opts: { childLabel?: string; place?: { city: string; lat: number; lng: number }; membershipTiers?: PriceTier[]; access?: MockEntity["access"] } = {}
 ): MockEntity {
   return { id, name, parentId, label, emoji, memberCountMock, blurbMock, ...opts };
 }
@@ -63,6 +76,7 @@ function tieChapter(slug: string, name: string, regionId: string, city: string, 
     childLabel: "Programmes",
     place: { city, lat, lng },
     membershipTiers: TIE_CHAPTER_TIERS,
+    access: "paid",
   });
 }
 
@@ -189,11 +203,11 @@ const ISB_TREE: MockEntity[] = [
   node("isb-egp", "EGP", "isb", "Programme", "📗", 2600, "Executive Graduate Programme — for working senior managers.", { childLabel: "Classes" }),
   node("isb-ivi", "IVI", "isb", "Programme", "🚀", 480, "I-Venture @ ISB — the incubator and its founder cohorts.", { childLabel: "Cohorts" }),
   ...[2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025].map((y) =>
-    node(`isb-pgp-${y}`, `Class of ${y}`, "isb-pgp", "Class", "🎓", 600 + (y % 7) * 40, `The PGP cohort that graduated in ${y}.`)
+    node(`isb-pgp-${y}`, `Class of ${y}`, "isb-pgp", "Class", "🎓", 600 + (y % 7) * 40, `The PGP cohort that graduated in ${y}.`, { access: "request" })
   ),
-  ...[2020, 2022, 2024].map((y) => node(`isb-egp-${y}`, `Class of ${y}`, "isb-egp", "Class", "🎓", 180 + (y % 5) * 20, `The EGP cohort that graduated in ${y}.`)),
+  ...[2020, 2022, 2024].map((y) => node(`isb-egp-${y}`, `Class of ${y}`, "isb-egp", "Class", "🎓", 180 + (y % 5) * 20, `The EGP cohort that graduated in ${y}.`, { access: "request" })),
   ...["Cohort 7", "Cohort 8", "Cohort 9"].map((c, i) =>
-    node(`isb-ivi-${i + 7}`, c, "isb-ivi", "Cohort", "🚀", 18 + i * 4, `I-Venture ${c} — currently incubating.`)
+    node(`isb-ivi-${i + 7}`, c, "isb-ivi", "Cohort", "🚀", 18 + i * 4, `I-Venture ${c} — currently incubating.`, { access: "request" })
   ),
 ];
 
@@ -210,7 +224,7 @@ const IITB_TREE: MockEntity[] = [
   node("iitb-bay-founders", "Bay Area Founders", "iitb-bay", "Group", "👥", 310, "Alumni who've started something in the valley."),
   node("iitb-bay-deeptech", "Deep Tech", "iitb-bay", "Group", "👥", 180, "Semiconductors, robotics, and hard science."),
   node("iitb-blr-founders", "Bengaluru Founders", "iitb-blr", "Group", "👥", 420, "Seed to Series C founders in the city."),
-  node("iitb-blr-08", "Class of 2008", "iitb-blr", "Group", "👥", 140, "Batchmates keeping the hostel group chat alive since '08."),
+  node("iitb-blr-08", "Class of 2008", "iitb-blr", "Group", "👥", 140, "Batchmates keeping the hostel group chat alive since '08.", { access: "request" }),
 ];
 
 const STANFORD_TREE: MockEntity[] = [
@@ -221,8 +235,8 @@ const STANFORD_TREE: MockEntity[] = [
   node("stanford-gsb", "Graduate School of Business", "stanford", "School", "📘", 2100, "GSB alumni worldwide.", { childLabel: "Classes" }),
   node("stanford-eng", "School of Engineering", "stanford", "School", "⚙️", 3400, "Engineering alumni across software, hardware, and research.", { childLabel: "Classes" }),
   node("stanford-india", "Stanford in India", "stanford", "Chapter", "📍", 640, "Alumni who've moved back or are building in India.", { place: { city: "Bengaluru", lat: 12.9279, lng: 77.6271 } }),
-  ...[2016, 2019, 2022].map((y) => node(`stanford-gsb-${y}`, `Class of ${y}`, "stanford-gsb", "Class", "🎓", 380, `GSB class of ${y}.`)),
-  ...[2018, 2021].map((y) => node(`stanford-eng-${y}`, `Class of ${y}`, "stanford-eng", "Class", "🎓", 520, `Engineering class of ${y}.`)),
+  ...[2016, 2019, 2022].map((y) => node(`stanford-gsb-${y}`, `Class of ${y}`, "stanford-gsb", "Class", "🎓", 380, `GSB class of ${y}.`, { access: "request" })),
+  ...[2018, 2021].map((y) => node(`stanford-eng-${y}`, `Class of ${y}`, "stanford-eng", "Class", "🎓", 520, `Engineering class of ${y}.`, { access: "request" })),
 ];
 
 /** Flatter networks — no sub-levels configured at all. The tree doesn't force any. */
@@ -235,14 +249,15 @@ const FLAT_NETWORKS: MockEntity[] = [
   node("exflipkart", "Ex-Flipkart", null, "Network", "🏢", 3900, "The Flipkart mafia — commerce, logistics, and fintech.", { place: { city: "Bengaluru", lat: 12.9237, lng: 77.675 } }),
   node("bits", "BITS Pilani", null, "Network", "🎓", 9300, "BITSians in tech, research, and startups everywhere.", { place: { city: "Pilani", lat: 28.3639, lng: 75.5869 } }),
   node("hbs", "Harvard Business School", null, "Network", "🎓", 11200, "HBS alumni in operating, investing, and founding roles.", { place: { city: "Boston", lat: 42.3663, lng: -71.1222 } }),
-  node("pm-india", "Product Managers India", null, "Network", "🧭", 14200, "Product people across India swapping craft and war stories."),
+  node("product-leadership", "Product Leadership Community", null, "Network", "🧭", 14200, "Heads of product and senior PMs comparing craft, org design, and the things that actually ship."),
   node("women-product", "Women in Product", null, "Network", "🧭", 16800, "Product leaders supporting other women building product.", { childLabel: "Circles" }),
   node("women-product-mentor", "Mentorship Circle", "women-product", "Circle", "👥", 1200, "Structured mentor pairings, two cohorts a year."),
   node("women-product-leaders", "Senior Leaders", "women-product", "Circle", "👥", 640, "Director-and-above leaders, closed-door discussions."),
   node("design-leaders", "Design Leaders India", null, "Network", "🧭", 9100, "Senior design leaders across India's product companies."),
   node("blr-founders", "Bengaluru Founders", null, "Network", "🧭", 21000, "Early-stage founders in Bengaluru trading notes and intros."),
   node("climate", "Climate Tech Collective", null, "Network", "🧭", 5200, "Builders working on decarbonisation across hardware and software."),
-  node("angels", "Angel Investors India", null, "Network", "🧭", 4400, "Active angels sharing deal flow and diligence notes.", {
+  node("angel-network", "Angel Network for Investments", null, "Network", "🧭", 420, "A working syndicate — shared deal flow, real diligence, and cheques that actually get written.", {
+    access: "request",
     membershipTiers: [
       { id: "syndicate", name: "Syndicate member", priceLabel: "₹25,000", period: "per year", perks: ["Weekly deal memos", "Co-investment rights", "Diligence pod access"], featured: true },
       { id: "observer", name: "Observer", priceLabel: "₹6,000", period: "per year", perks: ["Weekly deal memos", "Quarterly roundtable"] },
@@ -312,51 +327,6 @@ export function isClub(e: MockEntity): boolean {
 
 /** Everything with a physical home — these are what get pins on the map. */
 export const PLACED_ENTITIES: MockEntity[] = ALL_ENTITIES.filter((e) => e.place);
-
-// ----------------------------------------------------------------- feeds
-
-export type MockPost = {
-  id: string;
-  entityId: string;
-  author: string;
-  body: string;
-  dateLabel: string;
-};
-
-export const MOCK_POSTS: MockPost[] = [
-  { id: "p-pub-1", entityId: PUBLIC_ENTITY_ID, author: "Sarah Chen", body: "In Bengaluru all next week — happy to meet anyone building in B2B infra.", dateLabel: "3h ago" },
-  { id: "p-pub-2", entityId: PUBLIC_ENTITY_ID, author: "Kwame Asante", body: "Looking for intros to payments folks in Nairobi or Lagos. Will trade notes on informal-market rails.", dateLabel: "yesterday" },
-  { id: "p-pub-3", entityId: PUBLIC_ENTITY_ID, author: "Elin Berg", body: "Anyone in Stockholm up for a climate-hardware coffee on Thursday?", dateLabel: "2 days ago" },
-
-  { id: "p-tie-1", entityId: "tie-global", author: "TiE Global", body: "TiE Global Summit registrations are open — 3,000 founders, 40 countries, December.", dateLabel: "1 day ago" },
-  { id: "p-tie-2", entityId: "tie-global", author: "TiE Global", body: "Nominations for the Global Charter Member council close at the end of the month.", dateLabel: "6 days ago" },
-  { id: "p-tie-sa-1", entityId: "tie-southasia", author: "Region Desk", body: "South Asia chapters crossed 6,000 members this quarter — Hyderabad grew fastest.", dateLabel: "4 days ago" },
-  { id: "p-tie-blr-1", entityId: "tie-bangalore", author: "Vikram Shah", body: "TiECon Bangalore speaker list is live. Charter Members get early access to 1:1 mentor slots.", dateLabel: "2 days ago" },
-  { id: "p-tie-blr-2", entityId: "tie-bangalore", author: "Nandini Rao", body: "Pitch night this Thursday at the chapter office — six teams, 8 minutes each.", dateLabel: "5 days ago" },
-  { id: "p-tie-blr-women-1", entityId: "tie-bangalore-women", author: "Nandini Rao", body: "TiE Women Bangalore cohort 4 applications close Friday. 20 places.", dateLabel: "1 day ago" },
-  { id: "p-tie-blr-angels-1", entityId: "tie-bangalore-angels", author: "Rohit Agarwal", body: "Two deals in diligence this month — a climate hardware seed and a devtools pre-seed.", dateLabel: "3 days ago" },
-  { id: "p-tie-sv-1", entityId: "tie-siliconvalley", author: "Marcus Webb", body: "TiE SV mentor office hours moved to Wednesdays. Sign-up sheet in the chapter portal.", dateLabel: "2 days ago" },
-  { id: "p-tie-dubai-1", entityId: "tie-dubai", author: "Hana Al-Rashid", body: "Gulf founders dinner on the 19th — bring one person who's never been to a TiE event.", dateLabel: "yesterday" },
-
-  { id: "p-isb-1", entityId: "isb", author: "Alumni Office", body: "Homecoming weekend is the first weekend of February. Registration opens Monday.", dateLabel: "3 days ago" },
-  { id: "p-isb-pgp-1", entityId: "isb-pgp", author: "Priya Raman", body: "Putting together a product-vs-consulting panel for the winter reunion. Volunteers?", dateLabel: "1 day ago" },
-  { id: "p-isb-pgp19-1", entityId: "isb-pgp-2019", author: "Vikram Nair", body: "Class of 2019 — five-year reunion planning thread. Hyderabad or Goa?", dateLabel: "2 days ago" },
-  { id: "p-isb-ivi-1", entityId: "isb-ivi", author: "I-Venture Desk", body: "Cohort 9 demo day is on the 28th. Investors, ping us for a seat.", dateLabel: "4 days ago" },
-
-  { id: "p-iitb-1", entityId: "iitb", author: "Rhea Kapoor", body: "Powai meet is on for Nov 8 — bring a +1, first round's on the network.", dateLabel: "2 days ago" },
-  { id: "p-iitb-bay-1", entityId: "iitb-bay", author: "Marcus Webb", body: "Palo Alto dinner on the 22nd — 12 seats, reply to claim one.", dateLabel: "1 day ago" },
-  { id: "p-iitb-blr-1", entityId: "iitb-blr", author: "Divya Menon", body: "Chapter brunch moved to Koramangala — new spot has actual parking.", dateLabel: "4 days ago" },
-
-  { id: "p-stanford-1", entityId: "stanford", author: "Jordan Lee", body: "SF social on Nov 14 at The Battery — alums from every era welcome.", dateLabel: "4 days ago" },
-  { id: "p-stanford-gsb-1", entityId: "stanford-gsb", author: "Emma Whitfield", body: "London GSB drinks — first Thursday of every month, same pub.", dateLabel: "1 week ago" },
-
-  { id: "p-exg-1", entityId: "exgoogle", author: "Meera Pillai", body: "Mixer at Toit on Nov 6 — RSVP so we can hold the back room.", dateLabel: "1 day ago" },
-  { id: "p-blrf-1", entityId: "blr-founders", author: "Vikram Shah", body: "Third Wave on Saturday — come swap fundraising war stories.", dateLabel: "3 days ago" },
-  { id: "p-wip-1", entityId: "women-product", author: "Nandini Rao", body: "Mentorship sign-ups open — 20 pairings this cohort, closing Friday.", dateLabel: "5 days ago" },
-  { id: "p-yc-1", entityId: "yc", author: "Rohit Agarwal", body: "W26 applications close soon — happy to read anyone's application draft.", dateLabel: "6 days ago" },
-  { id: "p-hikers-1", entityId: "club-hikers", author: "Rohan Mehta", body: "Nandi Hills this Saturday, 5am start. Bring a torch.", dateLabel: "2 days ago" },
-  { id: "p-bookclub-1", entityId: "club-bookclub", author: "Tara Bhatt", body: "This month: The Hard Thing About Hard Things. Dinner on the 28th.", dateLabel: "1 week ago" },
-];
 
 // ------------------------------------------------------------ membership
 
@@ -432,6 +402,8 @@ export function membersOfEntity<T extends { name: string }>(people: T[], entityI
 // ----------------------------------------------------- my own membership
 
 const MY_ENTITIES_KEY = "mp_my_entities";
+const MY_PENDING_KEY = "mp_my_pending";
+const MY_ADMIN_KEY = "mp_my_admin";
 
 /** You start out inside a realistic spread — deep in a couple of trees, shallow in others. */
 const DEFAULT_MY_ENTITY_IDS = [
@@ -445,8 +417,8 @@ const DEFAULT_MY_ENTITY_IDS = [
   "exgoogle-founders",
   "blr-founders",
   "yc",
-  "angels",
-  "pm-india",
+  "angel-network",
+  "product-leadership",
   "club-hikers",
 ];
 
@@ -463,9 +435,45 @@ export function getMyEntityIds(): string[] {
 }
 
 export function setMyEntityIds(ids: string[]): void {
+  writeIds(MY_ENTITIES_KEY, ids);
+}
+
+/** Communities you run. Admins see pending join requests and post as the community. */
+const DEFAULT_MY_ADMIN_IDS = ["angel-network"];
+
+export function getMyAdminIds(): string[] {
+  return readIds(MY_ADMIN_KEY, DEFAULT_MY_ADMIN_IDS);
+}
+
+export function setMyAdminIds(ids: string[]): void {
+  writeIds(MY_ADMIN_KEY, ids);
+}
+
+/** Access you've asked for and are waiting on. */
+export function getMyPendingIds(): string[] {
+  return readIds(MY_PENDING_KEY, []);
+}
+
+export function setMyPendingIds(ids: string[]): void {
+  writeIds(MY_PENDING_KEY, ids);
+}
+
+function readIds(key: string, fallback: string[]): string[] {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw == null) return fallback;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeIds(key: string, ids: string[]): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(MY_ENTITIES_KEY, JSON.stringify(ids));
+    window.localStorage.setItem(key, JSON.stringify(ids));
   } catch {
     // Private browsing or storage disabled — membership just won't persist across reloads.
   }
