@@ -19,6 +19,7 @@
   /* Map-layer accents — distinct from the people/connection palette above. */
   --layer-event: #7c5cff;
   --layer-company: #0ea5b8;
+  --layer-institution: #2a5db0;
   --shadow: 0 16px 36px -22px rgba(90, 40, 20, 0.35);
   --shadow-lift: 0 24px 54px -26px rgba(90, 40, 20, 0.5);
 }
@@ -40,6 +41,7 @@
     --status-new: #ff8257;
     --layer-event: #a996ff;
     --layer-company: #4fd4e6;
+    --layer-institution: #7fa8f0;
     --shadow: 0 16px 36px -20px rgba(0, 0, 0, 0.7);
     --shadow-lift: 0 26px 60px -26px rgba(0, 0, 0, 0.85);
   }
@@ -60,6 +62,7 @@
   --status-new: #ff8257;
   --layer-event: #a996ff;
   --layer-company: #4fd4e6;
+  --layer-institution: #7fa8f0;
   --shadow: 0 16px 36px -20px rgba(0, 0, 0, 0.7);
   --shadow-lift: 0 26px 60px -26px rgba(0, 0, 0, 0.85);
 }
@@ -80,6 +83,7 @@
   --color-status-new: var(--status-new);
   --color-layer-event: var(--layer-event);
   --color-layer-company: var(--layer-company);
+  --color-layer-institution: var(--layer-institution);
   --font-sans: var(--font-inter);
 }
 

@@ -7,573 +7,41 @@ import type { MapRef } from "react-map-gl/mapbox";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { ArcLayer } from "@deck.gl/layers";
 import { DROP_DURATION_OPTIONS_MIN, DEFAULT_DROP_DURATION_MIN, MAX_DROP_LABEL } from "@/lib/rules";
-import { avatarUrl } from "@/lib/avatar";
+import {
+  type Profile,
+  type ConnState,
+  type Drop,
+  pinStatusOf,
+  minutesLeft,
+  Pin,
+  DropBadge,
+  ProfileCard,
+  ProfileListRow,
+  CalendarIcon,
+  BriefcaseIcon,
+  InstitutionIcon,
+  EventCard,
+  CompanyCard,
+} from "./MapPrimitives";
 import {
   MOCK_EVENTS,
   MOCK_COMPANIES,
-  mockConnectionCount,
+  MOCK_INSTITUTIONS,
   mockGroupsForName,
   countPeopleAtCompany,
-  type MockEvent,
-  type MockCompany,
+  type MockInstitution,
   type GroupType,
 } from "@/lib/prototypeData";
 import FloatingAccountMenu from "./FloatingAccountMenu";
+import CommunityHub from "./CommunityHub";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 const RADIUS_OPTIONS_KM = [5, 10, 25, 50, 100] as const;
 const DEFAULT_RADIUS_KM = 25;
-const MAX_NOTE = 300;
 /** Shown before geolocation resolves (or if it's denied) so the map is never blank. */
 const DEFAULT_CENTER = { lat: 12.9716, lng: 77.5946 };
 
 type Mode = "nearby" | "network";
-type Drop = { label: string; expiresAt: string };
-type ConnectionStatus = "connected" | "pending" | "none";
-
-type Profile = {
-  id: string;
-  name: string;
-  headline: string | null;
-  company: string | null;
-  bio: string | null;
-  skills: string[];
-  photoUrl: string | null;
-  locationLabel: string | null;
-  linkedinUrl: string | null;
-  instagramUrl: string | null;
-  websiteUrl: string | null;
-  lat: number;
-  lng: number;
-  distanceKm: number;
-  active: boolean;
-  drop: Drop | null;
-  /** Only present in "My Network" mode — /api/nearby doesn't compute these. */
-  connectionStatus?: ConnectionStatus;
-  connectionId?: string | null;
-  /** True if *I* sent the pending request; false if they sent it to me. */
-  mine?: boolean | null;
-};
-
-type ConnState = {
-  status: "connect" | "pending" | "accepted" | "declined";
-  connectionId: string | null;
-  /** A pending request that's waiting on *my* answer, not theirs. */
-  incoming?: boolean;
-};
-
-/** Green/amber/orange status for a pin or avatar, derived from the same ConnState everywhere a person is rendered. */
-function pinStatusOf(c: ConnState | undefined): "connected" | "pending" | "new" {
-  if (c?.status === "accepted") return "connected";
-  if (c?.status === "pending") return "pending";
-  return "new";
-}
-
-function minutesLeft(expiresAt: string, now: number): number {
-  return Math.max(0, Math.round((new Date(expiresAt).getTime() - now) / 60_000));
-}
-
-/** Small distances read naturally to one decimal; continental ones read better rounded with a thousands separator. */
-function formatDistance(km: number): string {
-  return km < 100 ? `~${km.toFixed(1)}km away` : `~${Math.round(km).toLocaleString()}km away`;
-}
-
-function CheckIcon() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5">
-      <path d="M4 12.5l5 5L20 6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function ClockIcon() {
-  return (
-    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3.5 2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-/** Green = connected, amber = a pending request (either direction), orange = not yet connected. */
-type PinStatus = "connected" | "pending" | "new";
-function statusColor(status: PinStatus): string {
-  if (status === "connected") return "var(--good)";
-  if (status === "pending") return "var(--pending)";
-  return "var(--status-new)";
-}
-
-function Pin({
-  photoUrl,
-  seed,
-  me,
-  active,
-  drop,
-  highlighted,
-  status,
-}: {
-  photoUrl: string | null;
-  /** Used to generate a deterministic round avatar when there's no uploaded photo. */
-  seed: string;
-  me?: boolean;
-  active?: boolean;
-  drop?: boolean;
-  highlighted?: boolean;
-  /** Omitted for "me" — my own pin isn't rated against myself. */
-  status?: PinStatus;
-}) {
-  const classes = ["pin", me ? "pin-me" : "", drop ? "pin-drop" : active ? "pin-active" : "", highlighted ? "pin-hover" : ""]
-    .filter(Boolean)
-    .join(" ");
-  const bg = drop ? "var(--gold)" : me ? "var(--brand)" : statusColor(status ?? "new");
-  const size = highlighted ? 46 : 38;
-  const img = photoUrl ?? avatarUrl(seed);
-  return (
-    <div style={{ position: "relative" }}>
-      <div className={classes} style={{ background: bg, width: size, height: size }}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={img} alt="" />
-      </div>
-      {!me && status === "connected" && (
-        <span
-          className="grid place-items-center rounded-full text-white"
-          style={{
-            position: "absolute",
-            bottom: -2,
-            right: -2,
-            width: 15,
-            height: 15,
-            background: "var(--good)",
-            border: "2px solid var(--card)",
-          }}
-          title="Connected"
-        >
-          <CheckIcon />
-        </span>
-      )}
-      {!me && status === "pending" && (
-        <span
-          className="grid place-items-center rounded-full text-white"
-          style={{
-            position: "absolute",
-            bottom: -2,
-            right: -2,
-            width: 15,
-            height: 15,
-            background: "var(--pending)",
-            border: "2px solid var(--card)",
-          }}
-          title="Pending request"
-        >
-          <ClockIcon />
-        </span>
-      )}
-    </div>
-  );
-}
-
-function DropBadge({ drop, now }: { drop: Drop; now: number }) {
-  return (
-    <p className="mt-1 flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: "var(--gold)" }}>
-      <span className="pulse-dot" style={{ background: "var(--gold)" }} />
-      “{drop.label}” · {minutesLeft(drop.expiresAt, now)}m left
-    </p>
-  );
-}
-
-function LinkedInIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M4.98 3.5C4.98 4.88 3.88 6 2.5 6S0 4.88 0 3.5 1.12 1 2.5 1s2.48 1.12 2.48 2.5zM.5 8h4V23h-4V8zm7.5 0h3.8v2.05h.05c.53-1 1.83-2.05 3.77-2.05 4.03 0 4.78 2.65 4.78 6.1V23h-4v-6.9c0-1.65-.03-3.77-2.3-3.77-2.3 0-2.65 1.8-2.65 3.65V23h-4V8z" />
-    </svg>
-  );
-}
-function InstagramIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="3" y="3" width="18" height="18" rx="5" />
-      <circle cx="12" cy="12" r="4" />
-      <circle cx="17.2" cy="6.8" r="0.6" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-function GlobeIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18Z" />
-    </svg>
-  );
-}
-
-function SocialLinks({ p }: { p: Profile }) {
-  if (!p.linkedinUrl && !p.instagramUrl && !p.websiteUrl) return null;
-  const linkCls =
-    "grid h-7 w-7 place-items-center rounded-full border border-[var(--line)] text-[var(--ink-soft)] transition-colors hover:border-[var(--brand)] hover:text-[var(--brand)]";
-  return (
-    <div className="mt-2 flex items-center gap-1.5">
-      {p.linkedinUrl && (
-        <a href={p.linkedinUrl} target="_blank" rel="noopener noreferrer" className={linkCls} title="LinkedIn">
-          <LinkedInIcon />
-        </a>
-      )}
-      {p.instagramUrl && (
-        <a href={p.instagramUrl} target="_blank" rel="noopener noreferrer" className={linkCls} title="Instagram">
-          <InstagramIcon />
-        </a>
-      )}
-      {p.websiteUrl && (
-        <a href={p.websiteUrl} target="_blank" rel="noopener noreferrer" className={linkCls} title="Website">
-          <GlobeIcon />
-        </a>
-      )}
-    </div>
-  );
-}
-
-function ActionButton({
-  p,
-  conn,
-  onConnect,
-  onRespond,
-  canAct,
-  detailed,
-  note,
-  onNoteChange,
-}: {
-  p: Profile;
-  conn: ConnState | undefined;
-  onConnect: (id: string, note?: string) => void;
-  onRespond: (p: Profile, accept: boolean) => void;
-  canAct: boolean;
-  /** The popup card shows a note field before connecting; the compact list row doesn't. */
-  detailed?: boolean;
-  note?: string;
-  onNoteChange?: (v: string) => void;
-}) {
-  if (!canAct) {
-    return (
-      <Link href="/login" className="btn btn-ghost btn-sm w-full">
-        Sign in to connect
-      </Link>
-    );
-  }
-  if (!conn || conn.status === "connect") {
-    if (detailed) {
-      return (
-        <div className="flex flex-col gap-1.5">
-          <input
-            className="input text-[12.5px]"
-            placeholder="Add a note (optional)"
-            value={note ?? ""}
-            onChange={(e) => onNoteChange?.(e.target.value.slice(0, MAX_NOTE))}
-          />
-          <button onClick={() => onConnect(p.id, note)} className="btn btn-primary btn-sm w-full">
-            Connect
-          </button>
-        </div>
-      );
-    }
-    return (
-      <button onClick={() => onConnect(p.id)} className="btn btn-primary btn-sm w-full">
-        Connect
-      </button>
-    );
-  }
-  if (conn.status === "pending" && conn.incoming) {
-    return (
-      <div className="flex gap-1.5">
-        <button onClick={() => onRespond(p, false)} className="btn btn-ghost btn-sm flex-1">
-          Decline
-        </button>
-        <button onClick={() => onRespond(p, true)} className="btn btn-primary btn-sm flex-1">
-          Accept
-        </button>
-      </div>
-    );
-  }
-  if (conn.status === "pending") {
-    return (
-      <button disabled className="btn btn-ghost btn-sm w-full">
-        Request sent
-      </button>
-    );
-  }
-  if (conn.status === "accepted") {
-    return (
-      <Link href={conn.connectionId ? `/messages/${conn.connectionId}` : "/connections"} className="btn btn-primary btn-sm w-full">
-        Message
-      </Link>
-    );
-  }
-  return (
-    <button disabled className="btn btn-ghost btn-sm w-full">
-      Not connected
-    </button>
-  );
-}
-
-/** The rich card shown in a pinned/hovered map popup — name, bio, socials, and the connect/message action. */
-function ProfileCard({
-  p,
-  conn,
-  now,
-  canAct,
-  note,
-  onNoteChange,
-  onConnect,
-  onRespond,
-}: {
-  p: Profile;
-  conn: ConnState | undefined;
-  now: number;
-  canAct: boolean;
-  note: string;
-  onNoteChange: (v: string) => void;
-  onConnect: (id: string, note?: string) => void;
-  onRespond: (p: Profile, accept: boolean) => void;
-}) {
-  const status = pinStatusOf(conn);
-  const groups = mockGroupsForName(p.name);
-  return (
-    <div className="w-72 p-3.5">
-      <div className="flex items-start gap-3">
-        <span
-          className="avatar h-13 w-13 flex-none text-[16px]"
-          style={{ width: 52, height: 52, background: `linear-gradient(135deg, ${statusColor(status)}, var(--brand-deep))` }}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={p.photoUrl ?? avatarUrl(p.id)} alt="" />
-        </span>
-        <div className="min-w-0 flex-1 pt-0.5">
-          <div className="flex items-center gap-1.5">
-            <p className="truncate text-[15px] font-semibold leading-tight">{p.name}</p>
-            {p.active && !p.drop && <span className="pulse-dot flex-none" title="Active recently" />}
-          </div>
-          {p.headline && <p className="truncate text-[12.5px] text-[var(--ink-soft)]">{p.headline}</p>}
-          {p.company && <p className="truncate text-[12px] text-[var(--ink-soft)]">{p.company}</p>}
-          <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">{mockConnectionCount(p.id).toLocaleString()} connections</p>
-        </div>
-      </div>
-
-      {status === "connected" && (
-        <span
-          className="mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"
-          style={{ background: "color-mix(in srgb, var(--good) 14%, var(--card))", color: "var(--good)" }}
-        >
-          <span className="grid h-3 w-3 place-items-center rounded-full text-white" style={{ background: "var(--good)" }}>
-            <CheckIcon />
-          </span>
-          Connected
-        </span>
-      )}
-      {status === "pending" && (
-        <span
-          className="mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"
-          style={{ background: "color-mix(in srgb, var(--pending) 16%, var(--card))", color: "var(--pending)" }}
-        >
-          <span className="grid h-3 w-3 place-items-center rounded-full text-white" style={{ background: "var(--pending)" }}>
-            <ClockIcon />
-          </span>
-          {conn?.incoming ? "Wants to connect" : "Request pending"}
-        </span>
-      )}
-
-      {groups.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {groups.map((g) => (
-            <span
-              key={g.id}
-              className="skill-tag"
-              style={{
-                background: g.type === "alumni" ? "color-mix(in srgb, var(--layer-event) 14%, var(--card))" : undefined,
-                color: g.type === "alumni" ? "var(--layer-event)" : undefined,
-              }}
-            >
-              {g.type === "alumni" ? "🎓" : g.type === "community" ? "👥" : "⛺"} {g.name}
-            </span>
-          ))}
-        </div>
-      )}
-
-      <div className="mt-2 flex items-center gap-1 text-[11.5px] text-[var(--ink-soft)]">
-        {p.locationLabel && <span className="truncate">{p.locationLabel}</span>}
-        {p.locationLabel && <span>·</span>}
-        <span className="flex-none">{formatDistance(p.distanceKm)}</span>
-      </div>
-
-      {p.drop && <DropBadge drop={p.drop} now={now} />}
-
-      {p.bio && <p className="mt-2 line-clamp-3 text-[12.5px] leading-5 text-[var(--ink)]">{p.bio}</p>}
-
-      {p.skills.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {p.skills.slice(0, 6).map((s) => (
-            <span key={s} className="skill-tag">
-              {s}
-            </span>
-          ))}
-        </div>
-      )}
-
-      <SocialLinks p={p} />
-
-      <div className="mt-3 border-t border-[var(--line)] pt-3">
-        <ActionButton p={p} conn={conn} onConnect={onConnect} onRespond={onRespond} canAct={canAct} detailed note={note} onNoteChange={onNoteChange} />
-      </div>
-    </div>
-  );
-}
-
-/** Prototype-only popup for a mock event pin — no RSVP backend yet, so the button just confirms locally. */
-function EventCard({ ev }: { ev: MockEvent }) {
-  const [rsvped, setRsvped] = useState(false);
-  return (
-    <div className="w-64 p-3.5">
-      <span
-        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold"
-        style={{ background: "color-mix(in srgb, var(--layer-event) 14%, var(--card))", color: "var(--layer-event)" }}
-      >
-        <CalendarIcon /> Event
-      </span>
-      <p className="mt-1.5 text-[14.5px] font-semibold leading-tight">{ev.name}</p>
-      <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">{ev.dateLabel}</p>
-      <p className="text-[12px] text-[var(--ink-soft)]">
-        {ev.venue}, {ev.city}
-      </p>
-      <p className="mt-1.5 text-[11.5px] text-[var(--ink-soft)]">{ev.attendeesMock} people attending</p>
-      <button
-        onClick={() => setRsvped((v) => !v)}
-        className={rsvped ? "btn btn-ghost btn-sm mt-3 w-full" : "btn btn-primary btn-sm mt-3 w-full"}
-      >
-        {rsvped ? "You're going ✓" : "RSVP"}
-      </button>
-    </div>
-  );
-}
-
-/** Prototype-only popup for a mock company pin — "people here" is a real count over the loaded nearby list, everything else is mock. */
-function CompanyCard({ co, peopleHere }: { co: MockCompany; peopleHere: number }) {
-  const [following, setFollowing] = useState(false);
-  return (
-    <div className="w-60 p-3.5">
-      <span
-        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold"
-        style={{ background: "color-mix(in srgb, var(--layer-company) 14%, var(--card))", color: "var(--layer-company)" }}
-      >
-        <BriefcaseIcon /> Company
-      </span>
-      <p className="mt-1.5 text-[14.5px] font-semibold leading-tight">{co.name}</p>
-      <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">
-        {co.industry} · {co.city}
-      </p>
-      {peopleHere > 0 && (
-        <p className="mt-1.5 text-[11.5px] text-[var(--ink-soft)]">
-          {peopleHere} {peopleHere === 1 ? "person" : "people"} here in your network view
-        </p>
-      )}
-      <button
-        onClick={() => setFollowing((v) => !v)}
-        className={following ? "btn btn-ghost btn-sm mt-3 w-full" : "btn btn-primary btn-sm mt-3 w-full"}
-      >
-        {following ? "Following ✓" : "Follow"}
-      </button>
-    </div>
-  );
-}
-
-function ProfileListRow({
-  p,
-  conn,
-  hoveredId,
-  now,
-  canAct,
-  onHover,
-  onUnhover,
-  onConnect,
-  onRespond,
-}: {
-  p: Profile;
-  conn: ConnState | undefined;
-  hoveredId: string | null;
-  now: number;
-  canAct: boolean;
-  onHover: (id: string) => void;
-  onUnhover: (id: string) => void;
-  onConnect: (id: string, note?: string) => void;
-  onRespond: (p: Profile, accept: boolean) => void;
-}) {
-  const status = pinStatusOf(conn);
-  const groups = mockGroupsForName(p.name);
-  return (
-    <div
-      onMouseEnter={() => onHover(p.id)}
-      onMouseLeave={() => onUnhover(p.id)}
-      className="card flex cursor-pointer gap-3 p-3 transition-colors"
-      style={hoveredId === p.id ? { borderColor: "var(--brand)", background: "var(--sunk)" } : undefined}
-    >
-      <span className="avatar h-11 w-11 flex-none text-[13px]" style={{ background: `linear-gradient(135deg, ${statusColor(status)}, var(--brand-deep))` }}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={p.photoUrl ?? avatarUrl(p.id)} alt="" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <p className="truncate text-[13.5px] font-semibold leading-tight">{p.name}</p>
-          {p.active && !p.drop && <span className="pulse-dot flex-none" title="Active recently" />}
-          {status === "connected" && (
-            <span
-              className="flex flex-none items-center gap-1 rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold"
-              style={{ background: "color-mix(in srgb, var(--good) 14%, var(--card))", color: "var(--good)" }}
-            >
-              <span className="grid h-2.5 w-2.5 place-items-center rounded-full text-white" style={{ background: "var(--good)" }}>
-                <CheckIcon />
-              </span>
-              Connected
-            </span>
-          )}
-          {status === "pending" && (
-            <span
-              className="flex flex-none items-center gap-1 rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold"
-              style={{ background: "color-mix(in srgb, var(--pending) 16%, var(--card))", color: "var(--pending)" }}
-            >
-              <span className="grid h-2.5 w-2.5 place-items-center rounded-full text-white" style={{ background: "var(--pending)" }}>
-                <ClockIcon />
-              </span>
-              Pending
-            </span>
-          )}
-        </div>
-        {p.headline && <p className="truncate text-[12px] text-[var(--ink-soft)]">{p.headline}</p>}
-        {p.locationLabel && <p className="truncate text-[11px] text-[var(--ink-soft)]">{p.locationLabel}</p>}
-        <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">
-          {formatDistance(p.distanceKm)} · {mockConnectionCount(p.id).toLocaleString()} connections
-        </p>
-        {p.drop && <DropBadge drop={p.drop} now={now} />}
-        {groups.length > 0 && (
-          <div className="mt-1.5 flex flex-wrap gap-1">
-            {groups.map((g) => (
-              <span key={g.id} className="skill-tag">
-                {g.type === "alumni" ? "🎓" : g.type === "community" ? "👥" : "⛺"} {g.name}
-              </span>
-            ))}
-          </div>
-        )}
-        {p.skills.length > 0 && (
-          <div className="mt-1.5 flex flex-wrap gap-1">
-            {p.skills.slice(0, 3).map((s) => (
-              <span key={s} className="skill-tag">
-                {s}
-              </span>
-            ))}
-          </div>
-        )}
-        <div className="mt-2">
-          <ActionButton p={p} conn={conn} onConnect={onConnect} onRespond={onRespond} canAct={canAct} />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function TargetIcon() {
   return (
@@ -595,21 +63,22 @@ function PanelIcon({ open }: { open: boolean }) {
   );
 }
 
-function CalendarIcon() {
+/** Prototype-only popup for a mock institution pin — the one new, genuinely georeferenced layer this round (a campus or an ex-employer's office is a real place; a "community" like Weekend Hikers isn't, so it doesn't get a pin — see CommunityHub). */
+function InstitutionCard({ inst, onOpenHub }: { inst: MockInstitution; onOpenHub: (groupId: string) => void }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="3" y="5" width="18" height="16" rx="3" />
-      <path d="M3 10h18M8 3v4M16 3v4" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function BriefcaseIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="3" y="7" width="18" height="13" rx="2.5" />
-      <path d="M8 7V5.5A2.5 2.5 0 0 1 10.5 3h3A2.5 2.5 0 0 1 16 5.5V7M3 12h18" strokeLinecap="round" />
-    </svg>
+    <div className="w-60 p-3.5">
+      <span
+        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold"
+        style={{ background: "color-mix(in srgb, var(--layer-institution) 14%, var(--card))", color: "var(--layer-institution)" }}
+      >
+        <InstitutionIcon /> {inst.kind === "university" ? "University" : inst.kind === "employer_alumni" ? "Alumni network" : "Institution"}
+      </span>
+      <p className="mt-1.5 text-[14.5px] font-semibold leading-tight">{inst.name}</p>
+      <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">{inst.city}</p>
+      <button onClick={() => onOpenHub(inst.groupId)} className="btn btn-primary btn-sm mt-3 w-full">
+        Open community hub →
+      </button>
+    </div>
   );
 }
 
@@ -674,9 +143,20 @@ export default function MapView({
   const [showPeopleLayer, setShowPeopleLayer] = useState(true);
   const [showEventsLayer, setShowEventsLayer] = useState(true);
   const [showCompaniesLayer, setShowCompaniesLayer] = useState(true);
+  const [showInstitutionsLayer, setShowInstitutionsLayer] = useState(true);
   const [groupFilter, setGroupFilter] = useState<"all" | GroupType>("all");
   const [pinnedExtraId, setPinnedExtraId] = useState<string | null>(null);
   const [hoveredExtraId, setHoveredExtraId] = useState<string | null>(null);
+  /**
+   * Which community's hub is open — set from an institution pin, the "Open
+   * hub" filter button, any group badge chip anywhere in the app, or (as a
+   * lazy initializer, so there's no flash of a closed hub before it opens)
+   * a `?previewGroup=` deep link from the institutions onboarding walkthrough.
+   * `typeof window` guards SSR, where there's no query string to read yet.
+   */
+  const [hubGroupId, setHubGroupId] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("previewGroup")
+  );
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapRef = useRef<MapRef>(null);
 
@@ -971,6 +451,12 @@ export default function MapView({
     return mockGroupsForName(p.name).some((g) => g.type === groupFilter);
   });
   const peopleOnMap = showPeopleLayer ? groupFiltered : [];
+  // The "Open hub" shortcut next to the filter only makes sense once the
+  // filter has actually resolved to one specific group (your alumni network,
+  // or — for community/group — the same one everyone's mock-assigned-first
+  // affiliation of that type would be, same logic as myAlumniGroup above).
+  const filterResolvedGroup =
+    groupFilter === "alumni" ? myAlumniGroup : groupFilter !== "all" ? mockGroupsForName(ownName).find((g) => g.type === groupFilter) : undefined;
 
   // Rendered twice below — as a mobile bottom sheet, and nested directly
   // under the toolbar as a desktop sidebar — so the two responsive layouts
@@ -998,6 +484,7 @@ export default function MapView({
               onUnhover={unhoverProfile}
               onConnect={connectTo}
               onRespond={respondTo}
+              onOpenHub={setHubGroupId}
             />
           ))}
         </div>
@@ -1024,6 +511,7 @@ export default function MapView({
               onUnhover={unhoverProfile}
               onConnect={connectTo}
               onRespond={respondTo}
+              onOpenHub={setHubGroupId}
             />
           ))}
         </div>
@@ -1146,6 +634,7 @@ export default function MapView({
                       onNoteChange={(v) => setNotes((n) => ({ ...n, [p.id]: v }))}
                       onConnect={connectTo}
                       onRespond={respondTo}
+                      onOpenHub={setHubGroupId}
                     />
                   </div>
                 </Popup>
@@ -1154,8 +643,8 @@ export default function MapView({
           );
         })}
 
-        {/* Experience-prototype layers — Events & Companies are mock
-            data (lib/prototypeData.ts), shown only in Nearby mode. */}
+        {/* Experience-prototype layers — Events, Companies & Institutions
+            are mock data (lib/prototypeData.ts), shown only in Nearby mode. */}
         {mode === "nearby" &&
           showEventsLayer &&
           MOCK_EVENTS.map((ev) => {
@@ -1221,6 +710,47 @@ export default function MapView({
                     onClose={() => setPinnedExtraId((cur) => (cur === co.id ? null : cur))}
                   >
                     <CompanyCard co={co} peopleHere={peopleHere} />
+                  </Popup>
+                )}
+              </Marker>
+            );
+          })}
+
+        {mode === "nearby" &&
+          showInstitutionsLayer &&
+          MOCK_INSTITUTIONS.map((inst) => {
+            const open = hoveredExtraId === inst.id || pinnedExtraId === inst.id;
+            return (
+              <Marker key={inst.id} longitude={inst.lng} latitude={inst.lat} anchor="center">
+                <div
+                  className={`layer-pin${open ? " layer-pin-hover" : ""}`}
+                  style={{ background: "var(--layer-institution)" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPinnedExtraId((cur) => (cur === inst.id ? null : inst.id));
+                  }}
+                  onMouseEnter={() => setHoveredExtraId(inst.id)}
+                  onMouseLeave={() => setHoveredExtraId((cur) => (cur === inst.id ? null : cur))}
+                >
+                  <InstitutionIcon />
+                </div>
+                {open && (
+                  <Popup
+                    longitude={inst.lng}
+                    latitude={inst.lat}
+                    anchor="top"
+                    closeButton={false}
+                    closeOnClick={false}
+                    offset={20}
+                    onClose={() => setPinnedExtraId((cur) => (cur === inst.id ? null : cur))}
+                  >
+                    <InstitutionCard
+                      inst={inst}
+                      onOpenHub={(groupId) => {
+                        setPinnedExtraId(null);
+                        setHubGroupId(groupId);
+                      }}
+                    />
                   </Popup>
                 )}
               </Marker>
@@ -1382,9 +912,9 @@ export default function MapView({
 
             {/* Experience prototype — map layers + group filter are mock
                 data (lib/prototypeData.ts), not a real feature yet. Layers
-                are location-based (nearby only); the group filter works in
-                both modes — "my alumni network" is a worldwide thing, not
-                a nearby one. */}
+                are location-based (nearby only); the group filter and the
+                "Open hub" shortcut work in both modes — alumni/communities
+                are worldwide things, not nearby ones. */}
             <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-[var(--line)] pt-2.5">
               {mode === "nearby" && (
                 <>
@@ -1412,6 +942,18 @@ export default function MapView({
                   >
                     <BriefcaseIcon /> Companies
                   </span>
+                  <span
+                    onClick={() => setShowInstitutionsLayer((v) => !v)}
+                    className="chip-toggle"
+                    data-on={showInstitutionsLayer}
+                    style={
+                      showInstitutionsLayer
+                        ? { borderColor: "var(--layer-institution)", background: "color-mix(in srgb, var(--layer-institution) 12%, var(--card))", color: "var(--layer-institution)" }
+                        : undefined
+                    }
+                  >
+                    <InstitutionIcon /> Institutions
+                  </span>
                 </>
               )}
               <select
@@ -1425,6 +967,11 @@ export default function MapView({
                 <option value="community">👥 Communities only</option>
                 <option value="group">⛺ Groups only</option>
               </select>
+              {filterResolvedGroup && (
+                <button onClick={() => setHubGroupId(filterResolvedGroup.id)} className="btn btn-ghost btn-sm">
+                  Open hub →
+                </button>
+              )}
             </div>
 
             {mode === "nearby" && dropOpen && (
@@ -1474,6 +1021,19 @@ export default function MapView({
 
       {/* Mobile only — bottom sheet, pinned to the viewport regardless of the toolbar's height. */}
       <div className="floating-list lg:hidden">{listBody}</div>
+
+      {hubGroupId && (
+        <CommunityHub
+          groupId={hubGroupId}
+          onClose={() => setHubGroupId(null)}
+          people={activeData}
+          conn={conn}
+          onConnect={connectTo}
+          onRespond={respondTo}
+          canAct={canAct}
+          now={now}
+        />
+      )}
     </div>
   );
 }

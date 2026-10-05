@@ -334,15 +334,20 @@ export default function ProfileForm({ initial, wasOnboarded }: { initial: Initia
         )}
       </div>
 
-      <label className="chip-toggle w-fit" data-on={visibleOnMap}>
-        <input
-          type="checkbox"
-          className="hidden"
-          checked={visibleOnMap}
-          onChange={(e) => setVisibleOnMap(e.target.checked)}
-        />
-        {visibleOnMap ? "Visible on the map" : "Hidden from the map"}
-      </label>
+      <div>
+        <label className="chip-toggle w-fit" data-on={visibleOnMap}>
+          <input
+            type="checkbox"
+            className="hidden"
+            checked={visibleOnMap}
+            onChange={(e) => setVisibleOnMap(e.target.checked)}
+          />
+          {visibleOnMap ? "Visible on the map" : "Hidden from the map"}
+        </label>
+        <p className="mt-1.5 text-[12px] text-[var(--ink-soft)]">
+          This is the real switch for whether you show up on the public map at all.
+        </p>
+      </div>
 
       {error && <p className="text-[13px] font-medium text-[var(--warn)]">{error}</p>}
       {saved && <p className="text-[13px] font-medium text-[var(--good)]">Saved.</p>}

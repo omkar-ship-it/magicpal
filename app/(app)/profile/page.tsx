@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/session";
 import { getProfileById } from "@/lib/profiles";
 import ProfileForm from "@/components/ProfileForm";
+import AffiliationsEditor from "@/components/AffiliationsEditor";
 
 export default async function ProfilePage() {
   const user = await getSessionUser();
@@ -36,6 +37,8 @@ export default async function ProfilePage() {
         }}
         wasOnboarded={user.onboarded}
       />
+
+      {user.onboarded && <AffiliationsEditor name={row?.name ?? user.name ?? ""} />}
     </div>
   );
 }

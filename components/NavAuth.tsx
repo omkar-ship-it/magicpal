@@ -29,6 +29,9 @@ export default function NavAuth({ user }: { user: SessionUser | null }) {
       <Link href="/connections" className="text-[var(--ink-soft)] transition-colors hover:text-[var(--ink)]">
         Connections
       </Link>
+      <Link href="/institutions" className="text-[var(--ink-soft)] transition-colors hover:text-[var(--ink)]">
+        For institutions
+      </Link>
       <Link href="/profile" className="flex items-center gap-2">
         <span
           className="avatar h-8 w-8 text-[12px]"
