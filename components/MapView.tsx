@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import Map, { Marker, Popup, NavigationControl, useControl } from "react-map-gl/mapbox";
 import type { MapRef } from "react-map-gl/mapbox";
 import { MapboxOverlay } from "@deck.gl/mapbox";
@@ -16,24 +15,21 @@ import {
   Pin,
   DropBadge,
   ProfileCard,
-  ProfileListRow,
   CalendarIcon,
   BriefcaseIcon,
   InstitutionIcon,
   EventCard,
   CompanyCard,
 } from "./MapPrimitives";
-import { MOCK_EVENTS, MOCK_COMPANIES, countPeopleAtCompany, companyById, eventById } from "@/lib/prototypeData";
+import { MOCK_EVENTS, MOCK_COMPANIES, countPeopleAtCompany } from "@/lib/prototypeData";
 import { MOCK_POSTS, type MockPost, type PostKind } from "@/lib/feedData";
 import {
   HOME_FEED_ID,
   PLACED_ENTITIES,
-  childrenOf,
   descendantIds,
   PUBLIC_ENTITY_ID,
   TOP_NETWORKS,
   ancestorsOf,
-  entityById,
   entityIdsForName,
   expandMembership,
   getMyAdminIds,
@@ -48,8 +44,8 @@ import FloatingAccountMenu from "./FloatingAccountMenu";
 import EntityPanel from "./EntityPanel";
 import EventPanel from "./EventPanel";
 import CompanyPanel from "./CompanyPanel";
-import WindowDock, { type DockTab, type PanelSize } from "./WindowDock";
-import NetworkRail from "./NetworkRail";
+import DockBar, { type Section } from "./DockBar";
+import SectionPanel, { type PanelSize } from "./SectionPanel";
 import type { CheckoutResult } from "./Checkout";
 import ChatWindow from "./ChatWindow";
 
@@ -98,31 +94,9 @@ const ROLE_FILTERS: Array<{ id: string; label: string; emoji: string; match: (p:
   { id: "hiring", label: "Hiring", emoji: "📣", match: (p) => p.skills.some((s) => /hiring/i.test(s)) || /hiring/i.test(`${p.bio ?? ""}`) },
 ];
 
-/** One open window over the map. Entity tabs carry their own drill-down stack. */
-type OpenTab =
-  | { key: string; kind: "entity"; stack: string[] }
-  | { key: string; kind: "event" | "company"; id: string }
-  | { key: string; kind: "chat"; id: string; name: string };
-
-function TargetIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="7" />
-      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
-      <path d="M12 2v3M12 19v3M2 12h3M19 12h3" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function PanelIcon({ open }: { open: boolean }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="3" y="4" width="18" height="16" rx="3" />
-      <path d="M9 4v16" />
-      {open ? <path d="M14 10l-2 2 2 2" strokeLinecap="round" strokeLinejoin="round" /> : <path d="M12 10l2 2-2 2" strokeLinecap="round" strokeLinejoin="round" />}
-    </svg>
-  );
-}
+/** Each dock section keeps its own drill-down stack, so switching sections doesn't lose your place. */
+type Stacks = Record<Section, string[]>;
+const EMPTY_STACKS: Stacks = { network: [], chats: [], events: [], institutions: [], companies: [] };
 
 /** The popup for any node with a real place — a campus, an office, or a TiE chapter city. Nodes without one are reached from the selector or anyone's profile chips. */
 function NetworkCard({ net, onOpen }: { net: MockEntity; onOpen: (id: string) => void }) {
@@ -178,7 +152,6 @@ export default function MapView({
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [worldProfiles, setWorldProfiles] = useState<Profile[]>([]);
   const [worldLoading, setWorldLoading] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [locating, setLocating] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Array<{ label: string; lat: number; lng: number }>>([]);
@@ -199,20 +172,19 @@ export default function MapView({
   const [mapReady, setMapReady] = useState(false);
   /** The browser's live GPS/network fix — when available, this is "you", not the saved profile pin. */
   const [liveLocation, setLiveLocation] = useState<{ lat: number; lng: number } | null>(null);
-  /** Desktop-only — hides the left list panel so the map can have the full width. */
-  const [listCollapsed, setListCollapsed] = useState(false);
   // --- Experience prototype only, below: layers + groups are mock/hardcoded
   // (see lib/prototypeData.ts) — no backend behind any of these yet.
-  const [showPeopleLayer, setShowPeopleLayer] = useState(true);
-  const [showEventsLayer, setShowEventsLayer] = useState(true);
-  const [showCompaniesLayer, setShowCompaniesLayer] = useState(true);
-  const [showInstitutionsLayer, setShowInstitutionsLayer] = useState(true);
+  // What's on the map follows the open section — exactly one overlay at a
+  // time, instead of four toggles parked on screen.
   /** null = the all-encompassing Public Network. Otherwise exactly one network at a time. */
   const [selectedNetworkId, setSelectedNetworkId] = useState<string | null>(null);
   const [myEntityIds, setMyEntityIdsState] = useState<string[]>(() => getMyEntityIds());
-  const [dockSize, setDockSize] = useState<PanelSize>("side");
-  const [dockWidth, setDockWidth] = useState(460);
-  const [dockCollapsed, setDockCollapsed] = useState(false);
+  const [panelSize, setPanelSize] = useState<PanelSize>("side");
+  const [panelWidth, setPanelWidth] = useState(460);
+  /** Default state is a bare map: the dock is a single icon and nothing is open. */
+  const [dockOpen, setDockOpen] = useState(false);
+  const [section, setSection] = useState<Section | null>(null);
+  const [stacks, setStacks] = useState<Stacks>(EMPTY_STACKS);
   /** Paid things you've bought this session — community memberships and event tickets. */
   const [paidMemberships, setPaidMemberships] = useState<Record<string, CheckoutResult>>({});
   const [registrations, setRegistrations] = useState<Record<string, CheckoutResult>>({});
@@ -234,21 +206,6 @@ export default function MapView({
    * closing step) as a lazy initializer, so there's no flash of a closed
    * panel first. `typeof window` guards SSR.
    */
-  /**
-   * Everything open over the map, as tabs. An entity tab keeps its own
-   * drill-down stack so Back walks up the tree within that tab; event and
-   * company tabs are single pages. Closing them all returns to the map.
-   */
-  const [tabs, setTabs] = useState<OpenTab[]>(() => {
-    if (typeof window === "undefined") return [];
-    const qp = new URLSearchParams(window.location.search).get("previewGroup");
-    return qp ? [{ key: `entity:${qp}`, kind: "entity", stack: [qp] }] : [];
-  });
-  const [activeTabKey, setActiveTabKey] = useState<string>(() => {
-    if (typeof window === "undefined") return "";
-    const qp = new URLSearchParams(window.location.search).get("previewGroup");
-    return qp ? `entity:${qp}` : "";
-  });
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapRef = useRef<MapRef>(null);
 
@@ -330,7 +287,6 @@ export default function MapView({
     if (mode !== "nearby") return;
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (!cancelled) setLoading(true);
     });
     fetch(`/api/nearby?lat=${center.lat}&lng=${center.lng}&radiusKm=${radiusKm}`)
       .then((r) => r.json())
@@ -341,7 +297,6 @@ export default function MapView({
         seedConnFromProfiles(list);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -352,7 +307,7 @@ export default function MapView({
   // "view the alumni all over the world" needs the actual worldwide roster,
   // not whatever happens to be within the current street-level radius.
   useEffect(() => {
-    if (mode !== "network" && tabs.length === 0) return;
+    if (mode !== "network" && !section) return;
     let cancelled = false;
     Promise.resolve().then(() => {
       if (!cancelled) setWorldLoading(true);
@@ -372,7 +327,7 @@ export default function MapView({
     return () => {
       cancelled = true;
     };
-  }, [mode, tabs.length, ownLat, ownLng, seedConnFromProfiles]);
+  }, [mode, section, ownLat, ownLng, seedConnFromProfiles]);
 
   // Nearby mode flies back to a street-level view of `center`; network mode
   // zooms out and fits every connection (plus your own pin) into frame —
@@ -510,9 +465,6 @@ export default function MapView({
     setHoveredId((cur) => (cur === id ? null : cur));
   }, []);
 
-  const activeCount = profiles.filter((p) => p.active || p.drop).length;
-  const dropCount = profiles.filter((p) => p.drop).length;
-
   const arcLayers =
     mode === "network" && ownLat != null && ownLng != null && connectedProfiles.length > 0
       ? [
@@ -534,7 +486,6 @@ export default function MapView({
   // hash plus a curated roster, not real data. Selecting a network narrows
   // the map to just that network's people, anywhere in the world; "All
   // networks" is the Public Network — everyone, no membership needed.
-  const selectedNetwork = selectedNetworkId ? entityById(selectedNetworkId) : undefined;
   // Selecting a network narrows the map to everyone beneath it — a member of
   // TiE Bangalore counts as a member of TiE Global, so picking the parent
   // shows the whole tree's people.
@@ -551,56 +502,36 @@ export default function MapView({
   const networkFiltered = (selectedNetworkId ? activeData.filter((p) => entityIdsForName(p.name).has(selectedNetworkId)) : activeData).filter(
     role.match
   );
-  const peopleOnMap = showPeopleLayer ? networkFiltered : [];
+  const showEventsLayer = section === "events";
+  const showCompaniesLayer = section === "companies";
+  const showInstitutionsLayer = section === "institutions" || section === "network";
+  const peopleOnMap = section === "events" || section === "companies" ? [] : networkFiltered;
   const myMembership = expandMembership(myEntityIds);
   const myNetworks = TOP_NETWORKS.filter((n) => myMembership.has(n.id));
 
-  const activeTab = tabs.find((t) => t.key === activeTabKey) ?? tabs[tabs.length - 1];
+  const stack = section ? stacks[section] : [];
 
-  /** Opening something that's already a tab focuses it rather than duplicating it. */
-  function openTab(tab: OpenTab) {
-    setTabs((cur) => (cur.some((t) => t.key === tab.key) ? cur : [...cur, tab]));
-    setActiveTabKey(tab.key);
-    setDockCollapsed(false);
+  function openSection(next: Section, id?: string) {
+    setDockOpen(true);
+    setSection(next);
+    if (id) setStacks((cur) => ({ ...cur, [next]: [id] }));
   }
 
-  function openEntity(id: string) {
-    // Drilling down inside the focused entity tab pushes onto its own stack;
-    // otherwise it's a new tab.
-    const current = tabs.find((t) => t.key === activeTabKey);
-    if (current?.kind === "entity" && current.stack[current.stack.length - 1] !== id) {
-      setTabs((cur) => cur.map((t) => (t.key === current.key && t.kind === "entity" ? { ...t, stack: [...t.stack, id] } : t)));
-      return;
-    }
-    openTab({ key: `entity:${id}`, kind: "entity", stack: [id] });
+  function pushInSection(id: string) {
+    if (!section) return;
+    setStacks((cur) => ({ ...cur, [section]: [...cur[section], id] }));
   }
 
-  /** Opens a fresh tab for an entity even if one is already focused — used by pins and the toolbar. */
-  function openEntityTab(id: string) {
-    openTab({ key: `entity:${id}`, kind: "entity", stack: [id] });
+  function popInSection() {
+    if (!section) return;
+    setStacks((cur) => ({ ...cur, [section]: cur[section].slice(0, -1) }));
   }
 
-  function openEvent(id: string) {
-    openTab({ key: `event:${id}`, kind: "event", id });
-  }
-
-  function openCompany(id: string) {
-    openTab({ key: `company:${id}`, kind: "company", id });
-  }
-
-  function closeTab(key: string) {
-    setTabs((cur) => {
-      const next = cur.filter((t) => t.key !== key);
-      if (key === activeTabKey) setActiveTabKey(next[next.length - 1]?.key ?? "");
-      return next;
-    });
-  }
-
-  function backInTab() {
-    setTabs((cur) =>
-      cur.map((t) => (t.key === activeTabKey && t.kind === "entity" && t.stack.length > 1 ? { ...t, stack: t.stack.slice(0, -1) } : t))
-    );
-  }
+  /** Drilling from inside a network page (a chapter, a class) stays in the Network section. */
+  const openEntity = (id: string) => (section === "network" ? pushInSection(id) : openSection("network", id));
+  const openEntityTab = (id: string) => openSection("network", id);
+  const openEvent = (id: string) => openSection("events", id);
+  const openCompany = (id: string) => openSection("companies", id);
 
   /** Joining a node joins its whole ancestry — you can't be in Class of 2019 without being in PGP and ISB. */
   function joinEntity(id: string, paid?: CheckoutResult) {
@@ -702,102 +633,202 @@ export default function MapView({
     return conn[p.id];
   }
 
+  const peopleControls = (
+    <div className="card mb-3 p-3">
+      <p className="label">People on the map</p>
+      <div className="flex flex-wrap gap-1.5">
+        {ROLE_FILTERS.map((r) => (
+          <button
+            key={r.id}
+            onClick={() => setRoleFilter(r.id)}
+            className="pill"
+            style={
+              roleFilter === r.id
+                ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)", border: "1px solid var(--brand)" }
+                : { background: "var(--sunk)", color: "var(--ink-soft)", border: "1px solid transparent" }
+            }
+          >
+            {r.emoji} {r.label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-none items-center gap-0.5 rounded-full p-0.5" style={{ background: "var(--sunk)" }}>
+          <button
+            onClick={() => setMode("nearby")}
+            className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
+            style={mode === "nearby" ? { background: "var(--card)", boxShadow: "var(--shadow)" } : { color: "var(--ink-soft)" }}
+          >
+            Near me
+          </button>
+          <button
+            onClick={() => setMode("network")}
+            className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
+            style={mode === "network" ? { background: "var(--card)", boxShadow: "var(--shadow)" } : { color: "var(--ink-soft)" }}
+          >
+            Worldwide
+          </button>
+        </div>
+        {mode === "nearby" && (
+          <>
+            <select className="chip-select" value={radiusKm} onChange={(e) => setRadiusKm(Number(e.target.value))}>
+              {RADIUS_OPTIONS_KM.map((km) => (
+                <option key={km} value={km}>
+                  {km} km
+                </option>
+              ))}
+            </select>
+            <button onClick={useMyLocation} disabled={locating} className="btn btn-ghost btn-sm">
+              {locating ? "Locating…" : "Use my location"}
+            </button>
+          </>
+        )}
+        <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
+          {peopleOnMap.length} shown
+        </span>
+      </div>
+
+      {canAct && ownVisible && ownLat != null && (
+        <div className="mt-2.5 border-t border-[var(--line)] pt-2.5">
+          {myDrop ? (
+            <span className="pill" style={{ background: "color-mix(in srgb, var(--gold) 16%, var(--card))", color: "var(--gold)" }}>
+              🟡 “{myDrop.label}” · {minutesLeft(myDrop.expiresAt, now)}m
+              <button onClick={endDrop} disabled={dropBusy} className="ml-1 font-bold underline">
+                end
+              </button>
+            </span>
+          ) : dropOpen ? (
+            <form onSubmit={submitDrop} className="flex flex-wrap items-center gap-2">
+              <input
+                className="input min-w-[160px] flex-1 text-[12.5px]"
+                placeholder="At Third Wave, open to chat…"
+                value={dropLabel}
+                onChange={(e) => setDropLabel(e.target.value.slice(0, MAX_DROP_LABEL))}
+                autoFocus
+                required
+              />
+              <select className="chip-select" value={dropDuration} onChange={(e) => setDropDuration(Number(e.target.value))}>
+                {DROP_DURATION_OPTIONS_MIN.map((m) => (
+                  <option key={m} value={m}>
+                    {m}m
+                  </option>
+                ))}
+              </select>
+              <button type="submit" disabled={dropBusy} className="btn btn-primary btn-sm">
+                Go live
+              </button>
+              <button type="button" onClick={() => setDropOpen(false)} className="btn btn-ghost btn-sm">
+                Cancel
+              </button>
+              {dropError && <p className="w-full text-[12px] font-medium text-[var(--warn)]">{dropError}</p>}
+            </form>
+          ) : (
+            <button onClick={() => setDropOpen(true)} className="btn btn-primary btn-sm">
+              Drop a pin ✦
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  /**
+   * Whatever's drilled into within the open section. Every section's detail
+   * is one of four pages, so there's one panel and no second window system.
+   */
+  function sectionDetail() {
+    const id = stack[stack.length - 1];
+    if (!section || !id) return null;
+
+    if (section === "chats") {
+      const p = [...worldProfiles, ...profiles].find((x) => x.id === id);
+      return <ChatWindow key={id} name={p?.name ?? "Chat"} photoUrl={p?.photoUrl ?? null} headline={p?.headline ?? null} wide={panelSize !== "side"} />;
+    }
+
+    if (section === "events") {
+      return (
+        <EventPanel
+          eventId={id}
+          people={worldProfiles}
+          wide={panelSize !== "side"}
+          onOpenEntity={openEntityTab}
+          registration={registrations[id]}
+          onRegistered={(eid, r) => setRegistrations((cur) => ({ ...cur, [eid]: r }))}
+          conn={panelConn}
+          onConnect={connectTo}
+          onRespond={respondTo}
+          onMessage={openChat}
+          canAct={canAct}
+          now={now}
+        />
+      );
+    }
+
+    if (section === "companies") {
+      return (
+        <CompanyPanel
+          companyId={id}
+          people={worldProfiles}
+          wide={panelSize !== "side"}
+          conn={panelConn}
+          onConnect={connectTo}
+          onRespond={respondTo}
+          onMessage={openChat}
+          onOpenEntity={openEntityTab}
+          canAct={canAct}
+          now={now}
+        />
+      );
+    }
+
+    // network and institutions are both nodes in the same tree
+    return (
+      <EntityPanel
+        entityId={id}
+        depth={stack.length}
+        people={worldProfiles}
+        loading={worldLoading && worldProfiles.length === 0}
+        posts={postsFor(id)}
+        onPost={addPost}
+        likes={likes}
+        comments={extraComments}
+        votes={votes}
+        onToggleLike={toggleLike}
+        onComment={addComment}
+        onVote={castVote}
+        isAdmin={isAdminOf(id)}
+        isPending={myPendingIds.includes(id)}
+        onRequestAccess={requestAccess}
+        isMember={isMemberOf(id)}
+        membershipTier={paidMemberships[id]}
+        onJoin={joinEntity}
+        onLeave={leaveEntity}
+        onOpen={openEntity}
+        onOpenEvent={openEvent}
+        onBack={popInSection}
+        wide={panelSize !== "side"}
+        conn={panelConn}
+        onConnect={connectTo}
+        onRespond={respondTo}
+        onMessage={openChat}
+        canAct={canAct}
+        now={now}
+      />
+    );
+  }
+
   /** Connection status for everyone in the loaded roster, keyed by id — what the panels need. */
   const panelConn: Record<string, ConnState> = Object.fromEntries(
     worldProfiles.map((p) => [p.id, connFor(p)]).filter((entry): entry is [string, ConnState] => Boolean(entry[1]))
   );
 
   function openChat(p: Profile) {
-    openTab({ key: `chat:${p.id}`, kind: "chat", id: p.id, name: p.name });
+    openSection("chats", p.id);
   }
 
   // Rendered twice below — as a mobile bottom sheet, and nested directly
   // under the toolbar as a desktop sidebar — so the two responsive layouts
   // don't duplicate the actual list markup, just where it's mounted.
-  const roleChips = (
-    <div className="mb-2.5 flex flex-wrap gap-1.5 border-b border-[var(--line)] pb-2.5">
-      {ROLE_FILTERS.map((r) => (
-        <button
-          key={r.id}
-          onClick={() => setRoleFilter(r.id)}
-          className="pill"
-          style={
-            roleFilter === r.id
-              ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)", border: "1px solid var(--brand)" }
-              : { background: "var(--sunk)", color: "var(--ink-soft)", border: "1px solid transparent" }
-          }
-        >
-          {r.emoji} {r.label}
-        </button>
-      ))}
-    </div>
-  );
-
-  const listBody =
-    mode === "nearby" ? (
-      <>
-        {roleChips}
-        {loading && profiles.length === 0 && <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">Loading nearby people…</p>}
-        {!loading && profiles.length === 0 && (
-          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one visible within {radiusKm}km yet. Try a wider radius.</p>
-        )}
-        {!loading && profiles.length > 0 && networkFiltered.length === 0 && (
-          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">
-            No {roleFilter === "all" ? "one" : role.label.toLowerCase()} nearby in {selectedNetwork?.name ?? "this view"} yet.
-          </p>
-        )}
-        <div className="flex flex-col gap-2.5">
-          {networkFiltered.map((p) => (
-            <ProfileListRow
-              key={p.id}
-              p={p}
-              conn={connFor(p)}
-              hoveredId={hoveredId}
-              now={now}
-              canAct={canAct}
-              onHover={hoverProfile}
-              onUnhover={unhoverProfile}
-              onConnect={connectTo}
-              onRespond={respondTo}
-              onOpenEntity={openEntity}
-              onMessage={openChat}
-            />
-          ))}
-        </div>
-      </>
-    ) : (
-      <>
-        {roleChips}
-        {worldLoading && worldProfiles.length === 0 && <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">Loading the world…</p>}
-        {!worldLoading && worldProfiles.length === 0 && (
-          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one else has joined yet — check back soon.</p>
-        )}
-        {!worldLoading && worldProfiles.length > 0 && networkFiltered.length === 0 && (
-          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">
-            No {roleFilter === "all" ? "one" : role.label.toLowerCase()} in {selectedNetwork?.name ?? "this view"} yet.
-          </p>
-        )}
-        <div className="flex flex-col gap-2.5">
-          {networkFiltered.map((p) => (
-            <ProfileListRow
-              key={p.id}
-              p={p}
-              conn={connFor(p)}
-              hoveredId={hoveredId}
-              now={now}
-              canAct={canAct}
-              onHover={hoverProfile}
-              onUnhover={unhoverProfile}
-              onConnect={connectTo}
-              onRespond={respondTo}
-              onOpenEntity={openEntity}
-              onMessage={openChat}
-            />
-          ))}
-        </div>
-      </>
-    );
-
   // Nearby shows the live "you are here" fix; My Network keeps the stable
   // profile/home-base location, since arcs and distances in that view are
   // about your established base, not wherever you happen to be this second.
@@ -926,8 +957,7 @@ export default function MapView({
 
         {/* Experience-prototype layers — Events, Companies & Institutions
             are mock data (lib/prototypeData.ts), shown only in Nearby mode. */}
-        {mode === "nearby" &&
-          showEventsLayer &&
+        {showEventsLayer &&
           visibleEvents.map((ev) => {
             const open = hoveredExtraId === ev.id || pinnedExtraId === ev.id;
             return (
@@ -967,9 +997,7 @@ export default function MapView({
             );
           })}
 
-        {mode === "nearby" &&
-          showCompaniesLayer &&
-          !selectedNetworkId &&
+        {showCompaniesLayer &&
           MOCK_COMPANIES.map((co) => {
             const open = hoveredExtraId === co.id || pinnedExtraId === co.id;
             const peopleHere = countPeopleAtCompany(profiles, co.name);
@@ -1011,8 +1039,7 @@ export default function MapView({
             );
           })}
 
-        {mode === "nearby" &&
-          showInstitutionsLayer &&
+        {showInstitutionsLayer &&
           visiblePlaces.map((net) => {
             const open = hoveredExtraId === net.id || pinnedExtraId === net.id;
             const place = net.place!;
@@ -1054,428 +1081,48 @@ export default function MapView({
           })}
       </Map>
 
-      <NetworkRail
-        networks={myNetworks}
-        selectedId={selectedNetworkId}
-        adminIds={myAdminIds}
-        onSelect={setSelectedNetworkId}
-        onOpenHome={() => openEntityTab(HOME_FEED_ID)}
-      />
-
-      {/* ---------------------------------------------------- floating chrome */}
-      <div className="pointer-events-none absolute inset-x-3 top-3 z-[1000] flex items-start justify-between gap-3 sm:inset-x-5 sm:top-5 lg:left-[80px]">
-        <div className="flex w-full max-w-[600px] flex-col gap-3">
-          <div className="floating-panel pointer-events-auto p-3">
-            <div className="flex items-center gap-2">
-              <span
-                className="grid h-8 w-8 flex-none place-items-center rounded-full text-[15px] text-white"
-                style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-deep))" }}
-              >
-                ✦
-              </span>
-
-              <div className="flex flex-none items-center gap-0.5 rounded-full p-0.5" style={{ background: "var(--sunk)" }}>
-                <button
-                  onClick={() => setMode("nearby")}
-                  className="rounded-full px-3 py-1.5 text-[12px] font-semibold transition-colors"
-                  style={mode === "nearby" ? { background: "var(--card)", boxShadow: "var(--shadow)" } : { color: "var(--ink-soft)" }}
-                >
-                  Nearby
-                </button>
-                <button
-                  onClick={() => setMode("network")}
-                  className="rounded-full px-3 py-1.5 text-[12px] font-semibold transition-colors"
-                  style={mode === "network" ? { background: "var(--card)", boxShadow: "var(--shadow)" } : { color: "var(--ink-soft)" }}
-                >
-                  My Network
-                </button>
-              </div>
-
-              {mode === "nearby" && (
-                <div className="relative min-w-0 flex-1">
-                  <svg
-                    className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--ink-soft)]"
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                  >
-                    <circle cx="11" cy="11" r="7" />
-                    <path d="m20 20-3.5-3.5" strokeLinecap="round" />
-                  </svg>
-                  <input
-                    className="input pl-9"
-                    placeholder="Search a city or neighbourhood…"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                  />
-                  {results.length > 0 && (
-                    <div className="card absolute z-10 mt-1 w-full overflow-hidden p-1">
-                      {results.map((r) => (
-                        <button
-                          key={`${r.lat},${r.lng}`}
-                          type="button"
-                          onClick={() => {
-                            setCenter({ lat: r.lat, lng: r.lng });
-                            setQuery(r.label);
-                            setResults([]);
-                          }}
-                          className="block w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-[var(--sunk)]"
-                        >
-                          {r.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {mode === "nearby" && (
-                <button
-                  onClick={useMyLocation}
-                  disabled={locating}
-                  title="Use my location"
-                  className="grid h-9 w-9 flex-none place-items-center rounded-full border border-[var(--line)] text-[var(--ink-soft)] transition-colors hover:border-[var(--brand)] hover:text-[var(--brand)]"
-                >
-                  <TargetIcon />
-                </button>
-              )}
-
-              <button
-                onClick={() => setListCollapsed((c) => !c)}
-                title={listCollapsed ? "Show the people list" : "Hide the people list"}
-                className="sidebar-collapse-toggle hidden lg:grid"
-              >
-                <PanelIcon open={!listCollapsed} />
-              </button>
-            </div>
-
-            {mode === "nearby" ? (
-              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                <select className="chip-select" value={radiusKm} onChange={(e) => setRadiusKm(Number(e.target.value))}>
-                  {RADIUS_OPTIONS_KM.map((km) => (
-                    <option key={km} value={km}>
-                      {km} km
-                    </option>
-                  ))}
-                </select>
-
-                {activeCount > 0 && (
-                  <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
-                    <span className="pulse-dot" />
-                    {activeCount} active{dropCount > 0 ? ` · ${dropCount} open to chat` : ""}
-                  </span>
-                )}
-
-                {!canAct ? (
-                  <Link href="/login" className="btn btn-primary btn-sm">
-                    Sign in to drop a pin ✦
-                  </Link>
-                ) : ownVisible && ownLat != null ? (
-                  myDrop ? (
-                    <span className="pill" style={{ background: "color-mix(in srgb, var(--gold) 16%, var(--card))", color: "var(--gold)" }}>
-                      🟡 “{myDrop.label}” · {minutesLeft(myDrop.expiresAt, now)}m
-                      <button onClick={endDrop} disabled={dropBusy} className="ml-1 font-bold underline">
-                        end
-                      </button>
-                    </span>
-                  ) : !dropOpen ? (
-                    <button onClick={() => setDropOpen(true)} className="btn btn-primary btn-sm">
-                      Drop a pin ✦
-                    </button>
-                  ) : null
-                ) : (
-                  <Link href="/profile" className="text-[12px] text-[var(--ink-soft)] underline">
-                    Set a location to drop a pin
-                  </Link>
-                )}
-              </div>
-            ) : (
-              <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-                <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
-                  🌍 {worldProfiles.length} worldwide · {connectedProfiles.length} connected
-                </span>
-                <span className="flex items-center gap-3 text-[11px] text-[var(--ink-soft)]">
-                  <span className="flex items-center gap-1.5">
-                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--good)" }} />
-                    connected
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--pending)" }} />
-                    pending
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--status-new)" }} />
-                    not yet
-                  </span>
-                </span>
-              </div>
-            )}
-
-            {/* Experience prototype — map layers + group filter are mock
-                data (lib/prototypeData.ts), not a real feature yet. Layers
-                are location-based (nearby only); the group filter and the
-                "Open hub" shortcut work in both modes — alumni/communities
-                are worldwide things, not nearby ones. */}
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-[var(--line)] pt-2.5">
-              {mode === "nearby" && (
-                <>
-                  <span
-                    onClick={() => setShowPeopleLayer((v) => !v)}
-                    className="chip-toggle"
-                    data-on={showPeopleLayer}
-                    style={showPeopleLayer ? { borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" } : undefined}
-                  >
-                    👤 People
-                  </span>
-                  <span
-                    onClick={() => setShowEventsLayer((v) => !v)}
-                    className="chip-toggle"
-                    data-on={showEventsLayer}
-                    style={showEventsLayer ? { borderColor: "var(--layer-event)", background: "color-mix(in srgb, var(--layer-event) 12%, var(--card))", color: "var(--layer-event)" } : undefined}
-                  >
-                    <CalendarIcon /> Events
-                  </span>
-                  <span
-                    onClick={() => setShowCompaniesLayer((v) => !v)}
-                    className="chip-toggle"
-                    data-on={showCompaniesLayer}
-                    style={showCompaniesLayer ? { borderColor: "var(--layer-company)", background: "color-mix(in srgb, var(--layer-company) 12%, var(--card))", color: "var(--layer-company)" } : undefined}
-                  >
-                    <BriefcaseIcon /> Companies
-                  </span>
-                  <span
-                    onClick={() => setShowInstitutionsLayer((v) => !v)}
-                    className="chip-toggle"
-                    data-on={showInstitutionsLayer}
-                    style={
-                      showInstitutionsLayer
-                        ? { borderColor: "var(--layer-institution)", background: "color-mix(in srgb, var(--layer-institution) 12%, var(--card))", color: "var(--layer-institution)" }
-                        : undefined
-                    }
-                  >
-                    <InstitutionIcon /> Institutions
-                  </span>
-                </>
-              )}
-              {/* mobile has no rail, so it keeps a compact switcher */}
-              <select
-                className="chip-select lg:hidden"
-                value={selectedNetworkId ?? "all"}
-                onChange={(e) => setSelectedNetworkId(e.target.value === "all" ? null : e.target.value)}
-                title="Show one network at a time, or the whole public network"
-              >
-                <option value="all">🌍 All networks — Public</option>
-                {myNetworks.map((n) => (
-                  <option key={n.id} value={n.id}>
-                    {n.emoji} {n.name}
-                  </option>
-                ))}
-              </select>
-
-              <button onClick={() => openEntityTab(HOME_FEED_ID)} className="btn btn-primary btn-sm">
-                Your feed
-              </button>
-            </div>
-
-            {/* Context strip — only when you're inside a network. The modules
-                here are adaptive: what's on the map changes with the network,
-                so the counts are that network's, not the whole map's. */}
-            {selectedNetwork && (
-              <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-[var(--line)] pt-2.5">
-                <span className="flex items-center gap-1.5 text-[13px] font-semibold">
-                  <span className="text-[15px]">{selectedNetwork.emoji}</span>
-                  {selectedNetwork.name}
-                </span>
-                <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
-                  {selectedNetwork.memberCountMock.toLocaleString()} members
-                </span>
-                {isAdminOf(selectedNetwork.id) && (
-                  <span className="pill" style={{ background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)" }}>
-                    ⭐ You run this
-                  </span>
-                )}
-
-                <span className="mx-0.5 h-5 w-px" style={{ background: "var(--line)" }} />
-
-                <button onClick={() => openEntityTab(selectedNetwork.id)} className="btn btn-ghost btn-sm">
-                  📰 Feed
-                </button>
-                {childrenOf(selectedNetwork.id).length > 0 && (
-                  <button onClick={() => openEntityTab(selectedNetwork.id)} className="btn btn-ghost btn-sm">
-                    {selectedNetwork.emoji} {selectedNetwork.childLabel ?? "Groups"} ({childrenOf(selectedNetwork.id).length})
-                  </button>
-                )}
-                <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
-                  📅 {visibleEvents.length} events
-                </span>
-                <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
-                  📍 {visiblePlaces.length} on the map
-                </span>
-                <button onClick={() => setSelectedNetworkId(null)} className="text-[12px] text-[var(--ink-soft)] underline">
-                  Back to public
-                </button>
-              </div>
-            )}
-
-            {mode === "nearby" && dropOpen && (
-              <form onSubmit={submitDrop} className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--line)] pt-2.5">
-                <input
-                  className="input min-w-[180px] flex-1"
-                  placeholder="At Third Wave, open to chat…"
-                  value={dropLabel}
-                  onChange={(e) => setDropLabel(e.target.value.slice(0, MAX_DROP_LABEL))}
-                  autoFocus
-                  required
-                />
-                <select className="chip-select" value={dropDuration} onChange={(e) => setDropDuration(Number(e.target.value))}>
-                  {DROP_DURATION_OPTIONS_MIN.map((m) => (
-                    <option key={m} value={m}>
-                      {m}m
-                    </option>
-                  ))}
-                </select>
-                <button type="submit" disabled={dropBusy} className="btn btn-primary btn-sm">
-                  Go live
-                </button>
-                <button type="button" onClick={() => setDropOpen(false)} className="btn btn-ghost btn-sm">
-                  Cancel
-                </button>
-                {dropError && <p className="w-full text-[12px] font-medium text-[var(--warn)]">{dropError}</p>}
-              </form>
-            )}
-          </div>
-
-          {/* Desktop only — nested directly under the toolbar it belongs to,
-              not independently positioned with a guessed pixel offset. */}
-          {!listCollapsed && (
-            <div
-              className="pointer-events-auto hidden max-h-[calc(100vh-220px)] w-[360px] overflow-y-auto rounded-2xl border border-[var(--line)] p-3 lg:block"
-              style={{ background: "var(--bg)", boxShadow: "var(--shadow-lift)" }}
-            >
-              {listBody}
-            </div>
-          )}
-        </div>
-
+      <div className="pointer-events-none absolute right-3 top-3 z-[1000] sm:right-5 sm:top-5">
         <div className="pointer-events-auto">
           <FloatingAccountMenu isSignedIn={isSignedIn} canAct={canAct} name={ownName} photoUrl={ownPhotoUrl} />
         </div>
       </div>
 
-      {/* Mobile only — bottom sheet, pinned to the viewport regardless of the toolbar's height. */}
-      <div className="floating-list lg:hidden">{listBody}</div>
+      <DockBar
+        open={dockOpen}
+        active={section}
+        unread={MOCK_ACCEPTED_NAMES.length}
+        query={query}
+        results={results}
+        onOpenChange={(v) => {
+          setDockOpen(v);
+          if (!v) setSection(null);
+        }}
+        onSelect={(s) => setSection((cur) => (cur === s ? null : s))}
+        onQueryChange={setQuery}
+        onPickResult={(r) => {
+          setCenter({ lat: r.lat, lng: r.lng });
+          setQuery(r.label);
+          setResults([]);
+        }}
+      />
 
-      {tabs.length > 0 && (
-        <WindowDock
-          tabs={tabs.map((t): DockTab => {
-            if (t.kind === "entity") {
-              const id = t.stack[t.stack.length - 1];
-              if (id === HOME_FEED_ID) return { key: t.key, emoji: "🏠", title: "Your feed" };
-              if (id === PUBLIC_ENTITY_ID) return { key: t.key, emoji: "🌍", title: "Public Network" };
-              const e = entityById(id);
-              return { key: t.key, emoji: e?.emoji ?? "👥", title: e?.name ?? "Network" };
-            }
-            if (t.kind === "event") return { key: t.key, emoji: "📅", title: eventById(t.id)?.name ?? "Event" };
-            if (t.kind === "chat") return { key: t.key, emoji: "💬", title: t.name };
-            return { key: t.key, emoji: "🏢", title: companyById(t.id)?.name ?? "Company" };
-          })}
-          activeKey={activeTabKey}
-          size={dockSize}
-          width={dockWidth}
-          collapsed={dockCollapsed}
-          onActivate={setActiveTabKey}
-          onMinimise={() => setActiveTabKey("")}
-          onClose={closeTab}
-          onCloseAll={() => {
-            setTabs([]);
-            setActiveTabKey("");
-          }}
-          onSize={setDockSize}
-          onWidth={setDockWidth}
-          onCollapsedChange={setDockCollapsed}
-        >
-          {activeTab?.kind === "entity" && (
-            <EntityPanel
-              entityId={activeTab.stack[activeTab.stack.length - 1]}
-              depth={activeTab.stack.length}
-              people={worldProfiles}
-              loading={worldLoading && worldProfiles.length === 0}
-              posts={postsFor(activeTab.stack[activeTab.stack.length - 1])}
-              onPost={addPost}
-              likes={likes}
-              comments={extraComments}
-              votes={votes}
-              onToggleLike={toggleLike}
-              onComment={addComment}
-              onVote={castVote}
-              isAdmin={isAdminOf(activeTab.stack[activeTab.stack.length - 1])}
-              isPending={myPendingIds.includes(activeTab.stack[activeTab.stack.length - 1])}
-              onRequestAccess={requestAccess}
-              isMember={isMemberOf(activeTab.stack[activeTab.stack.length - 1])}
-              membershipTier={paidMemberships[activeTab.stack[activeTab.stack.length - 1]]}
-              onJoin={joinEntity}
-              onLeave={leaveEntity}
-              onOpen={openEntity}
-              onOpenEvent={openEvent}
-              onBack={backInTab}
-              wide={dockSize !== "side"}
-              conn={panelConn}
-              onConnect={connectTo}
-              onRespond={respondTo}
-              onMessage={openChat}
-              canAct={canAct}
-              now={now}
-            />
-          )}
-          {activeTab?.kind === "event" && (
-            <EventPanel
-              eventId={activeTab.id}
-              people={worldProfiles}
-              wide={dockSize !== "side"}
-              onOpenEntity={openEntityTab}
-              registration={registrations[activeTab.id]}
-              onRegistered={(id, r) => setRegistrations((cur) => ({ ...cur, [id]: r }))}
-              conn={panelConn}
-              onConnect={connectTo}
-              onRespond={respondTo}
-              onMessage={openChat}
-              canAct={canAct}
-              now={now}
-            />
-          )}
-          {activeTab?.kind === "company" && (
-            <CompanyPanel
-              companyId={activeTab.id}
-              people={worldProfiles}
-              wide={dockSize !== "side"}
-              conn={panelConn}
-              onConnect={connectTo}
-              onRespond={respondTo}
-              onMessage={openChat}
-              onOpenEntity={openEntityTab}
-              canAct={canAct}
-              now={now}
-            />
-          )}
-          {activeTab?.kind === "chat" &&
-            (() => {
-              const p = worldProfiles.find((x) => x.id === activeTab.id) ?? profiles.find((x) => x.id === activeTab.id);
-              return (
-                <ChatWindow
-                  key={activeTab.id}
-                  name={p?.name ?? activeTab.name}
-                  photoUrl={p?.photoUrl ?? null}
-                  headline={p?.headline ?? null}
-                  wide={dockSize !== "side"}
-                />
-              );
-            })()}
-        </WindowDock>
+      {section && (
+        <SectionPanel
+          section={section}
+          stack={stacks[section]}
+          size={panelSize}
+          width={panelWidth}
+          myNetworks={myNetworks}
+          people={activeData}
+          onOpenStack={pushInSection}
+          onBack={popInSection}
+          onClose={() => setSection(null)}
+          onSize={setPanelSize}
+          onWidth={setPanelWidth}
+          controls={section === "network" && stacks.network.length === 0 ? peopleControls : null}
+          detail={sectionDetail()}
+        />
       )}
-
     </div>
   );
 }
