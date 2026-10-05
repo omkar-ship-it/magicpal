@@ -16,6 +16,7 @@ import {
   Pin,
   DropBadge,
   ProfileCard,
+  ProfileListRow,
   CalendarIcon,
   BriefcaseIcon,
   InstitutionIcon,
@@ -27,6 +28,7 @@ import { MOCK_POSTS, type MockPost, type PostKind } from "@/lib/feedData";
 import {
   HOME_FEED_ID,
   PLACED_ENTITIES,
+  childrenOf,
   entityById,
   descendantIds,
   PUBLIC_ENTITY_ID,
@@ -101,6 +103,9 @@ const ROLE_FILTERS: Array<{ id: string; label: string; emoji: string; match: (p:
 /** Each dock section keeps its own drill-down stack, so switching sections doesn't lose your place. */
 type Stacks = Record<Section, string[]>;
 const EMPTY_STACKS: Stacks = { network: [], chats: [], events: [], institutions: [], companies: [] };
+
+/** Pseudo-id for the "people you're connected to" scope — not a node in the tree. */
+const MY_NETWORK_ID = "__mynetwork";
 
 /** The popup for any node with a real place — a campus, an office, or a TiE chapter city. Nodes without one are reached from the selector or anyone's profile chips. */
 function NetworkCard({ net, onOpen }: { net: MockEntity; onOpen: (id: string) => void }) {
@@ -189,6 +194,8 @@ export default function MapView({
   const [section, setSection] = useState<Section | null>(null);
   const [stacks, setStacks] = useState<Stacks>(EMPTY_STACKS);
   const [searchOpen, setSearchOpen] = useState(false);
+  /** "My Network" is a scope in its own right — just the people you're connected to. */
+  const [connectionsOnly, setConnectionsOnly] = useState(false);
   /** Per-section search and filter — the same state drives the popup list and the map. */
   const [sectionQuery, setSectionQuery] = useState<Record<Section, string>>({ network: "", chats: "", events: "", institutions: "", companies: "" });
   const [sectionFilter, setSectionFilter] = useState<Record<Section, string>>({ network: "mine", chats: "all", events: "all", institutions: "all", companies: "all" });
@@ -346,6 +353,31 @@ export default function MapView({
   }, [center, mode, mapReady]);
 
   const connectedProfiles = worldProfiles.filter((p) => conn[p.id]?.status === "accepted");
+
+  /**
+   * Frames a set of points. A naive min/max over raw longitudes picks the
+   * long way round whenever the set spans the date line (India ↔ California
+   * is 261° the "normal" way, 99° over the Pacific), so every point is
+   * measured as an offset from the first and wrapped into (-180, 180].
+   */
+  const fitPoints = useCallback((pts: Array<[number, number]>) => {
+    const map = mapRef.current;
+    if (!map || pts.length === 0) return;
+    if (pts.length === 1) {
+      map.flyTo({ center: pts[0], zoom: 11, duration: 900 });
+      return;
+    }
+    const refLng = pts[0][0];
+    const offsets = pts.map((p) => (((p[0] - refLng + 180) % 360 + 360) % 360) - 180);
+    const lats = pts.map((p) => p[1]);
+    map.fitBounds(
+      [
+        [refLng + Math.min(...offsets), Math.min(...lats)],
+        [refLng + Math.max(...offsets), Math.max(...lats)],
+      ],
+      { padding: { top: 80, bottom: 220, left: 80, right: 480 }, duration: 1000, maxZoom: 12 }
+    );
+  }, []);
 
   useEffect(() => {
     if (mode !== "network" || worldLoading || !mapReady) return;
@@ -558,12 +590,40 @@ export default function MapView({
   const showCompaniesLayer = section === "companies";
   const showInstitutionsLayer = section === "institutions" || section === "network";
   const chatNames = new Set(chatPeople.map((c) => c.name));
+  const connectionScoped = connectionsOnly ? networkFiltered.filter((p) => connFor(p)?.status === "accepted") : networkFiltered;
+
+  // Opening a section — or filtering one — moves the camera to what it's
+  // showing. Without this the pins render correctly but sit on another
+  // continent, so clicking Events looks like nothing happened.
+  const activeFilter = section ? sectionFilter[section] : "";
+  const activeQuery = section ? sectionQuery[section] : "";
+  useEffect(() => {
+    if (!mapReady || !section) return;
+    const pts: Array<[number, number]> =
+      section === "events"
+        ? filteredEvents.map((e) => [e.lng, e.lat])
+        : section === "companies"
+          ? filteredCompanies.map((c) => [c.lng, c.lat])
+          : section === "institutions"
+            ? filteredPlaces.map((e) => [e.place!.lng, e.place!.lat])
+            : section === "chats"
+              ? peopleOnMap.map((p) => [p.lng, p.lat])
+              : selectedNetworkId
+                ? [
+                    ...PLACED_ENTITIES.filter((e) => scopeIds?.has(e.id)).map((e): [number, number] => [e.place!.lng, e.place!.lat]),
+                    ...peopleOnMap.map((p): [number, number] => [p.lng, p.lat]),
+                  ]
+                : [];
+    fitPoints(pts);
+    // Re-frames when the section changes or its own filter/search does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section, activeFilter, activeQuery, selectedNetworkId, connectionsOnly, mapReady, worldProfiles.length, profiles.length]);
   const peopleOnMap =
     section === "events" || section === "companies"
       ? []
       : section === "chats"
-        ? networkFiltered.filter((p) => chatNames.has(p.name))
-        : networkFiltered;
+        ? connectionScoped.filter((p) => chatNames.has(p.name))
+        : connectionScoped;
 
   const stack = section ? stacks[section] : [];
 
@@ -779,23 +839,48 @@ export default function MapView({
   /** The popup's rows — the same filtered collections the map is drawing. */
   function popupItems(): PopupItem[] {
     switch (section) {
-      case "network":
+      case "network": {
+        const connected = activeData.filter((p) => connFor(p)?.status === "accepted").length;
+        const base: PopupItem[] = q("network")
+          ? []
+          : [
+              { id: HOME_FEED_ID, group: "Feed", emoji: "🏠", title: "Your feed", subtitle: "Everything from every community you're in" },
+              {
+                id: PUBLIC_ENTITY_ID,
+                group: "Everyone",
+                emoji: "🌍",
+                title: "Public Network",
+                subtitle: "Every professional on the map",
+                meta: `${activeData.length} visible · no membership needed`,
+                active: !connectionsOnly && selectedNetworkId === null,
+              },
+              {
+                id: MY_NETWORK_ID,
+                group: "Everyone",
+                emoji: "🤝",
+                title: "My Network",
+                subtitle: "People you're connected to",
+                meta: `${connected} connection${connected === 1 ? "" : "s"}`,
+                active: connectionsOnly,
+              },
+            ];
+        const mine = filteredNetworks.filter((n) => myMembership.has(n.id));
+        const others = filteredNetworks.filter((n) => !myMembership.has(n.id));
+        const row = (n: (typeof filteredNetworks)[number], group: string): PopupItem => ({
+          id: n.id,
+          group,
+          emoji: n.emoji,
+          title: n.name,
+          subtitle: n.blurbMock,
+          meta: `${n.memberCountMock.toLocaleString()} members${childrenOf(n.id).length ? ` · ${childrenOf(n.id).length} ${(n.childLabel ?? "groups").toLowerCase()}` : ""}`,
+          active: selectedNetworkId === n.id,
+        });
         return [
-          ...(q("network")
-            ? []
-            : [
-                { id: HOME_FEED_ID, emoji: "🏠", title: "Your feed", subtitle: "Everything from every community you're in" },
-                { id: PUBLIC_ENTITY_ID, emoji: "🌍", title: "Public Network", subtitle: "Everyone — no membership needed", active: selectedNetworkId === null },
-              ]),
-          ...filteredNetworks.map((n) => ({
-            id: n.id,
-            emoji: n.emoji,
-            title: n.name,
-            subtitle: n.blurbMock,
-            meta: `${n.memberCountMock.toLocaleString()} members${myMembership.has(n.id) ? " · joined" : ""}`,
-            active: selectedNetworkId === n.id,
-          })),
+          ...base,
+          ...mine.map((n) => row(n, `Networks you're in (${mine.length})`)),
+          ...others.map((n) => row(n, `Other networks (${others.length})`)),
         ];
+      }
       case "chats":
         return chatPeople.map((t) => ({
           id: t.p?.id ?? t.name,
@@ -872,7 +957,7 @@ export default function MapView({
   function popupCount(): string {
     switch (section) {
       case "network":
-        return selectedNetworkId ? `${peopleOnMap.length} on the map` : `${peopleOnMap.length} people`;
+        return `${peopleOnMap.length} on the map`;
       case "chats":
         return `${chatPeople.length} on the map`;
       case "events":
@@ -894,6 +979,7 @@ export default function MapView({
     if (section === "companies") return MOCK_COMPANIES.find((c) => c.id === id)?.name ?? "Company";
     if (id === HOME_FEED_ID) return "Your feed";
     if (id === PUBLIC_ENTITY_ID) return "Public Network";
+    if (id === MY_NETWORK_ID) return "My Network";
     return entityById(id)?.name ?? "Network";
   }
 
@@ -905,6 +991,7 @@ export default function MapView({
     if (section === "companies") return "🏢";
     if (id === HOME_FEED_ID) return "🏠";
     if (id === PUBLIC_ENTITY_ID) return "🌍";
+    if (id === MY_NETWORK_ID) return "🤝";
     return entityById(id)?.emoji ?? "🌐";
   }
 
@@ -954,6 +1041,42 @@ export default function MapView({
           canAct={canAct}
           now={now}
         />
+      );
+    }
+
+    if (id === MY_NETWORK_ID) {
+      const connections = activeData.filter((p) => connFor(p)?.status === "accepted");
+      return (
+        <div>
+          <span className="text-[26px] leading-none">🤝</span>
+          <h2 className="mt-1.5 text-[19px] font-bold leading-tight">My Network</h2>
+          <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">People you&apos;re connected to — {connections.length} of them</p>
+          <p className="mt-3 text-[13.5px] leading-5">
+            The map is showing just these people. Message anyone here, or book a time to talk.
+          </p>
+          <div className="mt-4 flex flex-col gap-2.5">
+            {connections.length === 0 ? (
+              <p className="text-[13px] text-[var(--ink-soft)]">No connections yet — send a request from anyone&apos;s pin.</p>
+            ) : (
+              connections.map((p) => (
+                <ProfileListRow
+                  key={p.id}
+                  p={p}
+                  conn={connFor(p)}
+                  hoveredId={hoveredId}
+                  now={now}
+                  canAct={canAct}
+                  onHover={hoverProfile}
+                  onUnhover={unhoverProfile}
+                  onConnect={connectTo}
+                  onRespond={respondTo}
+                  onMessage={openChat}
+                  onOpenEntity={openEntity}
+                />
+              ))
+            )}
+          </div>
+        </div>
       );
     }
 
@@ -1302,7 +1425,10 @@ export default function MapView({
           onChip={(id) => setSectionFilter((cur) => ({ ...cur, [section]: id }))}
           onSort={setChatSort}
           onPick={(id) => {
-            if (section === "network") setSelectedNetworkId(id === PUBLIC_ENTITY_ID || id === HOME_FEED_ID ? null : id);
+            if (section === "network") {
+              setConnectionsOnly(id === MY_NETWORK_ID);
+              setSelectedNetworkId(id === PUBLIC_ENTITY_ID || id === HOME_FEED_ID || id === MY_NETWORK_ID ? null : id);
+            }
             pushInSection(id);
           }}
           onClose={() => setSection(null)}

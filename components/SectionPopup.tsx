@@ -4,6 +4,8 @@ import { SECTIONS, type Section } from "./DockBar";
 
 export type PopupItem = {
   id: string;
+  /** Rows are rendered under their group's heading, in the order given. */
+  group?: string;
   emoji?: string;
   photo?: string;
   title: string;
@@ -60,13 +62,19 @@ export default function SectionPopup({
     <div className="pointer-events-none fixed inset-x-0 bottom-[104px] z-[1340] flex justify-center px-3">
       <div
         className="pointer-events-auto flex max-h-[min(58vh,540px)] w-full max-w-[420px] flex-col overflow-hidden rounded-3xl border border-[var(--line)]"
-        style={{ background: "color-mix(in srgb, var(--card) 94%, transparent)", backdropFilter: "blur(14px)", boxShadow: "var(--shadow-lift)" }}
+        style={{
+          background: "color-mix(in srgb, var(--card) 94%, transparent)",
+          backdropFilter: "blur(14px)",
+          boxShadow: "var(--shadow-lift)",
+        }}
       >
         <div className="flex flex-none items-center gap-2 px-3.5 pb-1 pt-3">
           <span className="text-[13px] font-semibold">
             {meta.emoji} {meta.label}
           </span>
-          <span className="ml-auto text-[11px] text-[var(--ink-soft)]">{count}</span>
+          <span className="ml-auto text-[11px] text-[var(--ink-soft)]">
+            {count}
+          </span>
           <button onClick={onClose} className="win-btn flex-none" title="Close">
             ×
           </button>
@@ -103,8 +111,17 @@ export default function SectionPopup({
                   className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold transition-colors"
                   style={
                     activeChip === c.id
-                      ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)", border: "1px solid var(--brand)" }
-                      : { background: "var(--sunk)", color: "var(--ink-soft)", border: "1px solid transparent" }
+                      ? {
+                          background:
+                            "color-mix(in srgb, var(--brand) 14%, var(--card))",
+                          color: "var(--brand)",
+                          border: "1px solid var(--brand)",
+                        }
+                      : {
+                          background: "var(--sunk)",
+                          color: "var(--ink-soft)",
+                          border: "1px solid transparent",
+                        }
                   }
                 >
                   {c.label}
@@ -121,7 +138,11 @@ export default function SectionPopup({
                   key={srt.id}
                   onClick={() => onSort?.(srt.id)}
                   className="rounded-full px-2 py-0.5 text-[11px] font-semibold transition-colors"
-                  style={activeSort === srt.id ? { background: "var(--sunk)", color: "var(--ink)" } : { color: "var(--ink-soft)" }}
+                  style={
+                    activeSort === srt.id
+                      ? { background: "var(--sunk)", color: "var(--ink)" }
+                      : { color: "var(--ink-soft)" }
+                  }
                 >
                   {srt.label}
                 </button>
@@ -133,33 +154,61 @@ export default function SectionPopup({
 
         <div className="flex-1 overflow-y-auto px-2 pb-2">
           {items.length === 0 ? (
-            <p className="px-2 py-6 text-center text-[12.5px] text-[var(--ink-soft)]">Nothing matches that.</p>
+            <p className="px-2 py-6 text-center text-[12.5px] text-[var(--ink-soft)]">
+              Nothing matches that.
+            </p>
           ) : (
             <div className="flex flex-col gap-1">
-              {items.map((it) => (
-                <button
-                  key={it.id}
-                  onClick={() => onPick(it.id)}
-                  className="flex w-full items-center gap-2.5 rounded-2xl p-2 text-left transition-colors hover:bg-[var(--sunk)]"
-                  style={it.active ? { background: "color-mix(in srgb, var(--brand) 10%, transparent)" } : undefined}
-                >
-                  {it.photo ? (
-                    <span className="avatar h-9 w-9 flex-none text-[11px]">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={it.photo} alt="" />
-                    </span>
-                  ) : (
-                    <span className="grid h-9 w-9 flex-none place-items-center rounded-xl text-[16px]" style={{ background: "var(--sunk)" }}>
-                      {it.emoji}
-                    </span>
+              {items.map((it, i) => (
+                <div key={it.id}>
+                  {it.group && it.group !== items[i - 1]?.group && (
+                    <p className="px-2 pb-1 pt-2 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
+                      {it.group}
+                    </p>
                   )}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12.5px] font-semibold leading-tight">{it.title}</span>
-                    {it.subtitle && <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">{it.subtitle}</span>}
-                    {it.meta && <span className="block truncate text-[11px] text-[var(--ink-soft)]">{it.meta}</span>}
-                  </span>
-                  <span className="flex-none text-[var(--ink-soft)]">›</span>
-                </button>
+                  <button
+                    onClick={() => onPick(it.id)}
+                    className="flex w-full items-center gap-2.5 rounded-2xl p-2 text-left transition-colors hover:bg-[var(--sunk)]"
+                    style={
+                      it.active
+                        ? {
+                            background:
+                              "color-mix(in srgb, var(--brand) 10%, transparent)",
+                          }
+                        : undefined
+                    }
+                  >
+                    {it.photo ? (
+                      <span className="avatar h-9 w-9 flex-none text-[11px]">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={it.photo} alt="" />
+                      </span>
+                    ) : (
+                      <span
+                        className="grid h-9 w-9 flex-none place-items-center rounded-xl text-[16px]"
+                        style={{ background: "var(--sunk)" }}
+                      >
+                        {it.emoji}
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12.5px] font-semibold leading-tight">
+                        {it.title}
+                      </span>
+                      {it.subtitle && (
+                        <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">
+                          {it.subtitle}
+                        </span>
+                      )}
+                      {it.meta && (
+                        <span className="block truncate text-[11px] text-[var(--ink-soft)]">
+                          {it.meta}
+                        </span>
+                      )}
+                    </span>
+                    <span className="flex-none text-[var(--ink-soft)]">›</span>
+                  </button>
+                </div>
               ))}
             </div>
           )}
