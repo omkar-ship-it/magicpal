@@ -4,30 +4,24 @@ import { useEffect, useRef, useState } from "react";
 import { avatarUrl } from "@/lib/avatar";
 import { BOOKING_SLOTS, MEETING_KINDS, MOCK_THREADS, type MeetingKind, type MockMessage } from "@/lib/chatData";
 
-export type ChatWindowState = "docked" | "expanded" | "full";
-
 /**
- * A 1:1 chat that floats over the map rather than taking you to another
- * page — dock it to a title bar, expand it, go full screen, or close it and
- * you're back on the bare map. Mocked (lib/chatData.ts): messages you send
- * stay in memory for the session.
+ * A 1:1 chat, rendered as one more window in the dock rather than its own
+ * floating box — same minimise, expand, full-screen and close as a feed or
+ * an event page. Mocked (lib/chatData.ts): messages you send stay in memory
+ * for the session.
  */
 export default function ChatWindow({
   name,
   photoUrl,
   headline,
-  windowState,
-  onWindowState,
-  onClose,
+  wide,
 }: {
   name: string;
   photoUrl: string | null;
   headline: string | null;
-  windowState: ChatWindowState;
-  onWindowState: (s: ChatWindowState) => void;
-  onClose: () => void;
+  wide: boolean;
 }) {
-  // Keyed by name in MapView, so switching person remounts this and the
+  // Keyed by person in MapView, so switching chat remounts this and the
   // thread/booking state resets without an effect syncing it.
   const [messages, setMessages] = useState<MockMessage[]>(() => MOCK_THREADS[name] ?? []);
   const [draft, setDraft] = useState("");
@@ -37,8 +31,8 @@ export default function ChatWindow({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (windowState !== "docked") scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages, windowState]);
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages]);
 
   function send() {
     const body = draft.trim();
@@ -62,164 +56,121 @@ export default function ChatWindow({
     setPicked(null);
   }
 
-  const frame =
-    windowState === "full"
-      ? "fixed inset-0 z-[1400] flex flex-col"
-      : windowState === "expanded"
-        ? "fixed bottom-0 right-4 z-[1400] flex h-[min(640px,calc(100vh-40px))] w-[min(460px,calc(100vw-32px))] flex-col rounded-t-2xl border border-[var(--line)]"
-        : "fixed bottom-0 right-4 z-[1400] flex w-[min(320px,calc(100vw-32px))] flex-col rounded-t-2xl border border-[var(--line)]";
+  const inner = wide ? "mx-auto w-full max-w-2xl" : "";
 
   return (
-    <div className={frame} style={{ background: "var(--bg)", boxShadow: "var(--shadow-lift)" }}>
-      {/* title bar — also the dock handle */}
-      <div
-        className="flex flex-none items-center gap-2 border-b border-[var(--line)] px-3 py-2.5"
-        style={{ background: "var(--card)", borderRadius: windowState === "full" ? 0 : "16px 16px 0 0" }}
-      >
-        <button
-          onClick={() => onWindowState(windowState === "docked" ? "expanded" : "docked")}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-          title={windowState === "docked" ? "Open chat" : "Minimise"}
-        >
-          <span className="avatar h-7 w-7 flex-none text-[11px]">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={photoUrl ?? avatarUrl(name)} alt="" />
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate text-[13px] font-semibold leading-tight">{name}</span>
-            {windowState !== "docked" && headline && (
-              <span className="block truncate text-[11px] text-[var(--ink-soft)]">{headline}</span>
-            )}
-          </span>
-        </button>
-
-        <div className="flex flex-none items-center gap-0.5">
-          <button
-            onClick={() => onWindowState(windowState === "docked" ? "expanded" : "docked")}
-            className="win-btn"
-            title={windowState === "docked" ? "Expand" : "Minimise"}
-          >
-            {windowState === "docked" ? "▴" : "▾"}
-          </button>
-          <button
-            onClick={() => onWindowState(windowState === "full" ? "expanded" : "full")}
-            className="win-btn"
-            title={windowState === "full" ? "Exit full screen" : "Full screen"}
-          >
-            {windowState === "full" ? "⤡" : "⤢"}
-          </button>
-          <button onClick={onClose} className="win-btn" title="Close">
-            ×
-          </button>
+    <div className="flex h-full min-h-[460px] flex-col">
+      <div className={`flex flex-none items-center gap-2 border-b border-[var(--line)] pb-3 ${inner}`}>
+        <span className="avatar h-9 w-9 flex-none text-[12px]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={photoUrl ?? avatarUrl(name)} alt="" />
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-[13.5px] font-semibold leading-tight">{name}</p>
+          {headline && <p className="truncate text-[11.5px] text-[var(--ink-soft)]">{headline}</p>}
         </div>
       </div>
 
-      {windowState !== "docked" && (
-        <>
-          <div ref={scrollRef} className={`flex-1 overflow-y-auto p-3 ${windowState === "full" ? "mx-auto w-full max-w-2xl" : ""}`}>
-            <div className="flex flex-col gap-2">
-              {messages.map((m) => (
-                <div key={m.id} className={m.mine ? "self-end" : "self-start"} style={{ maxWidth: "85%" }}>
-                  <div
-                    className="rounded-2xl px-3 py-2 text-[12.5px] leading-5"
-                    style={
-                      m.mine
-                        ? { background: "var(--brand)", color: "#fff", borderBottomRightRadius: 6 }
-                        : { background: "var(--sunk)", color: "var(--ink)", borderBottomLeftRadius: 6 }
-                    }
-                  >
-                    {m.body}
-                  </div>
-                  <p className={`mt-0.5 text-[10.5px] text-[var(--ink-soft)] ${m.mine ? "text-right" : ""}`}>{m.timeLabel}</p>
-                </div>
-              ))}
+      <div ref={scrollRef} className={`flex-1 overflow-y-auto py-3 ${inner}`}>
+        <div className="flex flex-col gap-2">
+          {messages.map((m) => (
+            <div key={m.id} className={m.mine ? "self-end" : "self-start"} style={{ maxWidth: "85%" }}>
+              <div
+                className="rounded-2xl px-3 py-2 text-[12.5px] leading-5"
+                style={
+                  m.mine
+                    ? { background: "var(--brand)", color: "#fff", borderBottomRightRadius: 6 }
+                    : { background: "var(--sunk)", color: "var(--ink)", borderBottomLeftRadius: 6 }
+                }
+              >
+                {m.body}
+              </div>
+              <p className={`mt-0.5 text-[10.5px] text-[var(--ink-soft)] ${m.mine ? "text-right" : ""}`}>{m.timeLabel}</p>
             </div>
-          </div>
+          ))}
+        </div>
+      </div>
 
-          {booking && (
-            <div className={`flex-none border-t border-[var(--line)] p-3 ${windowState === "full" ? "mx-auto w-full max-w-2xl" : ""}`}>
-              <p className="label">Book a time with {name.split(" ")[0]}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {MEETING_KINDS.map((k) => (
-                  <button
-                    key={k}
-                    onClick={() => setKind(k)}
-                    className="pill"
-                    style={
-                      kind === k
-                        ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)", border: "1px solid var(--brand)" }
-                        : { background: "var(--sunk)", color: "var(--ink-soft)", border: "1px solid transparent" }
-                    }
-                  >
-                    {k}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-2.5 flex flex-col gap-2">
-                {BOOKING_SLOTS.map((slot) => (
-                  <div key={slot.id} className="flex items-center gap-2">
-                    <span className="w-[72px] flex-none text-[12px] font-semibold text-[var(--ink-soft)]">
-                      {slot.day} {slot.date}
-                    </span>
-                    <div className="flex flex-wrap gap-1">
-                      {slot.times.map((t) => {
-                        const on = picked?.date === slot.date && picked?.time === t;
-                        return (
-                          <button
-                            key={t}
-                            onClick={() => setPicked({ day: slot.day, date: slot.date, time: t })}
-                            className="rounded-lg border px-2 py-1 text-[12px] font-semibold transition-colors"
-                            style={
-                              on
-                                ? { borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" }
-                                : { borderColor: "var(--line)", background: "var(--card)", color: "var(--ink)" }
-                            }
-                          >
-                            {t}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-3 flex gap-2">
-                <button onClick={() => setBooking(false)} className="btn btn-ghost btn-sm">
-                  Cancel
-                </button>
-                <button onClick={confirmBooking} disabled={!picked} className="btn btn-primary btn-sm flex-1">
-                  {picked ? `Confirm ${kind.toLowerCase()} — ${picked.day} ${picked.time}` : "Pick a slot"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {!booking && (
-            <div className={`flex-none border-t border-[var(--line)] p-3 ${windowState === "full" ? "mx-auto w-full max-w-2xl" : ""}`}>
-              <div className="flex items-end gap-2">
-                <textarea
-                  className="input text-[12.5px]"
-                  rows={windowState === "full" ? 3 : 2}
-                  placeholder={`Message ${name.split(" ")[0]}…`}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value.slice(0, 600))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      send();
-                    }
-                  }}
-                />
-                <button onClick={send} disabled={!draft.trim()} className="btn btn-primary btn-sm flex-none">
-                  Send
-                </button>
-              </div>
-              <button onClick={() => setBooking(true)} className="btn btn-ghost btn-sm mt-2 w-full">
-                📅 Book a time to connect
+      {booking ? (
+        <div className={`flex-none border-t border-[var(--line)] pt-3 ${inner}`}>
+          <p className="label">Book a time with {name.split(" ")[0]}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {MEETING_KINDS.map((k) => (
+              <button
+                key={k}
+                onClick={() => setKind(k)}
+                className="pill"
+                style={
+                  kind === k
+                    ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)", border: "1px solid var(--brand)" }
+                    : { background: "var(--sunk)", color: "var(--ink-soft)", border: "1px solid transparent" }
+                }
+              >
+                {k}
               </button>
-            </div>
-          )}
-        </>
+            ))}
+          </div>
+          <div className="mt-2.5 flex flex-col gap-2">
+            {BOOKING_SLOTS.map((slot) => (
+              <div key={slot.id} className="flex items-center gap-2">
+                <span className="w-[72px] flex-none text-[12px] font-semibold text-[var(--ink-soft)]">
+                  {slot.day} {slot.date}
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {slot.times.map((t) => {
+                    const on = picked?.date === slot.date && picked?.time === t;
+                    return (
+                      <button
+                        key={t}
+                        onClick={() => setPicked({ day: slot.day, date: slot.date, time: t })}
+                        className="rounded-lg border px-2 py-1 text-[12px] font-semibold transition-colors"
+                        style={
+                          on
+                            ? { borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" }
+                            : { borderColor: "var(--line)", background: "var(--card)", color: "var(--ink)" }
+                        }
+                      >
+                        {t}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button onClick={() => setBooking(false)} className="btn btn-ghost btn-sm">
+              Cancel
+            </button>
+            <button onClick={confirmBooking} disabled={!picked} className="btn btn-primary btn-sm flex-1">
+              {picked ? `Confirm ${kind.toLowerCase()} — ${picked.day} ${picked.time}` : "Pick a slot"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className={`flex-none border-t border-[var(--line)] pt-3 ${inner}`}>
+          <div className="flex items-end gap-2">
+            <textarea
+              className="input text-[12.5px]"
+              rows={wide ? 3 : 2}
+              placeholder={`Message ${name.split(" ")[0]}…`}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value.slice(0, 600))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+            />
+            <button onClick={send} disabled={!draft.trim()} className="btn btn-primary btn-sm flex-none">
+              Send
+            </button>
+          </div>
+          <button onClick={() => setBooking(true)} className="btn btn-ghost btn-sm mt-2 w-full">
+            📅 Book a time to connect
+          </button>
+        </div>
       )}
     </div>
   );

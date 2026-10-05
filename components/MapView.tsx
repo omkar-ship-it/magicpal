@@ -28,6 +28,8 @@ import { MOCK_POSTS, type MockPost, type PostKind } from "@/lib/feedData";
 import {
   HOME_FEED_ID,
   PLACED_ENTITIES,
+  childrenOf,
+  descendantIds,
   PUBLIC_ENTITY_ID,
   TOP_NETWORKS,
   ancestorsOf,
@@ -46,9 +48,10 @@ import FloatingAccountMenu from "./FloatingAccountMenu";
 import EntityPanel from "./EntityPanel";
 import EventPanel from "./EventPanel";
 import CompanyPanel from "./CompanyPanel";
-import PanelDock, { type DockSize, type DockTab } from "./PanelDock";
+import WindowDock, { type DockTab, type PanelSize } from "./WindowDock";
+import NetworkRail from "./NetworkRail";
 import type { CheckoutResult } from "./Checkout";
-import ChatWindow, { type ChatWindowState } from "./ChatWindow";
+import ChatWindow from "./ChatWindow";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 const RADIUS_OPTIONS_KM = [5, 10, 25, 50, 100] as const;
@@ -96,7 +99,10 @@ const ROLE_FILTERS: Array<{ id: string; label: string; emoji: string; match: (p:
 ];
 
 /** One open window over the map. Entity tabs carry their own drill-down stack. */
-type OpenTab = { key: string; kind: "entity"; stack: string[] } | { key: string; kind: "event" | "company"; id: string };
+type OpenTab =
+  | { key: string; kind: "entity"; stack: string[] }
+  | { key: string; kind: "event" | "company"; id: string }
+  | { key: string; kind: "chat"; id: string; name: string };
 
 function TargetIcon() {
   return (
@@ -204,13 +210,13 @@ export default function MapView({
   /** null = the all-encompassing Public Network. Otherwise exactly one network at a time. */
   const [selectedNetworkId, setSelectedNetworkId] = useState<string | null>(null);
   const [myEntityIds, setMyEntityIdsState] = useState<string[]>(() => getMyEntityIds());
-  const [dockSize, setDockSize] = useState<DockSize>("side");
-  const [dockWidth, setDockWidth] = useState(430);
+  const [dockSize, setDockSize] = useState<PanelSize>("side");
+  const [dockWidth, setDockWidth] = useState(460);
+  const [dockCollapsed, setDockCollapsed] = useState(false);
   /** Paid things you've bought this session — community memberships and event tickets. */
   const [paidMemberships, setPaidMemberships] = useState<Record<string, CheckoutResult>>({});
   const [registrations, setRegistrations] = useState<Record<string, CheckoutResult>>({});
-  const [chatWith, setChatWith] = useState<Profile | null>(null);
-  const [chatState, setChatState] = useState<ChatWindowState>("expanded");
+
   /** Posts you write this session, on top of the seeded ones. Prototype-only — never leaves the browser. */
   const [myPosts, setMyPosts] = useState<MockPost[]>([]);
   const [likes, setLikes] = useState<Set<string>>(new Set());
@@ -533,6 +539,15 @@ export default function MapView({
   // TiE Bangalore counts as a member of TiE Global, so picking the parent
   // shows the whole tree's people.
   const role = ROLE_FILTERS.find((r) => r.id === roleFilter) ?? ROLE_FILTERS[0];
+  /**
+   * Everything on the map narrows to the selected network's subtree: its
+   * people, the events its chapters are hosting, and its own places —
+   * selecting TiE Global puts its chapter pins on the map, not a generic
+   * institutions layer.
+   */
+  const scopeIds = selectedNetworkId ? new Set([selectedNetworkId, ...descendantIds(selectedNetworkId)]) : null;
+  const visibleEvents = scopeIds ? MOCK_EVENTS.filter((e) => e.hostEntityId && scopeIds.has(e.hostEntityId)) : MOCK_EVENTS;
+  const visiblePlaces = scopeIds ? PLACED_ENTITIES.filter((e) => scopeIds.has(e.id)) : PLACED_ENTITIES;
   const networkFiltered = (selectedNetworkId ? activeData.filter((p) => entityIdsForName(p.name).has(selectedNetworkId)) : activeData).filter(
     role.match
   );
@@ -546,7 +561,7 @@ export default function MapView({
   function openTab(tab: OpenTab) {
     setTabs((cur) => (cur.some((t) => t.key === tab.key) ? cur : [...cur, tab]));
     setActiveTabKey(tab.key);
-    setDockSize((sz) => (sz === "min" ? "side" : sz));
+    setDockCollapsed(false);
   }
 
   function openEntity(id: string) {
@@ -555,7 +570,6 @@ export default function MapView({
     const current = tabs.find((t) => t.key === activeTabKey);
     if (current?.kind === "entity" && current.stack[current.stack.length - 1] !== id) {
       setTabs((cur) => cur.map((t) => (t.key === current.key && t.kind === "entity" ? { ...t, stack: [...t.stack, id] } : t)));
-      setDockSize((sz) => (sz === "min" ? "side" : sz));
       return;
     }
     openTab({ key: `entity:${id}`, kind: "entity", stack: [id] });
@@ -694,8 +708,7 @@ export default function MapView({
   );
 
   function openChat(p: Profile) {
-    setChatWith(p);
-    setChatState("expanded");
+    openTab({ key: `chat:${p.id}`, kind: "chat", id: p.id, name: p.name });
   }
 
   // Rendered twice below — as a mobile bottom sheet, and nested directly
@@ -915,7 +928,7 @@ export default function MapView({
             are mock data (lib/prototypeData.ts), shown only in Nearby mode. */}
         {mode === "nearby" &&
           showEventsLayer &&
-          MOCK_EVENTS.map((ev) => {
+          visibleEvents.map((ev) => {
             const open = hoveredExtraId === ev.id || pinnedExtraId === ev.id;
             return (
               <Marker key={ev.id} longitude={ev.lng} latitude={ev.lat} anchor="center">
@@ -956,6 +969,7 @@ export default function MapView({
 
         {mode === "nearby" &&
           showCompaniesLayer &&
+          !selectedNetworkId &&
           MOCK_COMPANIES.map((co) => {
             const open = hoveredExtraId === co.id || pinnedExtraId === co.id;
             const peopleHere = countPeopleAtCompany(profiles, co.name);
@@ -999,7 +1013,7 @@ export default function MapView({
 
         {mode === "nearby" &&
           showInstitutionsLayer &&
-          PLACED_ENTITIES.map((net) => {
+          visiblePlaces.map((net) => {
             const open = hoveredExtraId === net.id || pinnedExtraId === net.id;
             const place = net.place!;
             return (
@@ -1040,8 +1054,16 @@ export default function MapView({
           })}
       </Map>
 
+      <NetworkRail
+        networks={myNetworks}
+        selectedId={selectedNetworkId}
+        adminIds={myAdminIds}
+        onSelect={setSelectedNetworkId}
+        onOpenHome={() => openEntityTab(HOME_FEED_ID)}
+      />
+
       {/* ---------------------------------------------------- floating chrome */}
-      <div className="pointer-events-none absolute inset-x-3 top-3 z-[1000] flex items-start justify-between gap-3 sm:inset-x-5 sm:top-5">
+      <div className="pointer-events-none absolute inset-x-3 top-3 z-[1000] flex items-start justify-between gap-3 sm:inset-x-5 sm:top-5 lg:left-[80px]">
         <div className="flex w-full max-w-[600px] flex-col gap-3">
           <div className="floating-panel pointer-events-auto p-3">
             <div className="flex items-center gap-2">
@@ -1238,8 +1260,9 @@ export default function MapView({
                   </span>
                 </>
               )}
+              {/* mobile has no rail, so it keeps a compact switcher */}
               <select
-                className="chip-select"
+                className="chip-select lg:hidden"
                 value={selectedNetworkId ?? "all"}
                 onChange={(e) => setSelectedNetworkId(e.target.value === "all" ? null : e.target.value)}
                 title="Show one network at a time, or the whole public network"
@@ -1255,15 +1278,47 @@ export default function MapView({
               <button onClick={() => openEntityTab(HOME_FEED_ID)} className="btn btn-primary btn-sm">
                 Your feed
               </button>
-
-              <button onClick={() => openEntityTab(selectedNetworkId ?? PUBLIC_ENTITY_ID)} className="btn btn-ghost btn-sm">
-                {selectedNetwork ? `Open ${selectedNetwork.name} →` : "Public network →"}
-              </button>
-
-              <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
-                {myNetworks.length} networks
-              </span>
             </div>
+
+            {/* Context strip — only when you're inside a network. The modules
+                here are adaptive: what's on the map changes with the network,
+                so the counts are that network's, not the whole map's. */}
+            {selectedNetwork && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-[var(--line)] pt-2.5">
+                <span className="flex items-center gap-1.5 text-[13px] font-semibold">
+                  <span className="text-[15px]">{selectedNetwork.emoji}</span>
+                  {selectedNetwork.name}
+                </span>
+                <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
+                  {selectedNetwork.memberCountMock.toLocaleString()} members
+                </span>
+                {isAdminOf(selectedNetwork.id) && (
+                  <span className="pill" style={{ background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)" }}>
+                    ⭐ You run this
+                  </span>
+                )}
+
+                <span className="mx-0.5 h-5 w-px" style={{ background: "var(--line)" }} />
+
+                <button onClick={() => openEntityTab(selectedNetwork.id)} className="btn btn-ghost btn-sm">
+                  📰 Feed
+                </button>
+                {childrenOf(selectedNetwork.id).length > 0 && (
+                  <button onClick={() => openEntityTab(selectedNetwork.id)} className="btn btn-ghost btn-sm">
+                    {selectedNetwork.emoji} {selectedNetwork.childLabel ?? "Groups"} ({childrenOf(selectedNetwork.id).length})
+                  </button>
+                )}
+                <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
+                  📅 {visibleEvents.length} events
+                </span>
+                <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
+                  📍 {visiblePlaces.length} on the map
+                </span>
+                <button onClick={() => setSelectedNetworkId(null)} className="text-[12px] text-[var(--ink-soft)] underline">
+                  Back to public
+                </button>
+              </div>
+            )}
 
             {mode === "nearby" && dropOpen && (
               <form onSubmit={submitDrop} className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--line)] pt-2.5">
@@ -1313,8 +1368,8 @@ export default function MapView({
       {/* Mobile only — bottom sheet, pinned to the viewport regardless of the toolbar's height. */}
       <div className="floating-list lg:hidden">{listBody}</div>
 
-      {tabs.length > 0 && activeTab && (
-        <PanelDock
+      {tabs.length > 0 && (
+        <WindowDock
           tabs={tabs.map((t): DockTab => {
             if (t.kind === "entity") {
               const id = t.stack[t.stack.length - 1];
@@ -1324,12 +1379,15 @@ export default function MapView({
               return { key: t.key, emoji: e?.emoji ?? "👥", title: e?.name ?? "Network" };
             }
             if (t.kind === "event") return { key: t.key, emoji: "📅", title: eventById(t.id)?.name ?? "Event" };
+            if (t.kind === "chat") return { key: t.key, emoji: "💬", title: t.name };
             return { key: t.key, emoji: "🏢", title: companyById(t.id)?.name ?? "Company" };
           })}
-          activeKey={activeTab.key}
+          activeKey={activeTabKey}
           size={dockSize}
           width={dockWidth}
+          collapsed={dockCollapsed}
           onActivate={setActiveTabKey}
+          onMinimise={() => setActiveTabKey("")}
           onClose={closeTab}
           onCloseAll={() => {
             setTabs([]);
@@ -1337,8 +1395,9 @@ export default function MapView({
           }}
           onSize={setDockSize}
           onWidth={setDockWidth}
+          onCollapsedChange={setDockCollapsed}
         >
-          {activeTab.kind === "entity" && (
+          {activeTab?.kind === "entity" && (
             <EntityPanel
               entityId={activeTab.stack[activeTab.stack.length - 1]}
               depth={activeTab.stack.length}
@@ -1371,7 +1430,7 @@ export default function MapView({
               now={now}
             />
           )}
-          {activeTab.kind === "event" && (
+          {activeTab?.kind === "event" && (
             <EventPanel
               eventId={activeTab.id}
               people={worldProfiles}
@@ -1387,7 +1446,7 @@ export default function MapView({
               now={now}
             />
           )}
-          {activeTab.kind === "company" && (
+          {activeTab?.kind === "company" && (
             <CompanyPanel
               companyId={activeTab.id}
               people={worldProfiles}
@@ -1401,20 +1460,22 @@ export default function MapView({
               now={now}
             />
           )}
-        </PanelDock>
+          {activeTab?.kind === "chat" &&
+            (() => {
+              const p = worldProfiles.find((x) => x.id === activeTab.id) ?? profiles.find((x) => x.id === activeTab.id);
+              return (
+                <ChatWindow
+                  key={activeTab.id}
+                  name={p?.name ?? activeTab.name}
+                  photoUrl={p?.photoUrl ?? null}
+                  headline={p?.headline ?? null}
+                  wide={dockSize !== "side"}
+                />
+              );
+            })()}
+        </WindowDock>
       )}
 
-      {chatWith && (
-        <ChatWindow
-          key={chatWith.id}
-          name={chatWith.name}
-          photoUrl={chatWith.photoUrl}
-          headline={chatWith.headline}
-          windowState={chatState}
-          onWindowState={setChatState}
-          onClose={() => setChatWith(null)}
-        />
-      )}
     </div>
   );
 }
