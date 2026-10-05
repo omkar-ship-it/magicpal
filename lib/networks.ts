@@ -488,3 +488,30 @@ export function expandMembership(directIds: string[]): Set<string> {
   }
   return out;
 }
+
+/**
+ * The strongest thing you and someone else have in common — the deepest
+ * node you both belong to. "Both in ISB PGP Class of 2019" beats "both in
+ * ISB", which beats nothing.
+ *
+ * This is the warmth engine: a stranger with a reason attached is a
+ * different proposition to a stranger without one, and it's the one thing a
+ * reach-optimised network can't put on the card before you hit Connect.
+ */
+export function sharedContextFor(name: string): { emoji: string; label: string; entityId: string } | null {
+  const mine = expandMembership(getMyEntityIds());
+  if (mine.size === 0) return null;
+  let best: MockEntity | null = null;
+  let bestDepth = -1;
+  for (const id of entityIdsForName(name)) {
+    if (!mine.has(id)) continue;
+    const e = entityById(id);
+    if (!e) continue;
+    const depth = ancestorsOf(id).length;
+    if (depth > bestDepth) {
+      best = e;
+      bestDepth = depth;
+    }
+  }
+  return best ? { emoji: best.emoji, label: best.name, entityId: best.id } : null;
+}

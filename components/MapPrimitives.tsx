@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { avatarUrl } from "@/lib/avatar";
 import { mockConnectionCount, type MockEvent, type MockCompany } from "@/lib/prototypeData";
-import { directEntitiesForName, networksForName } from "@/lib/networks";
+import { directEntitiesForName, networksForName, sharedContextFor } from "@/lib/networks";
 
 const MAX_NOTE = 300;
 
@@ -272,7 +272,18 @@ export function ActionButton({
       </Link>
     );
   }
+  const shared = communityName ? null : sharedContextFor(p.name);
   if (!conn || conn.status === "connect") {
+    if (!communityName && shared) {
+      return (
+        <button
+          onClick={() => onConnect(p.id, `Hey — we're both in ${shared.label}!`)}
+          className="btn btn-primary btn-sm w-full"
+        >
+          Connect via {shared.label}
+        </button>
+      );
+    }
     if (communityName) {
       return (
         <button
@@ -349,6 +360,24 @@ export function ActionButton({
  * specific nodes underneath (a chapter, a class, a club). Each chip is a
  * door into that node's panel.
  */
+/** The one-line reason you two should talk, shown above the action. */
+function SharedContext({ name, onOpenEntity }: { name: string; onOpenEntity?: (id: string) => void }) {
+  const shared = sharedContextFor(name);
+  if (!shared) return null;
+  return (
+    <button
+      onClick={onOpenEntity ? () => onOpenEntity(shared.entityId) : undefined}
+      className="mt-2 flex w-full items-center gap-1.5 rounded-xl px-2 py-1.5 text-left"
+      style={{ background: "color-mix(in srgb, var(--good) 10%, var(--card))", cursor: onOpenEntity ? "pointer" : "default" }}
+    >
+      <span className="flex-none text-[13px]">{shared.emoji}</span>
+      <span className="min-w-0 truncate text-[11.5px] font-semibold" style={{ color: "var(--good)" }}>
+        You&apos;re both in {shared.label}
+      </span>
+    </button>
+  );
+}
+
 function AffiliationChips({
   name,
   onOpenEntity,
@@ -490,6 +519,8 @@ export function ProfileCard({
 
       <SocialLinks p={p} />
 
+      <SharedContext name={p.name} onOpenEntity={onOpenEntity} />
+
       <div className="mt-3 border-t border-[var(--line)] pt-3">
         <ActionButton p={p} conn={conn} onConnect={onConnect} onRespond={onRespond} canAct={canAct} detailed note={note} onNoteChange={onNoteChange} onMessage={onMessage} />
       </div>
@@ -625,6 +656,7 @@ export function ProfileListRow({
         </p>
         {p.drop && <DropBadge drop={p.drop} now={now} />}
         {!communityName && <AffiliationChips name={p.name} onOpenEntity={onOpenEntity} maxNetworks={2} />}
+        {!communityName && <SharedContext name={p.name} onOpenEntity={onOpenEntity} />}
         {p.skills.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1">
             {p.skills.slice(0, 3).map((s) => (

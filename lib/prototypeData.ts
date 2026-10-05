@@ -28,6 +28,8 @@ export type MockEvent = {
   lat: number;
   lng: number;
   attendeesMock: number;
+  /** Days from today — lets "this week" be a real filter rather than string-matching a label. */
+  daysAway: number;
   /** The network, group, or club hosting this — ties an event to a feed. Not every event has a host. */
   hostEntityId?: string;
   about: string;
@@ -60,6 +62,7 @@ const FREE_AGENDA = [
 export const MOCK_EVENTS: MockEvent[] = [
   {
     id: "evt-tie-summit",
+    daysAway: 38,
     name: "TiE Global Summit 2026",
     dateLabel: "Thu, Dec 11 – Sat, Dec 13",
     timeLabel: "9:00am onwards",
@@ -87,6 +90,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-tie-blr-pitch",
+    daysAway: 5,
     name: "TiE Bangalore Pitch Night",
     dateLabel: "Thu, Nov 13",
     timeLabel: "6:30pm – 9:00pm",
@@ -111,6 +115,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-tie-women-blr",
+    daysAway: 18,
     name: "TiE Women Bangalore — Cohort 4 Demo",
     dateLabel: "Wed, Nov 26",
     timeLabel: "5:00pm – 8:00pm",
@@ -126,6 +131,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-tie-sv-officehours",
+    daysAway: 2,
     name: "TiE Silicon Valley Mentor Office Hours",
     dateLabel: "Every Wednesday",
     timeLabel: "4:00pm – 6:00pm",
@@ -141,6 +147,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-tie-dubai-dinner",
+    daysAway: 11,
     name: "Gulf Founders Dinner",
     dateLabel: "Wed, Nov 19",
     timeLabel: "7:30pm",
@@ -163,6 +170,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-isb-teardown",
+    daysAway: 3,
     name: "ISB Product Teardown",
     dateLabel: "Tue, Nov 11",
     timeLabel: "6:00pm – 8:00pm",
@@ -178,6 +186,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-isb-reunion",
+    daysAway: 92,
     name: "PGP Class of 2019 — Five Year Reunion",
     dateLabel: "Sat, Feb 7",
     timeLabel: "All day",
@@ -201,6 +210,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-isb-ivi-demo",
+    daysAway: 20,
     name: "I-Venture Cohort 9 Demo Day",
     dateLabel: "Fri, Nov 28",
     timeLabel: "2:00pm – 6:00pm",
@@ -219,6 +229,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-iitb-1",
+    daysAway: 1,
     name: "IIT Bombay Alumni Meet",
     dateLabel: "Sat, Nov 8",
     timeLabel: "11:00am",
@@ -234,6 +245,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-iitb-bay-1",
+    daysAway: 14,
     name: "IITB Bay Area Dinner",
     dateLabel: "Sat, Nov 22",
     timeLabel: "7:00pm",
@@ -250,6 +262,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-stan-1",
+    daysAway: 6,
     name: "Stanford Alumni SF Social",
     dateLabel: "Fri, Nov 14",
     timeLabel: "6:30pm",
@@ -266,6 +279,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-exg-1",
+    daysAway: 2,
     name: "Ex-Googlers Bengaluru Mixer",
     dateLabel: "Thu, Nov 6",
     timeLabel: "7:00pm",
@@ -281,6 +295,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-blr-1",
+    daysAway: 7,
     name: "Founders & Coffee",
     dateLabel: "Sat, Nov 15",
     timeLabel: "10:00am",
@@ -296,6 +311,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-wip-1",
+    daysAway: 21,
     name: "Women Who Build",
     dateLabel: "Wed, Nov 29",
     timeLabel: "5:00pm",
@@ -311,6 +327,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-design-1",
+    daysAway: 12,
     name: "Product Design Meetup",
     dateLabel: "Thu, Nov 20",
     timeLabel: "6:30pm",
@@ -326,6 +343,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-yc-1",
+    daysAway: 10,
     name: "SF Founders Dinner",
     dateLabel: "Tue, Nov 18",
     timeLabel: "7:00pm",
@@ -342,6 +360,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-climate-1",
+    daysAway: 13,
     name: "Berlin Design Jam",
     dateLabel: "Fri, Nov 21",
     timeLabel: "6:00pm",
@@ -357,6 +376,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-hike-1",
+    daysAway: 7,
     name: "Nandi Hills Sunrise Hike",
     dateLabel: "Sat, Nov 15",
     timeLabel: "5:00am",
@@ -375,6 +395,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   },
   {
     id: "evt-sg-1",
+    daysAway: 14,
     name: "Singapore Growth Summit",
     dateLabel: "Sat, Nov 22",
     timeLabel: "9:00am",

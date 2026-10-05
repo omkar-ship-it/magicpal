@@ -35,6 +35,7 @@ import {
   TOP_NETWORKS,
   ancestorsOf,
   entityIdsForName,
+  sharedContextFor,
   expandMembership,
   getMyAdminIds,
   getMyEntityIds,
@@ -48,6 +49,7 @@ import FloatingAccountMenu from "./FloatingAccountMenu";
 import EntityPanel from "./EntityPanel";
 import EventPanel from "./EventPanel";
 import CompanyPanel from "./CompanyPanel";
+import Compass, { type CompassLine } from "./Compass";
 import DockBar, { type Section } from "./DockBar";
 import SectionPopup, { type Chip, type PopupItem } from "./SectionPopup";
 import FloatingPage, { type PageSize } from "./FloatingPage";
@@ -196,6 +198,7 @@ export default function MapView({
   const [searchOpen, setSearchOpen] = useState(false);
   /** "My Network" is a scope in its own right — just the people you're connected to. */
   const [connectionsOnly, setConnectionsOnly] = useState(false);
+  const [compassDismissed, setCompassDismissed] = useState(false);
   /** Per-section search and filter — the same state drives the popup list and the map. */
   const [sectionQuery, setSectionQuery] = useState<Record<Section, string>>({ network: "", chats: "", events: "", institutions: "", companies: "" });
   const [sectionFilter, setSectionFilter] = useState<Record<Section, string>>({ network: "mine", chats: "all", events: "all", institutions: "all", companies: "all" });
@@ -544,6 +547,15 @@ export default function MapView({
   const myMembership = expandMembership(myEntityIds);
   const myNetworks = TOP_NETWORKS.filter((n) => myMembership.has(n.id));
 
+  /** Rough great-circle distance in km — good enough for a "near me" filter. */
+  function kmFrom(lat: number, lng: number) {
+    const dLat = ((lat - center.lat) * Math.PI) / 180;
+    const dLng = ((lng - center.lng) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) ** 2 + Math.cos((center.lat * Math.PI) / 180) * Math.cos((lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+    return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
   const q = (sec: Section) => sectionQuery[sec].trim().toLowerCase();
   const hit = (...fields: Array<string | null | undefined>) => (needle: string) =>
     !needle || fields.some((f) => (f ?? "").toLowerCase().includes(needle));
@@ -551,6 +563,8 @@ export default function MapView({
   const filteredEvents = MOCK_EVENTS.filter((e) => {
     if (!hit(e.name, e.city, e.venue, entityById(e.hostEntityId ?? "")?.name)(q("events"))) return false;
     const f = sectionFilter.events;
+    if (f === "near") return kmFrom(e.lat, e.lng) <= radiusKm;
+    if (f === "week") return e.daysAway <= 7;
     if (f === "free") return !e.tickets;
     if (f === "paid") return Boolean(e.tickets);
     if (f === "mine") return Boolean(e.hostEntityId && myMembership.has(e.hostEntityId));
@@ -560,6 +574,7 @@ export default function MapView({
   const filteredCompanies = MOCK_COMPANIES.filter((c) => {
     if (!hit(c.name, c.industry, c.city)(q("companies"))) return false;
     const f = sectionFilter.companies;
+    if (f === "near") return kmFrom(c.lat, c.lng) <= radiusKm;
     if (f === "hiring") return c.openRoles.length > 0;
     if (f === "all") return true;
     return c.industry === f;
@@ -568,6 +583,7 @@ export default function MapView({
   const filteredPlaces = PLACED_ENTITIES.filter((e) => {
     if (!hit(e.name, e.place?.city, e.label)(q("institutions"))) return false;
     const f = sectionFilter.institutions;
+    if (f === "near") return e.place ? kmFrom(e.place.lat, e.place.lng) <= radiusKm : false;
     if (f === "mine") return myMembership.has(e.id);
     if (f === "all") return true;
     return e.label === f;
@@ -836,6 +852,74 @@ export default function MapView({
     </div>
   );
 
+  /**
+   * The opening answer to "what's true near me right now" — computed from
+   * the same data everything else uses, so every line is clickable through
+   * to the already-filtered view behind it.
+   */
+  function compassLines(): CompassLine[] {
+    const lines: CompassLine[] = [];
+    const jump = (sec: Section, filter?: string) => () => {
+      setDockOpen(true);
+      setSection(sec);
+      if (filter) setSectionFilter((cur) => ({ ...cur, [sec]: filter }));
+    };
+
+    const nearbyFromMine = profiles.filter((p) => {
+      const theirs = entityIdsForName(p.name);
+      return [...myMembership].some((id) => theirs.has(id));
+    });
+    if (nearbyFromMine.length > 0) {
+      const shared = sharedContextFor(nearbyFromMine[0].name);
+      lines.push({
+        id: "near",
+        emoji: "🎓",
+        headline: `${nearbyFromMine.length} from your networks within ${radiusKm}km`,
+        detail: shared ? `${nearbyFromMine[0].name} and others from ${shared.label}` : "People you already have something in common with",
+        onClick: jump("network"),
+      });
+    }
+
+    const weekInMine = MOCK_EVENTS.filter((e) => e.daysAway <= 7 && e.hostEntityId && myMembership.has(e.hostEntityId));
+    if (weekInMine.length > 0) {
+      const next = [...weekInMine].sort((a, b) => a.daysAway - b.daysAway)[0];
+      lines.push({
+        id: "events",
+        emoji: "📅",
+        headline: `${weekInMine.length} event${weekInMine.length === 1 ? "" : "s"} this week in your networks`,
+        detail: `Next: ${next.name} · ${next.dateLabel}`,
+        onClick: jump("events", "week"),
+      });
+    }
+
+    const waiting = MOCK_ACCEPTED_NAMES.filter((n) => {
+      const msgs = MOCK_THREADS[n] ?? [];
+      return msgs.length > 0 && !msgs[msgs.length - 1].mine;
+    });
+    if (waiting.length > 0) {
+      lines.push({
+        id: "chats",
+        emoji: "💬",
+        headline: `${waiting.length} conversation${waiting.length === 1 ? "" : "s"} waiting on you`,
+        detail: `${waiting.slice(0, 2).join(", ")}${waiting.length > 2 ? ` and ${waiting.length - 2} more` : ""}`,
+        onClick: jump("chats", "unread"),
+      });
+    }
+
+    const live = profiles.filter((p) => p.drop);
+    if (live.length > 0) {
+      lines.push({
+        id: "live",
+        emoji: "✦",
+        headline: `${live.length} open to chat right now`,
+        detail: live[0].drop ? `“${live[0].drop.label}”` : "Nearby and available",
+        onClick: jump("network"),
+      });
+    }
+
+    return lines;
+  }
+
   /** The popup's rows — the same filtered collections the map is drawing. */
   function popupItems(): PopupItem[] {
     switch (section) {
@@ -933,6 +1017,8 @@ export default function MapView({
       case "events":
         return [
           { id: "all", label: "All" },
+          { id: "near", label: "Near me" },
+          { id: "week", label: "This week" },
           { id: "mine", label: "My networks" },
           { id: "free", label: "Free" },
           { id: "paid", label: "Ticketed" },
@@ -940,13 +1026,19 @@ export default function MapView({
       case "institutions":
         return [
           { id: "all", label: "All" },
+          { id: "near", label: "Near me" },
           { id: "mine", label: "Mine" },
           { id: "Chapter", label: "Chapters" },
           { id: "Network", label: "Institutions" },
         ];
       case "companies": {
         const industries = Array.from(new Set(MOCK_COMPANIES.map((c) => c.industry))).slice(0, 3);
-        return [{ id: "all", label: "All" }, { id: "hiring", label: "Hiring" }, ...industries.map((i) => ({ id: i, label: i }))];
+        return [
+          { id: "all", label: "All" },
+          { id: "near", label: "Near me" },
+          { id: "hiring", label: "Hiring" },
+          ...industries.map((i) => ({ id: i, label: i })),
+        ];
       }
       default:
         return [];
@@ -1141,12 +1233,11 @@ export default function MapView({
         mapboxAccessToken={MAPBOX_TOKEN}
         initialViewState={{ longitude: center.lng, latitude: center.lat, zoom: 12 }}
         mapStyle={mapStyle}
-        // deck.gl's view-state sync doesn't yet track Mapbox's experimental
-        // "globe" projection correctly — an ArcLayer's geometry projects to
-        // the wrong screen position under it, rendering invisibly. The
-        // sphere is the better look for free exploration; a flat projection
-        // is what actually makes the connection arcs show up correctly.
-        projection={mode === "network" ? "mercator" : "globe"}
+        // Flat, always. A globe looks good and navigates badly: half the
+        // world is behind it, "fit these 84 chapters" framed a sphere edge,
+        // and deck.gl's arcs project to the wrong place under it. Location
+        // is navigated through the filters, not by spinning a ball.
+        projection="mercator"
         style={{ height: "100%", width: "100%" }}
         onLoad={(e) => {
           setMapReady(true);
@@ -1410,6 +1501,10 @@ export default function MapView({
           setSearchOpen(false);
         }}
       />
+
+      {dockOpen && !section && !compassDismissed && (
+        <Compass place={profiles[0]?.locationLabel?.split(",").pop()?.trim() ?? ""} lines={compassLines()} onDismiss={() => setCompassDismissed(true)} />
+      )}
 
       {section && stack.length === 0 && (
         <SectionPopup
