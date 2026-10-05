@@ -28,6 +28,7 @@ import {
   MOCK_COMPANIES,
   MOCK_INSTITUTIONS,
   mockGroupsForName,
+  myGroups,
   countPeopleAtCompany,
   type MockInstitution,
   type GroupType,
@@ -435,28 +436,41 @@ export default function MapView({
       : [];
 
   const activeData = mode === "nearby" ? profiles : worldProfiles;
-  // Prototype-only group filter — mockGroupsForName is a deterministic
-  // client-side guess, not real membership data (see lib/prototypeData.ts).
-  // "Alumni" narrows to *your* specific alumni affiliation when you have
-  // one (mocked from your own name, same as everyone else's) — "my alumni
-  // network" should mean people who share your actual school, not every
-  // alumni network at once. Falls back to the broad alumni bucket for
-  // anyone without a mock affiliation of their own (e.g. signed out).
-  const myAlumniGroup = mockGroupsForName(ownName).find((g) => g.type === "alumni");
+  // Prototype-only group filter — mockGroupsForName/myGroups are a
+  // deterministic client-side guess, not real membership data (see
+  // lib/prototypeData.ts). myGroups(ownName) is *your* full affiliation
+  // set — your name-derived ones plus anything you've explicitly added on
+  // your profile (lets you genuinely be alumni of three different schools
+  // at once, not just whatever a single hash would've picked). "Alumni"
+  // narrows to the union of every alumni network you're actually in —
+  // "view all my alumni members" means everyone from any of your schools,
+  // not just one. Falls back to the broad type-wide bucket for anyone
+  // without a mock affiliation of their own (e.g. signed out).
+  const myAllGroups = myGroups(ownName);
+  const myGroupsOfType = (t: GroupType) => myAllGroups.filter((g) => g.type === t);
+  const myAlumniNetworks = myGroupsOfType("alumni");
   const groupFiltered = activeData.filter((p) => {
     if (groupFilter === "all") return true;
-    if (groupFilter === "alumni" && myAlumniGroup) {
-      return mockGroupsForName(p.name).some((g) => g.id === myAlumniGroup.id);
+    const mine = myGroupsOfType(groupFilter);
+    if (mine.length > 0) {
+      const mineIds = new Set(mine.map((g) => g.id));
+      return mockGroupsForName(p.name).some((g) => mineIds.has(g.id));
     }
     return mockGroupsForName(p.name).some((g) => g.type === groupFilter);
   });
   const peopleOnMap = showPeopleLayer ? groupFiltered : [];
-  // The "Open hub" shortcut next to the filter only makes sense once the
-  // filter has actually resolved to one specific group (your alumni network,
-  // or — for community/group — the same one everyone's mock-assigned-first
-  // affiliation of that type would be, same logic as myAlumniGroup above).
-  const filterResolvedGroup =
-    groupFilter === "alumni" ? myAlumniGroup : groupFilter !== "all" ? mockGroupsForName(ownName).find((g) => g.type === groupFilter) : undefined;
+  // "Open hub" shortcuts — one per network of the selected type you're
+  // actually in, since you might belong to several (three alumni networks,
+  // say) and each has its own hub. Falls back to the single group your name
+  // alone would resolve to, for anyone without an explicit membership.
+  const filterResolvedGroups =
+    groupFilter === "all"
+      ? []
+      : myGroupsOfType(groupFilter).length > 0
+        ? myGroupsOfType(groupFilter)
+        : mockGroupsForName(ownName)
+            .filter((g) => g.type === groupFilter)
+            .slice(0, 1);
 
   // Rendered twice below — as a mobile bottom sheet, and nested directly
   // under the toolbar as a desktop sidebar — so the two responsive layouts
@@ -963,15 +977,21 @@ export default function MapView({
                 title="Filter people by group"
               >
                 <option value="all">All people</option>
-                <option value="alumni">{myAlumniGroup ? `🎓 My alumni network — ${myAlumniGroup.name}` : "🎓 Alumni only"}</option>
+                <option value="alumni">
+                  {myAlumniNetworks.length === 0
+                    ? "🎓 Alumni only"
+                    : myAlumniNetworks.length === 1
+                      ? `🎓 My alumni network — ${myAlumniNetworks[0].name}`
+                      : `🎓 My alumni networks — ${myAlumniNetworks.map((g) => g.name).join(", ")}`}
+                </option>
                 <option value="community">👥 Communities only</option>
                 <option value="group">⛺ Groups only</option>
               </select>
-              {filterResolvedGroup && (
-                <button onClick={() => setHubGroupId(filterResolvedGroup.id)} className="btn btn-ghost btn-sm">
-                  Open hub →
+              {filterResolvedGroups.map((g) => (
+                <button key={g.id} onClick={() => setHubGroupId(g.id)} className="btn btn-ghost btn-sm">
+                  {filterResolvedGroups.length > 1 ? `${g.name} →` : "Open hub →"}
                 </button>
-              )}
+              ))}
             </div>
 
             {mode === "nearby" && dropOpen && (

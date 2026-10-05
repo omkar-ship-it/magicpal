@@ -72,6 +72,7 @@ export const MOCK_EVENTS: MockEvent[] = [
   { id: "evt-mum-1", name: "Mumbai Fintech Night", dateLabel: "Wed, Oct 22 · 7pm", venue: "BKC Terrace", city: "Mumbai", lat: 19.0660, lng: 72.8690, attendeesMock: 58 },
   { id: "evt-iitb-1", name: "IIT Bombay Alumni Meet", dateLabel: "Sat, Nov 8 · 11am", venue: "Powai Lake Lawn", city: "Mumbai", lat: 19.1280, lng: 72.9150, attendeesMock: 96, hostGroupId: "grp-iitb" },
   { id: "evt-exg-1", name: "Ex-Googlers Bengaluru Mixer", dateLabel: "Thu, Nov 6 · 7pm", venue: "Toit Brewpub", city: "Bengaluru", lat: 12.9698, lng: 77.6410, attendeesMock: 51, hostGroupId: "grp-exgoogle" },
+  { id: "evt-stan-1", name: "Stanford Alumni SF Social", dateLabel: "Fri, Nov 14 · 6:30pm", venue: "The Battery, SF", city: "San Francisco", lat: 37.7983, lng: -122.4015, attendeesMock: 74, hostGroupId: "grp-stanford" },
 ];
 
 export const MOCK_COMPANIES: MockCompany[] = [
@@ -91,12 +92,14 @@ export const MOCK_INSTITUTIONS: MockInstitution[] = [
   { id: "inst-iitb", groupId: "grp-iitb", name: "IIT Bombay", kind: "university", city: "Mumbai", lat: 19.1334, lng: 72.9133 },
   { id: "inst-isb", groupId: "grp-isb", name: "Indian School of Business", kind: "university", city: "Hyderabad", lat: 17.4239, lng: 78.3413 },
   { id: "inst-google", groupId: "grp-exgoogle", name: "Google Bengaluru", kind: "employer_alumni", city: "Bengaluru", lat: 12.9351, lng: 77.6947 },
+  { id: "inst-stanford", groupId: "grp-stanford", name: "Stanford University", kind: "university", city: "Stanford, CA", lat: 37.4275, lng: -122.1697 },
 ];
 
 export const MOCK_GROUPS: MockGroup[] = [
   { id: "grp-iitb", name: "IIT Bombay Alumni", type: "alumni", memberCountMock: 1240, missionMock: "Connecting IIT Bombay graduates building and leading across the world." },
   { id: "grp-isb", name: "ISB Alumni", type: "alumni", memberCountMock: 860, missionMock: "A network of ISB graduates in product, strategy, and venture." },
   { id: "grp-exgoogle", name: "Ex-Google", type: "alumni", memberCountMock: 540, missionMock: "Former Googlers helping each other build what's next." },
+  { id: "grp-stanford", name: "Stanford Alumni", type: "alumni", memberCountMock: 1510, missionMock: "Stanford graduates building and connecting across the world." },
   { id: "grp-blr-founders", name: "Bengaluru Founders", type: "community", memberCountMock: 2100, missionMock: "Early-stage founders in Bengaluru trading notes and warm intros." },
   { id: "grp-women-product", name: "Women in Product", type: "community", memberCountMock: 1680, missionMock: "Product leaders supporting other women building product." },
   { id: "grp-design-leaders", name: "Design Leaders India", type: "community", memberCountMock: 910, missionMock: "Senior design leaders across India's product companies." },
@@ -110,6 +113,7 @@ export const MOCK_ANNOUNCEMENTS: MockAnnouncement[] = [
   { id: "ann-blr-founders-1", groupId: "grp-blr-founders", author: "Vikram Shah", body: "Third Wave on Saturday — come swap fundraising war stories.", dateLabel: "3 days ago" },
   { id: "ann-women-product-1", groupId: "grp-women-product", author: "Nandini Rao", body: "Mentorship sign-ups are open for Q1 — 20 spots, first come first served.", dateLabel: "5 days ago" },
   { id: "ann-exgoogle-1", groupId: "grp-exgoogle", author: "Arjun Mehta", body: "Mixer at Toit on Nov 6 — RSVP so we can hold the back room.", dateLabel: "1 day ago" },
+  { id: "ann-stanford-1", groupId: "grp-stanford", author: "Jordan Lee", body: "SF social on Nov 14 at The Battery — alums from every era welcome.", dateLabel: "4 days ago" },
 ];
 
 /** A stable (not random-each-render) small hash, used to derive deterministic mock numbers/picks from a seed string. */
@@ -144,4 +148,48 @@ export function countPeopleAtCompany(profiles: Array<{ company: string | null }>
 /** Which of the already-loaded profiles belong to a given group — a real filter over mock affiliation data, not a fabricated member list. */
 export function membersInGroup<T extends { name: string }>(people: T[], groupId: string): T[] {
   return people.filter((p) => mockGroupsForName(p.name).some((g) => g.id === groupId));
+}
+
+const MY_EXTRA_GROUPS_KEY = "mp_my_extra_groups";
+
+/**
+ * A real person can be alumni of more schools than a 0–2 name-hash would
+ * ever assign (e.g. undergrad + an MBA + a past employer's alumni network).
+ * This lets *you specifically* declare extra affiliations beyond your
+ * hash-derived ones — prototype-only, stored in this browser's
+ * localStorage rather than a backend, so it survives navigating around the
+ * app in one session without pretending to be real, persisted membership.
+ */
+export function getMyExtraGroupIds(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(MY_EXTRA_GROUPS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setMyExtraGroupIds(ids: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(MY_EXTRA_GROUPS_KEY, JSON.stringify(ids));
+  } catch {
+    // Private browsing or storage disabled — the picker just won't persist across reloads.
+  }
+}
+
+/**
+ * Your own full set of affiliations: the deterministic ones your name
+ * always gets, plus any you've explicitly added for yourself. Only
+ * meaningful for "me" — everyone else on the map still uses plain
+ * mockGroupsForName, since there's no way to ask a mock person what
+ * schools they went to.
+ */
+export function myGroups(name: string): MockGroup[] {
+  const base = mockGroupsForName(name);
+  const extraIds = getMyExtraGroupIds();
+  const extra = MOCK_GROUPS.filter((g) => extraIds.includes(g.id) && !base.some((b) => b.id === g.id));
+  return [...base, ...extra];
 }
