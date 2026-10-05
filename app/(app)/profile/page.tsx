@@ -38,7 +38,7 @@ export default async function ProfilePage() {
         wasOnboarded={user.onboarded}
       />
 
-      {user.onboarded && <AffiliationsEditor name={row?.name ?? user.name ?? ""} />}
+      {user.onboarded && <AffiliationsEditor />}
     </div>
   );
 }

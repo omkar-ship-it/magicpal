@@ -23,18 +23,24 @@ import {
   EventCard,
   CompanyCard,
 } from "./MapPrimitives";
+import { MOCK_EVENTS, MOCK_COMPANIES, countPeopleAtCompany } from "@/lib/prototypeData";
 import {
-  MOCK_EVENTS,
-  MOCK_COMPANIES,
-  MOCK_INSTITUTIONS,
-  mockGroupsForName,
-  myGroups,
-  countPeopleAtCompany,
-  type MockInstitution,
-  type GroupType,
-} from "@/lib/prototypeData";
+  MOCK_NETWORKS,
+  MOCK_POSTS,
+  NETWORK_KIND_EMOJI,
+  NETWORK_KIND_LABEL,
+  PUBLIC_ENTITY_ID,
+  getMyGroupIds,
+  getMyNetworkIds,
+  networkById,
+  networksForName,
+  setMyGroupIds,
+  setMyNetworkIds,
+  type MockNetwork,
+  type MockPost,
+} from "@/lib/networks";
 import FloatingAccountMenu from "./FloatingAccountMenu";
-import CommunityHub from "./CommunityHub";
+import EntityPanel, { type PanelRef } from "./EntityPanel";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 const RADIUS_OPTIONS_KM = [5, 10, 25, 50, 100] as const;
@@ -64,20 +70,22 @@ function PanelIcon({ open }: { open: boolean }) {
   );
 }
 
-/** Prototype-only popup for a mock institution pin — the one new, genuinely georeferenced layer this round (a campus or an ex-employer's office is a real place; a "community" like Weekend Hikers isn't, so it doesn't get a pin — see CommunityHub). */
-function InstitutionCard({ inst, onOpenHub }: { inst: MockInstitution; onOpenHub: (groupId: string) => void }) {
+/** The popup for a network that has a real place — a campus or an office. Networks without one (professional networks) have no pin; you reach them from the selector or anyone's profile chips. */
+function NetworkCard({ net, onOpen }: { net: MockNetwork; onOpen: (id: string) => void }) {
   return (
     <div className="w-60 p-3.5">
       <span
         className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold"
         style={{ background: "color-mix(in srgb, var(--layer-institution) 14%, var(--card))", color: "var(--layer-institution)" }}
       >
-        <InstitutionIcon /> {inst.kind === "university" ? "University" : inst.kind === "employer_alumni" ? "Alumni network" : "Institution"}
+        <InstitutionIcon /> {NETWORK_KIND_LABEL[net.kind]}
       </span>
-      <p className="mt-1.5 text-[14.5px] font-semibold leading-tight">{inst.name}</p>
-      <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">{inst.city}</p>
-      <button onClick={() => onOpenHub(inst.groupId)} className="btn btn-primary btn-sm mt-3 w-full">
-        Open community hub →
+      <p className="mt-1.5 text-[14.5px] font-semibold leading-tight">{net.name}</p>
+      <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">
+        {net.place?.city} · {net.memberCountMock.toLocaleString()} members
+      </p>
+      <button onClick={() => onOpen(net.id)} className="btn btn-primary btn-sm mt-3 w-full">
+        Open network →
       </button>
     </div>
   );
@@ -145,19 +153,26 @@ export default function MapView({
   const [showEventsLayer, setShowEventsLayer] = useState(true);
   const [showCompaniesLayer, setShowCompaniesLayer] = useState(true);
   const [showInstitutionsLayer, setShowInstitutionsLayer] = useState(true);
-  const [groupFilter, setGroupFilter] = useState<"all" | GroupType>("all");
+  /** null = the all-encompassing Public Network. Otherwise exactly one network at a time. */
+  const [selectedNetworkId, setSelectedNetworkId] = useState<string | null>(null);
+  const [myNetworkIds, setMyNetworkIdsState] = useState<string[]>(() => getMyNetworkIds());
+  const [myGroupIds, setMyGroupIdsState] = useState<string[]>(() => getMyGroupIds());
+  /** Posts you write this session, on top of the seeded ones. Prototype-only — never leaves the browser. */
+  const [myPosts, setMyPosts] = useState<MockPost[]>([]);
   const [pinnedExtraId, setPinnedExtraId] = useState<string | null>(null);
   const [hoveredExtraId, setHoveredExtraId] = useState<string | null>(null);
   /**
-   * Which community's hub is open — set from an institution pin, the "Open
-   * hub" filter button, any group badge chip anywhere in the app, or (as a
-   * lazy initializer, so there's no flash of a closed hub before it opens)
-   * a `?previewGroup=` deep link from the institutions onboarding walkthrough.
-   * `typeof window` guards SSR, where there's no query string to read yet.
+   * The open panel stack — a network pushes on top of the map, a group
+   * pushes on top of its network, and closing unwinds back to the bare map.
+   * Seeded from a `?previewGroup=` deep link (the institutions walkthrough's
+   * closing step) as a lazy initializer, so there's no flash of a closed
+   * panel first. `typeof window` guards SSR.
    */
-  const [hubGroupId, setHubGroupId] = useState<string | null>(() =>
-    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("previewGroup")
-  );
+  const [panelStack, setPanelStack] = useState<PanelRef[]>(() => {
+    if (typeof window === "undefined") return [];
+    const qp = new URLSearchParams(window.location.search).get("previewGroup");
+    return qp ? [{ kind: "network", id: qp }] : [];
+  });
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapRef = useRef<MapRef>(null);
 
@@ -261,7 +276,7 @@ export default function MapView({
   // "view the alumni all over the world" needs the actual worldwide roster,
   // not whatever happens to be within the current street-level radius.
   useEffect(() => {
-    if (mode !== "network" && !hubGroupId) return;
+    if (mode !== "network" && panelStack.length === 0) return;
     let cancelled = false;
     Promise.resolve().then(() => {
       if (!cancelled) setWorldLoading(true);
@@ -281,7 +296,7 @@ export default function MapView({
     return () => {
       cancelled = true;
     };
-  }, [mode, hubGroupId, ownLat, ownLng, seedConnFromProfiles]);
+  }, [mode, panelStack.length, ownLat, ownLng, seedConnFromProfiles]);
 
   // Nearby mode flies back to a street-level view of `center`; network mode
   // zooms out and fits every connection (plus your own pin) into frame —
@@ -439,41 +454,51 @@ export default function MapView({
       : [];
 
   const activeData = mode === "nearby" ? profiles : worldProfiles;
-  // Prototype-only group filter — mockGroupsForName/myGroups are a
-  // deterministic client-side guess, not real membership data (see
-  // lib/prototypeData.ts). myGroups(ownName) is *your* full affiliation
-  // set — your name-derived ones plus anything you've explicitly added on
-  // your profile (lets you genuinely be alumni of three different schools
-  // at once, not just whatever a single hash would've picked). "Alumni"
-  // narrows to the union of every alumni network you're actually in —
-  // "view all my alumni members" means everyone from any of your schools,
-  // not just one. Falls back to the broad type-wide bucket for anyone
-  // without a mock affiliation of their own (e.g. signed out).
-  const myAllGroups = myGroups(ownName);
-  const myGroupsOfType = (t: GroupType) => myAllGroups.filter((g) => g.type === t);
-  const myAlumniNetworks = myGroupsOfType("alumni");
-  const groupFiltered = activeData.filter((p) => {
-    if (groupFilter === "all") return true;
-    const mine = myGroupsOfType(groupFilter);
-    if (mine.length > 0) {
-      const mineIds = new Set(mine.map((g) => g.id));
-      return mockGroupsForName(p.name).some((g) => mineIds.has(g.id));
+  // Prototype-only membership (lib/networks.ts) — deterministic from a name
+  // hash plus a curated roster, not real data. Selecting a network narrows
+  // the map to just that network's people, anywhere in the world; "All
+  // networks" is the Public Network — everyone, no membership needed.
+  const selectedNetwork = selectedNetworkId ? networkById(selectedNetworkId) : undefined;
+  const networkFiltered = selectedNetworkId
+    ? activeData.filter((p) => networksForName(p.name).some((n) => n.id === selectedNetworkId))
+    : activeData;
+  const peopleOnMap = showPeopleLayer ? networkFiltered : [];
+  const myNetworks = MOCK_NETWORKS.filter((n) => myNetworkIds.includes(n.id));
+
+  const openEntity = (kind: "network" | "group", id: string) => setPanelStack((st) => [...st, { kind, id } as PanelRef]);
+  const topPanel = panelStack[panelStack.length - 1];
+
+  function toggleMembership(panel: PanelRef) {
+    if (panel.kind === "public") return;
+    if (panel.kind === "network") {
+      const next = myNetworkIds.includes(panel.id) ? myNetworkIds.filter((x) => x !== panel.id) : [...myNetworkIds, panel.id];
+      setMyNetworkIdsState(next);
+      setMyNetworkIds(next);
+      // Leaving a network you're currently filtered to drops you back to the public view.
+      if (!next.includes(panel.id) && selectedNetworkId === panel.id) setSelectedNetworkId(null);
+      return;
     }
-    return mockGroupsForName(p.name).some((g) => g.type === groupFilter);
-  });
-  const peopleOnMap = showPeopleLayer ? groupFiltered : [];
-  // "Open hub" shortcuts — one per network of the selected type you're
-  // actually in, since you might belong to several (three alumni networks,
-  // say) and each has its own hub. Falls back to the single group your name
-  // alone would resolve to, for anyone without an explicit membership.
-  const filterResolvedGroups =
-    groupFilter === "all"
-      ? []
-      : myGroupsOfType(groupFilter).length > 0
-        ? myGroupsOfType(groupFilter)
-        : mockGroupsForName(ownName)
-            .filter((g) => g.type === groupFilter)
-            .slice(0, 1);
+    const next = myGroupIds.includes(panel.id) ? myGroupIds.filter((x) => x !== panel.id) : [...myGroupIds, panel.id];
+    setMyGroupIdsState(next);
+    setMyGroupIds(next);
+  }
+
+  function isMemberOf(panel: PanelRef): boolean {
+    if (panel.kind === "public") return true;
+    if (panel.kind === "network") return myNetworkIds.includes(panel.id);
+    return myGroupIds.includes(panel.id);
+  }
+
+  function addPost(entityId: string, body: string) {
+    setMyPosts((cur) => [
+      { id: `my-${Date.now()}`, entityId, author: ownName || "You", body, dateLabel: "just now" },
+      ...cur,
+    ]);
+  }
+
+  function postsFor(entityId: string): MockPost[] {
+    return [...myPosts.filter((p) => p.entityId === entityId), ...MOCK_POSTS.filter((p) => p.entityId === entityId)];
+  }
 
   // Rendered twice below — as a mobile bottom sheet, and nested directly
   // under the toolbar as a desktop sidebar — so the two responsive layouts
@@ -485,11 +510,11 @@ export default function MapView({
         {!loading && profiles.length === 0 && (
           <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one visible within {radiusKm}km yet. Try a wider radius.</p>
         )}
-        {!loading && profiles.length > 0 && groupFiltered.length === 0 && (
-          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one nearby matches that filter yet.</p>
+        {!loading && profiles.length > 0 && networkFiltered.length === 0 && (
+          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one nearby is in {selectedNetwork?.name ?? "that network"} yet.</p>
         )}
         <div className="flex flex-col gap-2.5">
-          {groupFiltered.map((p) => (
+          {networkFiltered.map((p) => (
             <ProfileListRow
               key={p.id}
               p={p}
@@ -501,7 +526,7 @@ export default function MapView({
               onUnhover={unhoverProfile}
               onConnect={connectTo}
               onRespond={respondTo}
-              onOpenHub={setHubGroupId}
+              onOpenEntity={openEntity}
             />
           ))}
         </div>
@@ -512,11 +537,11 @@ export default function MapView({
         {!worldLoading && worldProfiles.length === 0 && (
           <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one else has joined yet — check back soon.</p>
         )}
-        {!worldLoading && worldProfiles.length > 0 && groupFiltered.length === 0 && (
-          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one matches that filter yet.</p>
+        {!worldLoading && worldProfiles.length > 0 && networkFiltered.length === 0 && (
+          <p className="px-2 py-3 text-[13px] text-[var(--ink-soft)]">No one in {selectedNetwork?.name ?? "that network"} yet.</p>
         )}
         <div className="flex flex-col gap-2.5">
-          {groupFiltered.map((p) => (
+          {networkFiltered.map((p) => (
             <ProfileListRow
               key={p.id}
               p={p}
@@ -528,7 +553,7 @@ export default function MapView({
               onUnhover={unhoverProfile}
               onConnect={connectTo}
               onRespond={respondTo}
-              onOpenHub={setHubGroupId}
+              onOpenEntity={openEntity}
             />
           ))}
         </div>
@@ -651,7 +676,7 @@ export default function MapView({
                       onNoteChange={(v) => setNotes((n) => ({ ...n, [p.id]: v }))}
                       onConnect={connectTo}
                       onRespond={respondTo}
-                      onOpenHub={setHubGroupId}
+                      onOpenEntity={openEntity}
                     />
                   </div>
                 </Popup>
@@ -735,37 +760,38 @@ export default function MapView({
 
         {mode === "nearby" &&
           showInstitutionsLayer &&
-          MOCK_INSTITUTIONS.map((inst) => {
-            const open = hoveredExtraId === inst.id || pinnedExtraId === inst.id;
+          MOCK_NETWORKS.filter((n) => n.place).map((net) => {
+            const open = hoveredExtraId === net.id || pinnedExtraId === net.id;
+            const place = net.place!;
             return (
-              <Marker key={inst.id} longitude={inst.lng} latitude={inst.lat} anchor="center">
+              <Marker key={net.id} longitude={place.lng} latitude={place.lat} anchor="center">
                 <div
                   className={`layer-pin${open ? " layer-pin-hover" : ""}`}
                   style={{ background: "var(--layer-institution)" }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    setPinnedExtraId((cur) => (cur === inst.id ? null : inst.id));
+                    setPinnedExtraId((cur) => (cur === net.id ? null : net.id));
                   }}
-                  onMouseEnter={() => setHoveredExtraId(inst.id)}
-                  onMouseLeave={() => setHoveredExtraId((cur) => (cur === inst.id ? null : cur))}
+                  onMouseEnter={() => setHoveredExtraId(net.id)}
+                  onMouseLeave={() => setHoveredExtraId((cur) => (cur === net.id ? null : cur))}
                 >
                   <InstitutionIcon />
                 </div>
                 {open && (
                   <Popup
-                    longitude={inst.lng}
-                    latitude={inst.lat}
+                    longitude={place.lng}
+                    latitude={place.lat}
                     anchor="top"
                     closeButton={false}
                     closeOnClick={false}
                     offset={20}
-                    onClose={() => setPinnedExtraId((cur) => (cur === inst.id ? null : cur))}
+                    onClose={() => setPinnedExtraId((cur) => (cur === net.id ? null : cur))}
                   >
-                    <InstitutionCard
-                      inst={inst}
-                      onOpenHub={(groupId) => {
+                    <NetworkCard
+                      net={net}
+                      onOpen={(id) => {
                         setPinnedExtraId(null);
-                        setHubGroupId(groupId);
+                        openEntity("network", id);
                       }}
                     />
                   </Popup>
@@ -975,26 +1001,50 @@ export default function MapView({
               )}
               <select
                 className="chip-select"
-                value={groupFilter}
-                onChange={(e) => setGroupFilter(e.target.value as "all" | GroupType)}
-                title="Filter people by group"
+                value={selectedNetworkId ?? "all"}
+                onChange={(e) => setSelectedNetworkId(e.target.value === "all" ? null : e.target.value)}
+                title="Show one network at a time, or the whole public network"
               >
-                <option value="all">All people</option>
-                <option value="alumni">
-                  {myAlumniNetworks.length === 0
-                    ? "🎓 Alumni only"
-                    : myAlumniNetworks.length === 1
-                      ? `🎓 My alumni network — ${myAlumniNetworks[0].name}`
-                      : `🎓 My alumni networks — ${myAlumniNetworks.map((g) => g.name).join(", ")}`}
-                </option>
-                <option value="community">👥 Communities only</option>
-                <option value="group">⛺ Groups only</option>
+                <option value="all">🌍 All networks — Public</option>
+                <optgroup label="Universities">
+                  {myNetworks
+                    .filter((n) => n.kind === "institution")
+                    .map((n) => (
+                      <option key={n.id} value={n.id}>
+                        {NETWORK_KIND_EMOJI[n.kind]} {n.name}
+                      </option>
+                    ))}
+                </optgroup>
+                <optgroup label="Employer alumni">
+                  {myNetworks
+                    .filter((n) => n.kind === "employer")
+                    .map((n) => (
+                      <option key={n.id} value={n.id}>
+                        {NETWORK_KIND_EMOJI[n.kind]} {n.name}
+                      </option>
+                    ))}
+                </optgroup>
+                <optgroup label="Professional networks">
+                  {myNetworks
+                    .filter((n) => n.kind === "professional")
+                    .map((n) => (
+                      <option key={n.id} value={n.id}>
+                        {NETWORK_KIND_EMOJI[n.kind]} {n.name}
+                      </option>
+                    ))}
+                </optgroup>
               </select>
-              {filterResolvedGroups.map((g) => (
-                <button key={g.id} onClick={() => setHubGroupId(g.id)} className="btn btn-ghost btn-sm">
-                  {filterResolvedGroups.length > 1 ? `${g.name} →` : "Open hub →"}
-                </button>
-              ))}
+
+              <button
+                onClick={() => setPanelStack(selectedNetworkId ? [{ kind: "network", id: selectedNetworkId }] : [{ kind: "public" }])}
+                className="btn btn-ghost btn-sm"
+              >
+                {selectedNetwork ? `Open ${selectedNetwork.name} →` : "Open public feed →"}
+              </button>
+
+              <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
+                {myNetworks.length} networks
+              </span>
             </div>
 
             {mode === "nearby" && dropOpen && (
@@ -1045,12 +1095,19 @@ export default function MapView({
       {/* Mobile only — bottom sheet, pinned to the viewport regardless of the toolbar's height. */}
       <div className="floating-list lg:hidden">{listBody}</div>
 
-      {hubGroupId && (
-        <CommunityHub
-          groupId={hubGroupId}
-          onClose={() => setHubGroupId(null)}
+      {topPanel && (
+        <EntityPanel
+          panel={topPanel}
+          depth={panelStack.length}
           people={worldProfiles}
           loading={worldLoading && worldProfiles.length === 0}
+          posts={postsFor(topPanel.kind === "public" ? PUBLIC_ENTITY_ID : topPanel.id)}
+          onPost={addPost}
+          isMember={isMemberOf(topPanel)}
+          onToggleMembership={() => toggleMembership(topPanel)}
+          onOpen={(next) => setPanelStack((st) => [...st, next])}
+          onBack={() => setPanelStack((st) => st.slice(0, -1))}
+          onClose={() => setPanelStack([])}
           conn={conn}
           onConnect={connectTo}
           onRespond={respondTo}

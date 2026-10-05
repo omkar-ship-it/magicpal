@@ -3,21 +3,21 @@
 import { useState } from "react";
 import Link from "next/link";
 import { InstitutionIcon } from "@/components/MapPrimitives";
-import type { InstitutionKind } from "@/lib/prototypeData";
+import type { NetworkKind } from "@/lib/networks";
 
 type Step = "intro" | "create" | "brand" | "invite" | "done";
 
-const KIND_LABEL: Record<InstitutionKind, string> = {
-  university: "University",
-  employer_alumni: "Employer alumni network",
-  professional_body: "Professional body",
+const KIND_LABEL: Record<NetworkKind, string> = {
+  institution: "University",
+  employer: "Employer alumni network",
+  professional: "Professional network",
 };
 
 /** Which already-seeded demo community the walkthrough deep-links into at the end — this whole page is a clickthrough prototype, not a real onboarding backend, so there's nothing to actually create. */
-const DEMO_GROUP_FOR_KIND: Record<InstitutionKind, string> = {
-  university: "grp-iitb",
-  employer_alumni: "grp-exgoogle",
-  professional_body: "grp-design-leaders",
+const DEMO_NETWORK_FOR_KIND: Record<NetworkKind, string> = {
+  institution: "net-iitb",
+  employer: "net-exgoogle",
+  professional: "net-design-leaders",
 };
 
 const SWATCHES = ["#2a5db0", "#7c5cff", "#0ea5b8", "#c2410c", "#1f8a5f"];
@@ -54,7 +54,7 @@ function StepDots({ step }: { step: Step }) {
 export default function InstitutionsPage() {
   const [step, setStep] = useState<Step>("intro");
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<InstitutionKind>("university");
+  const [kind, setKind] = useState<NetworkKind>("institution");
   const [mission, setMission] = useState("");
   const [color, setColor] = useState(SWATCHES[0]);
   const [copied, setCopied] = useState(false);
@@ -133,8 +133,8 @@ export default function InstitutionsPage() {
             </div>
             <div>
               <label className="label">Type</label>
-              <select className="input" value={kind} onChange={(e) => setKind(e.target.value as InstitutionKind)}>
-                {(Object.keys(KIND_LABEL) as InstitutionKind[]).map((k) => (
+              <select className="input" value={kind} onChange={(e) => setKind(e.target.value as NetworkKind)}>
+                {(Object.keys(KIND_LABEL) as NetworkKind[]).map((k) => (
                   <option key={k} value={k}>
                     {KIND_LABEL[k]}
                   </option>
@@ -189,7 +189,7 @@ export default function InstitutionsPage() {
             </div>
 
             <div className="rounded-2xl border border-[var(--line)] p-4">
-              <span className="text-[22px] leading-none">{kind === "university" ? "🎓" : "👥"}</span>
+              <span className="text-[22px] leading-none">{kind === "institution" ? "🎓" : kind === "employer" ? "🏢" : "🧭"}</span>
               <h2 className="mt-1.5 text-[16px] font-bold leading-tight">{name || "Your network"}</h2>
               <span className="pill mt-1.5" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
                 Member count grows as people join
@@ -258,7 +258,7 @@ export default function InstitutionsPage() {
             </div>
           </div>
           <div className="mt-5 flex flex-wrap gap-2">
-            <Link href={`/?previewGroup=${DEMO_GROUP_FOR_KIND[kind]}`} className="btn btn-primary">
+            <Link href={`/?previewGroup=${DEMO_NETWORK_FOR_KIND[kind]}`} className="btn btn-primary">
               View it on the map →
             </Link>
             <button

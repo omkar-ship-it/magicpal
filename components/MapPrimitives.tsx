@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { avatarUrl } from "@/lib/avatar";
-import { mockConnectionCount, mockGroupsForName, type MockEvent, type MockCompany, type MockGroup } from "@/lib/prototypeData";
+import { mockConnectionCount, type MockEvent, type MockCompany } from "@/lib/prototypeData";
+import { NETWORK_KIND_EMOJI, groupsForName, isClub, networksForName } from "@/lib/networks";
 
 const MAX_NOTE = 300;
 
@@ -334,23 +335,51 @@ export function ActionButton({
   );
 }
 
-function GroupChips({ groups, onOpenHub }: { groups: MockGroup[]; onOpenHub?: (groupId: string) => void }) {
-  if (groups.length === 0) return null;
+/**
+ * A person's affiliations: the networks they're in, then the groups/clubs
+ * inside them. Each chip is a door into that entity's panel.
+ */
+function AffiliationChips({
+  name,
+  onOpenEntity,
+  maxNetworks = 3,
+}: {
+  name: string;
+  onOpenEntity?: (kind: "network" | "group", id: string) => void;
+  maxNetworks?: number;
+}) {
+  const networks = networksForName(name);
+  const groups = groupsForName(name);
+  if (networks.length === 0 && groups.length === 0) return null;
+  const shown = networks.slice(0, maxNetworks);
+  const hidden = networks.length - shown.length;
   return (
     <div className="mt-2 flex flex-wrap gap-1">
-      {groups.map((g) => (
+      {shown.map((n) => (
+        <span
+          key={n.id}
+          className="skill-tag"
+          onClick={onOpenEntity ? () => onOpenEntity("network", n.id) : undefined}
+          style={{
+            cursor: onOpenEntity ? "pointer" : undefined,
+            background: "color-mix(in srgb, var(--layer-event) 14%, var(--card))",
+            color: "var(--layer-event)",
+          }}
+          title={onOpenEntity ? `Open ${n.name}` : undefined}
+        >
+          {NETWORK_KIND_EMOJI[n.kind]} {n.name}
+        </span>
+      ))}
+      {hidden > 0 && <span className="skill-tag">+{hidden} more</span>}
+      {groups.slice(0, 2).map((g) => (
         <span
           key={g.id}
           className="skill-tag"
-          onClick={onOpenHub ? () => onOpenHub(g.id) : undefined}
-          style={{
-            cursor: onOpenHub ? "pointer" : undefined,
-            background: g.type === "alumni" ? "color-mix(in srgb, var(--layer-event) 14%, var(--card))" : undefined,
-            color: g.type === "alumni" ? "var(--layer-event)" : undefined,
-          }}
-          title={onOpenHub ? `Open ${g.name}'s hub` : undefined}
+          onClick={onOpenEntity ? () => onOpenEntity("group", g.id) : undefined}
+          style={{ cursor: onOpenEntity ? "pointer" : undefined }}
+          title={onOpenEntity ? `Open ${g.name}` : undefined}
         >
-          {g.type === "alumni" ? "🎓" : g.type === "community" ? "👥" : "⛺"} {g.name}
+          {isClub(g) ? "⛺" : "👥"} {g.name}
         </span>
       ))}
     </div>
@@ -367,7 +396,7 @@ export function ProfileCard({
   onNoteChange,
   onConnect,
   onRespond,
-  onOpenHub,
+  onOpenEntity,
 }: {
   p: Profile;
   conn: ConnState | undefined;
@@ -377,11 +406,10 @@ export function ProfileCard({
   onNoteChange: (v: string) => void;
   onConnect: (id: string, note?: string) => void;
   onRespond: (p: Profile, accept: boolean) => void;
-  /** Lets a group badge chip open that community's hub — omit to render chips as plain labels. */
-  onOpenHub?: (groupId: string) => void;
+  /** Lets an affiliation chip open that network/group's panel — omit to render chips as plain labels. */
+  onOpenEntity?: (kind: "network" | "group", id: string) => void;
 }) {
   const status = pinStatusOf(conn);
-  const groups = mockGroupsForName(p.name);
   return (
     <div className="w-72 p-3.5">
       <div className="flex items-start gap-3">
@@ -426,7 +454,7 @@ export function ProfileCard({
         </span>
       )}
 
-      <GroupChips groups={groups} onOpenHub={onOpenHub} />
+      <AffiliationChips name={p.name} onOpenEntity={onOpenEntity} />
 
       <div className="mt-2 flex items-center gap-1 text-[11.5px] text-[var(--ink-soft)]">
         {p.locationLabel && <span className="truncate">{p.locationLabel}</span>}
@@ -524,7 +552,7 @@ export function ProfileListRow({
   onUnhover,
   onConnect,
   onRespond,
-  onOpenHub,
+  onOpenEntity,
   communityName,
 }: {
   p: Profile;
@@ -536,13 +564,12 @@ export function ProfileListRow({
   onUnhover: (id: string) => void;
   onConnect: (id: string, note?: string) => void;
   onRespond: (p: Profile, accept: boolean) => void;
-  /** Lets a group badge chip open that community's hub — omit to render chips as plain labels. */
-  onOpenHub?: (groupId: string) => void;
+  /** Lets an affiliation chip open that network/group's panel — omit to render chips as plain labels. */
+  onOpenEntity?: (kind: "network" | "group", id: string) => void;
   /** Set inside a Community Hub's member list — gives ActionButton the warmer "fellow member" connect CTA. */
   communityName?: string;
 }) {
   const status = pinStatusOf(conn);
-  const groups = mockGroupsForName(p.name);
   return (
     <div
       onMouseEnter={() => onHover(p.id)}
@@ -587,7 +614,7 @@ export function ProfileListRow({
           {formatDistance(p.distanceKm)} · {mockConnectionCount(p.id).toLocaleString()} connections
         </p>
         {p.drop && <DropBadge drop={p.drop} now={now} />}
-        {!communityName && <GroupChips groups={groups} onOpenHub={onOpenHub} />}
+        {!communityName && <AffiliationChips name={p.name} onOpenEntity={onOpenEntity} maxNetworks={2} />}
         {p.skills.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1">
             {p.skills.slice(0, 3).map((s) => (
