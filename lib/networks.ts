@@ -16,7 +16,7 @@
  * demo data, not an authoritative roster.
  */
 
-import { hashSeed } from "./prototypeData";
+import { hashSeed, type PriceTier } from "./prototypeData";
 
 export type MockEntity = {
   id: string;
@@ -32,6 +32,8 @@ export type MockEntity = {
   blurbMock: string;
   /** A real campus, office, or chapter city earns a map pin. */
   place?: { city: string; lat: number; lng: number };
+  /** Paid communities ask you to pick a tier before you're in. Absent = free to join. */
+  membershipTiers?: PriceTier[];
 };
 
 export const PUBLIC_ENTITY_ID = "public";
@@ -44,16 +46,23 @@ function node(
   emoji: string,
   memberCountMock: number,
   blurbMock: string,
-  opts: { childLabel?: string; place?: { city: string; lat: number; lng: number } } = {}
+  opts: { childLabel?: string; place?: { city: string; lat: number; lng: number }; membershipTiers?: PriceTier[] } = {}
 ): MockEntity {
   return { id, name, parentId, label, emoji, memberCountMock, blurbMock, ...opts };
 }
+
+/** Chapter membership is paid, the way TiE's actually is — a general tier and a Charter Member tier. */
+const TIE_CHAPTER_TIERS: PriceTier[] = [
+  { id: "general", name: "General Member", priceLabel: "₹5,000", period: "per year", perks: ["Chapter events at member rates", "Member directory", "Monthly newsletter"], featured: true },
+  { id: "charter", name: "Charter Member", priceLabel: "₹50,000", period: "per year", perks: ["Everything in General", "Mentor and be mentored 1:1", "Charter dinners", "Vote in chapter elections", "Deal flow from TiE Angels"] },
+];
 
 /** TiE chapter shorthand — every chapter is the same shape, just a different city. */
 function tieChapter(slug: string, name: string, regionId: string, city: string, lat: number, lng: number, members: number): MockEntity {
   return node(`tie-${slug}`, name, regionId, "Chapter", "📍", members, `TiE's ${city} chapter — mentoring, funding, and founder events.`, {
     childLabel: "Programmes",
     place: { city, lat, lng },
+    membershipTiers: TIE_CHAPTER_TIERS,
   });
 }
 
@@ -233,7 +242,12 @@ const FLAT_NETWORKS: MockEntity[] = [
   node("design-leaders", "Design Leaders India", null, "Network", "🧭", 9100, "Senior design leaders across India's product companies."),
   node("blr-founders", "Bengaluru Founders", null, "Network", "🧭", 21000, "Early-stage founders in Bengaluru trading notes and intros."),
   node("climate", "Climate Tech Collective", null, "Network", "🧭", 5200, "Builders working on decarbonisation across hardware and software."),
-  node("angels", "Angel Investors India", null, "Network", "🧭", 4400, "Active angels sharing deal flow and diligence notes."),
+  node("angels", "Angel Investors India", null, "Network", "🧭", 4400, "Active angels sharing deal flow and diligence notes.", {
+    membershipTiers: [
+      { id: "syndicate", name: "Syndicate member", priceLabel: "₹25,000", period: "per year", perks: ["Weekly deal memos", "Co-investment rights", "Diligence pod access"], featured: true },
+      { id: "observer", name: "Observer", priceLabel: "₹6,000", period: "per year", perks: ["Weekly deal memos", "Quarterly roundtable"] },
+    ],
+  }),
   node("yc", "Y Combinator Alumni", null, "Network", "🧭", 8800, "YC founders across batches, hiring and helping each other."),
 ];
 

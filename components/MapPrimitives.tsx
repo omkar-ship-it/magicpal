@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { avatarUrl } from "@/lib/avatar";
 import { mockConnectionCount, type MockEvent, type MockCompany } from "@/lib/prototypeData";
@@ -498,9 +497,8 @@ export function ProfileCard({
   );
 }
 
-/** Prototype-only popup for a mock event pin — no RSVP backend yet, so the button just confirms locally. */
-export function EventCard({ ev }: { ev: MockEvent }) {
-  const [rsvped, setRsvped] = useState(false);
+/** The small popup on an event pin — a teaser that opens the full event page. */
+export function EventCard({ ev, onOpen }: { ev: MockEvent; onOpen: () => void }) {
   return (
     <div className="w-64 p-3.5">
       <span
@@ -510,24 +508,24 @@ export function EventCard({ ev }: { ev: MockEvent }) {
         <CalendarIcon /> Event
       </span>
       <p className="mt-1.5 text-[14.5px] font-semibold leading-tight">{ev.name}</p>
-      <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">{ev.dateLabel}</p>
+      <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">
+        {ev.dateLabel} · {ev.timeLabel}
+      </p>
       <p className="text-[12px] text-[var(--ink-soft)]">
         {ev.venue}, {ev.city}
       </p>
-      <p className="mt-1.5 text-[11.5px] text-[var(--ink-soft)]">{ev.attendeesMock} people attending</p>
-      <button
-        onClick={() => setRsvped((v) => !v)}
-        className={rsvped ? "btn btn-ghost btn-sm mt-3 w-full" : "btn btn-primary btn-sm mt-3 w-full"}
-      >
-        {rsvped ? "You're going ✓" : "RSVP"}
+      <p className="mt-1.5 text-[11.5px] text-[var(--ink-soft)]">
+        {ev.attendeesMock.toLocaleString()} attending · {ev.tickets ? `from ${ev.tickets[0].priceLabel}` : "free"}
+      </p>
+      <button onClick={onOpen} className="btn btn-primary btn-sm mt-3 w-full">
+        Open event →
       </button>
     </div>
   );
 }
 
 /** Prototype-only popup for a mock company pin — "people here" is a real count over the loaded nearby list, everything else is mock. */
-export function CompanyCard({ co, peopleHere }: { co: MockCompany; peopleHere: number }) {
-  const [following, setFollowing] = useState(false);
+export function CompanyCard({ co, peopleHere, onOpen }: { co: MockCompany; peopleHere: number; onOpen: () => void }) {
   return (
     <div className="w-60 p-3.5">
       <span
@@ -545,11 +543,8 @@ export function CompanyCard({ co, peopleHere }: { co: MockCompany; peopleHere: n
           {peopleHere} {peopleHere === 1 ? "person" : "people"} here in your network view
         </p>
       )}
-      <button
-        onClick={() => setFollowing((v) => !v)}
-        className={following ? "btn btn-ghost btn-sm mt-3 w-full" : "btn btn-primary btn-sm mt-3 w-full"}
-      >
-        {following ? "Following ✓" : "Follow"}
+      <button onClick={onOpen} className="btn btn-primary btn-sm mt-3 w-full">
+        Open company →
       </button>
     </div>
   );

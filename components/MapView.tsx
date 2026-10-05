@@ -23,7 +23,7 @@ import {
   EventCard,
   CompanyCard,
 } from "./MapPrimitives";
-import { MOCK_EVENTS, MOCK_COMPANIES, countPeopleAtCompany } from "@/lib/prototypeData";
+import { MOCK_EVENTS, MOCK_COMPANIES, countPeopleAtCompany, companyById, eventById } from "@/lib/prototypeData";
 import {
   MOCK_POSTS,
   PLACED_ENTITIES,
@@ -40,7 +40,11 @@ import {
 } from "@/lib/networks";
 import { MOCK_ACCEPTED_NAMES } from "@/lib/chatData";
 import FloatingAccountMenu from "./FloatingAccountMenu";
-import EntityPanel, { type PanelSize } from "./EntityPanel";
+import EntityPanel from "./EntityPanel";
+import EventPanel from "./EventPanel";
+import CompanyPanel from "./CompanyPanel";
+import PanelDock, { type DockSize, type DockTab } from "./PanelDock";
+import type { CheckoutResult } from "./Checkout";
 import ChatWindow, { type ChatWindowState } from "./ChatWindow";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
@@ -50,6 +54,9 @@ const DEFAULT_RADIUS_KM = 25;
 const DEFAULT_CENTER = { lat: 12.9716, lng: 77.5946 };
 
 type Mode = "nearby" | "network";
+
+/** One open window over the map. Entity tabs carry their own drill-down stack. */
+type OpenTab = { key: string; kind: "entity"; stack: string[] } | { key: string; kind: "event" | "company"; id: string };
 
 function TargetIcon() {
   return (
@@ -157,8 +164,11 @@ export default function MapView({
   /** null = the all-encompassing Public Network. Otherwise exactly one network at a time. */
   const [selectedNetworkId, setSelectedNetworkId] = useState<string | null>(null);
   const [myEntityIds, setMyEntityIdsState] = useState<string[]>(() => getMyEntityIds());
-  const [panelSize, setPanelSize] = useState<PanelSize>("side");
-  const [panelWidth, setPanelWidth] = useState(430);
+  const [dockSize, setDockSize] = useState<DockSize>("side");
+  const [dockWidth, setDockWidth] = useState(430);
+  /** Paid things you've bought this session — community memberships and event tickets. */
+  const [paidMemberships, setPaidMemberships] = useState<Record<string, CheckoutResult>>({});
+  const [registrations, setRegistrations] = useState<Record<string, CheckoutResult>>({});
   const [chatWith, setChatWith] = useState<Profile | null>(null);
   const [chatState, setChatState] = useState<ChatWindowState>("expanded");
   /** Posts you write this session, on top of the seeded ones. Prototype-only — never leaves the browser. */
@@ -172,10 +182,20 @@ export default function MapView({
    * closing step) as a lazy initializer, so there's no flash of a closed
    * panel first. `typeof window` guards SSR.
    */
-  const [panelStack, setPanelStack] = useState<string[]>(() => {
+  /**
+   * Everything open over the map, as tabs. An entity tab keeps its own
+   * drill-down stack so Back walks up the tree within that tab; event and
+   * company tabs are single pages. Closing them all returns to the map.
+   */
+  const [tabs, setTabs] = useState<OpenTab[]>(() => {
     if (typeof window === "undefined") return [];
     const qp = new URLSearchParams(window.location.search).get("previewGroup");
-    return qp ? [qp] : [];
+    return qp ? [{ key: `entity:${qp}`, kind: "entity", stack: [qp] }] : [];
+  });
+  const [activeTabKey, setActiveTabKey] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    const qp = new URLSearchParams(window.location.search).get("previewGroup");
+    return qp ? `entity:${qp}` : "";
   });
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapRef = useRef<MapRef>(null);
@@ -280,7 +300,7 @@ export default function MapView({
   // "view the alumni all over the world" needs the actual worldwide roster,
   // not whatever happens to be within the current street-level radius.
   useEffect(() => {
-    if (mode !== "network" && panelStack.length === 0) return;
+    if (mode !== "network" && tabs.length === 0) return;
     let cancelled = false;
     Promise.resolve().then(() => {
       if (!cancelled) setWorldLoading(true);
@@ -300,7 +320,7 @@ export default function MapView({
     return () => {
       cancelled = true;
     };
-  }, [mode, panelStack.length, ownLat, ownLng, seedConnFromProfiles]);
+  }, [mode, tabs.length, ownLat, ownLng, seedConnFromProfiles]);
 
   // Nearby mode flies back to a street-level view of `center`; network mode
   // zooms out and fits every connection (plus your own pin) into frame —
@@ -473,23 +493,71 @@ export default function MapView({
   const myMembership = expandMembership(myEntityIds);
   const myNetworks = TOP_NETWORKS.filter((n) => myMembership.has(n.id));
 
-  const openEntity = (id: string) => setPanelStack((st) => (st[st.length - 1] === id ? st : [...st, id]));
-  const topPanelId = panelStack[panelStack.length - 1];
+  const activeTab = tabs.find((t) => t.key === activeTabKey) ?? tabs[tabs.length - 1];
 
-  /**
-   * Joining a node joins its whole ancestry — you can't be in Class of 2019
-   * without being in PGP and ISB. Leaving drops its descendants with it.
-   */
-  function toggleMembership(id: string) {
-    if (id === PUBLIC_ENTITY_ID) return;
-    let next: string[];
-    if (myEntityIds.includes(id)) {
-      next = myEntityIds.filter((x) => x !== id && !ancestorsOf(x).some((a) => a.id === id));
-    } else {
-      next = Array.from(new Set([...myEntityIds, id]));
+  /** Opening something that's already a tab focuses it rather than duplicating it. */
+  function openTab(tab: OpenTab) {
+    setTabs((cur) => (cur.some((t) => t.key === tab.key) ? cur : [...cur, tab]));
+    setActiveTabKey(tab.key);
+    setDockSize((sz) => (sz === "min" ? "side" : sz));
+  }
+
+  function openEntity(id: string) {
+    // Drilling down inside the focused entity tab pushes onto its own stack;
+    // otherwise it's a new tab.
+    const current = tabs.find((t) => t.key === activeTabKey);
+    if (current?.kind === "entity" && current.stack[current.stack.length - 1] !== id) {
+      setTabs((cur) => cur.map((t) => (t.key === current.key && t.kind === "entity" ? { ...t, stack: [...t.stack, id] } : t)));
+      setDockSize((sz) => (sz === "min" ? "side" : sz));
+      return;
     }
+    openTab({ key: `entity:${id}`, kind: "entity", stack: [id] });
+  }
+
+  /** Opens a fresh tab for an entity even if one is already focused — used by pins and the toolbar. */
+  function openEntityTab(id: string) {
+    openTab({ key: `entity:${id}`, kind: "entity", stack: [id] });
+  }
+
+  function openEvent(id: string) {
+    openTab({ key: `event:${id}`, kind: "event", id });
+  }
+
+  function openCompany(id: string) {
+    openTab({ key: `company:${id}`, kind: "company", id });
+  }
+
+  function closeTab(key: string) {
+    setTabs((cur) => {
+      const next = cur.filter((t) => t.key !== key);
+      if (key === activeTabKey) setActiveTabKey(next[next.length - 1]?.key ?? "");
+      return next;
+    });
+  }
+
+  function backInTab() {
+    setTabs((cur) =>
+      cur.map((t) => (t.key === activeTabKey && t.kind === "entity" && t.stack.length > 1 ? { ...t, stack: t.stack.slice(0, -1) } : t))
+    );
+  }
+
+  /** Joining a node joins its whole ancestry — you can't be in Class of 2019 without being in PGP and ISB. */
+  function joinEntity(id: string, paid?: CheckoutResult) {
+    const next = Array.from(new Set([...myEntityIds, id]));
     setMyEntityIdsState(next);
     setMyEntityIds(next);
+    if (paid) setPaidMemberships((cur) => ({ ...cur, [id]: paid }));
+  }
+
+  function leaveEntity(id: string) {
+    const next = myEntityIds.filter((x) => x !== id && !ancestorsOf(x).some((a) => a.id === id));
+    setMyEntityIdsState(next);
+    setMyEntityIds(next);
+    setPaidMemberships((cur) => {
+      const n = { ...cur };
+      delete n[id];
+      return n;
+    });
     if (selectedNetworkId && !expandMembership(next).has(selectedNetworkId)) setSelectedNetworkId(null);
   }
 
@@ -518,6 +586,11 @@ export default function MapView({
     if (MOCK_ACCEPTED_NAMES.includes(p.name)) return { status: "accepted", connectionId: null };
     return conn[p.id];
   }
+
+  /** Connection status for everyone in the loaded roster, keyed by id — what the panels need. */
+  const panelConn: Record<string, ConnState> = Object.fromEntries(
+    worldProfiles.map((p) => [p.id, connFor(p)]).filter((entry): entry is [string, ConnState] => Boolean(entry[1]))
+  );
 
   function openChat(p: Profile) {
     setChatWith(p);
@@ -742,7 +815,13 @@ export default function MapView({
                     offset={20}
                     onClose={() => setPinnedExtraId((cur) => (cur === ev.id ? null : cur))}
                   >
-                    <EventCard ev={ev} />
+                    <EventCard
+                      ev={ev}
+                      onOpen={() => {
+                        setPinnedExtraId(null);
+                        openEvent(ev.id);
+                      }}
+                    />
                   </Popup>
                 )}
               </Marker>
@@ -778,7 +857,14 @@ export default function MapView({
                     offset={20}
                     onClose={() => setPinnedExtraId((cur) => (cur === co.id ? null : cur))}
                   >
-                    <CompanyCard co={co} peopleHere={peopleHere} />
+                    <CompanyCard
+                      co={co}
+                      peopleHere={peopleHere}
+                      onOpen={() => {
+                        setPinnedExtraId(null);
+                        openCompany(co.id);
+                      }}
+                    />
                   </Popup>
                 )}
               </Marker>
@@ -1041,7 +1127,7 @@ export default function MapView({
               </select>
 
               <button
-                onClick={() => setPanelStack(selectedNetworkId ? [selectedNetworkId] : [PUBLIC_ENTITY_ID])}
+                onClick={() => openEntityTab(selectedNetworkId ?? PUBLIC_ENTITY_ID)}
                 className="btn btn-ghost btn-sm"
               >
                 {selectedNetwork ? `Open ${selectedNetwork.name} →` : "Open public feed →"}
@@ -1100,30 +1186,84 @@ export default function MapView({
       {/* Mobile only — bottom sheet, pinned to the viewport regardless of the toolbar's height. */}
       <div className="floating-list lg:hidden">{listBody}</div>
 
-      {topPanelId && (
-        <EntityPanel
-          entityId={topPanelId}
-          depth={panelStack.length}
-          people={worldProfiles}
-          loading={worldLoading && worldProfiles.length === 0}
-          posts={postsFor(topPanelId)}
-          onPost={addPost}
-          isMember={isMemberOf(topPanelId)}
-          onToggleMembership={() => toggleMembership(topPanelId)}
-          onOpen={openEntity}
-          onBack={() => setPanelStack((st) => st.slice(0, -1))}
-          onClose={() => setPanelStack([])}
-          size={panelSize}
-          onSize={setPanelSize}
-          width={panelWidth}
-          onWidth={setPanelWidth}
-          conn={Object.fromEntries(worldProfiles.map((p) => [p.id, connFor(p)]).filter(([, c]) => c) as [string, ConnState][])}
-          onConnect={connectTo}
-          onRespond={respondTo}
-          onMessage={openChat}
-          canAct={canAct}
-          now={now}
-        />
+      {tabs.length > 0 && activeTab && (
+        <PanelDock
+          tabs={tabs.map((t): DockTab => {
+            if (t.kind === "entity") {
+              const id = t.stack[t.stack.length - 1];
+              const e = id === PUBLIC_ENTITY_ID ? undefined : entityById(id);
+              return { key: t.key, emoji: id === PUBLIC_ENTITY_ID ? "🌍" : (e?.emoji ?? "👥"), title: id === PUBLIC_ENTITY_ID ? "Public Network" : (e?.name ?? "Network") };
+            }
+            if (t.kind === "event") return { key: t.key, emoji: "📅", title: eventById(t.id)?.name ?? "Event" };
+            return { key: t.key, emoji: "🏢", title: companyById(t.id)?.name ?? "Company" };
+          })}
+          activeKey={activeTab.key}
+          size={dockSize}
+          width={dockWidth}
+          onActivate={setActiveTabKey}
+          onClose={closeTab}
+          onCloseAll={() => {
+            setTabs([]);
+            setActiveTabKey("");
+          }}
+          onSize={setDockSize}
+          onWidth={setDockWidth}
+        >
+          {activeTab.kind === "entity" && (
+            <EntityPanel
+              entityId={activeTab.stack[activeTab.stack.length - 1]}
+              depth={activeTab.stack.length}
+              people={worldProfiles}
+              loading={worldLoading && worldProfiles.length === 0}
+              posts={postsFor(activeTab.stack[activeTab.stack.length - 1])}
+              onPost={addPost}
+              isMember={isMemberOf(activeTab.stack[activeTab.stack.length - 1])}
+              membershipTier={paidMemberships[activeTab.stack[activeTab.stack.length - 1]]}
+              onJoin={joinEntity}
+              onLeave={leaveEntity}
+              onOpen={openEntity}
+              onOpenEvent={openEvent}
+              onBack={backInTab}
+              wide={dockSize !== "side"}
+              conn={panelConn}
+              onConnect={connectTo}
+              onRespond={respondTo}
+              onMessage={openChat}
+              canAct={canAct}
+              now={now}
+            />
+          )}
+          {activeTab.kind === "event" && (
+            <EventPanel
+              eventId={activeTab.id}
+              people={worldProfiles}
+              wide={dockSize !== "side"}
+              onOpenEntity={openEntityTab}
+              registration={registrations[activeTab.id]}
+              onRegistered={(id, r) => setRegistrations((cur) => ({ ...cur, [id]: r }))}
+              conn={panelConn}
+              onConnect={connectTo}
+              onRespond={respondTo}
+              onMessage={openChat}
+              canAct={canAct}
+              now={now}
+            />
+          )}
+          {activeTab.kind === "company" && (
+            <CompanyPanel
+              companyId={activeTab.id}
+              people={worldProfiles}
+              wide={dockSize !== "side"}
+              conn={panelConn}
+              onConnect={connectTo}
+              onRespond={respondTo}
+              onMessage={openChat}
+              onOpenEntity={openEntityTab}
+              canAct={canAct}
+              now={now}
+            />
+          )}
+        </PanelDock>
       )}
 
       {chatWith && (
