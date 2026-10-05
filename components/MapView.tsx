@@ -5,6 +5,7 @@ import Map, { Marker, Popup, NavigationControl, useControl } from "react-map-gl/
 import type { MapRef } from "react-map-gl/mapbox";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { ArcLayer } from "@deck.gl/layers";
+import { avatarUrl } from "@/lib/avatar";
 import { DROP_DURATION_OPTIONS_MIN, DEFAULT_DROP_DURATION_MIN, MAX_DROP_LABEL } from "@/lib/rules";
 import {
   type Profile,
@@ -26,6 +27,7 @@ import { MOCK_POSTS, type MockPost, type PostKind } from "@/lib/feedData";
 import {
   HOME_FEED_ID,
   PLACED_ENTITIES,
+  entityById,
   descendantIds,
   PUBLIC_ENTITY_ID,
   TOP_NETWORKS,
@@ -39,13 +41,15 @@ import {
   setMyPendingIds,
   type MockEntity,
 } from "@/lib/networks";
-import { MOCK_ACCEPTED_NAMES } from "@/lib/chatData";
+import { MOCK_ACCEPTED_NAMES, MOCK_THREADS } from "@/lib/chatData";
 import FloatingAccountMenu from "./FloatingAccountMenu";
 import EntityPanel from "./EntityPanel";
 import EventPanel from "./EventPanel";
 import CompanyPanel from "./CompanyPanel";
 import DockBar, { type Section } from "./DockBar";
-import SectionPanel, { type PanelSize } from "./SectionPanel";
+import SectionPopup, { type Chip, type PopupItem } from "./SectionPopup";
+import FloatingPage, { type PageSize } from "./FloatingPage";
+import TopSearch from "./TopSearch";
 import type { CheckoutResult } from "./Checkout";
 import ChatWindow from "./ChatWindow";
 
@@ -179,12 +183,16 @@ export default function MapView({
   /** null = the all-encompassing Public Network. Otherwise exactly one network at a time. */
   const [selectedNetworkId, setSelectedNetworkId] = useState<string | null>(null);
   const [myEntityIds, setMyEntityIdsState] = useState<string[]>(() => getMyEntityIds());
-  const [panelSize, setPanelSize] = useState<PanelSize>("side");
-  const [panelWidth, setPanelWidth] = useState(460);
+  const [panelSize, setPanelSize] = useState<PageSize>("side");
   /** Default state is a bare map: the dock is a single icon and nothing is open. */
   const [dockOpen, setDockOpen] = useState(false);
   const [section, setSection] = useState<Section | null>(null);
   const [stacks, setStacks] = useState<Stacks>(EMPTY_STACKS);
+  const [searchOpen, setSearchOpen] = useState(false);
+  /** Per-section search and filter — the same state drives the popup list and the map. */
+  const [sectionQuery, setSectionQuery] = useState<Record<Section, string>>({ network: "", chats: "", events: "", institutions: "", companies: "" });
+  const [sectionFilter, setSectionFilter] = useState<Record<Section, string>>({ network: "mine", chats: "all", events: "all", institutions: "all", companies: "all" });
+  const [chatSort, setChatSort] = useState("recent");
   /** Paid things you've bought this session — community memberships and event tickets. */
   const [paidMemberships, setPaidMemberships] = useState<Record<string, CheckoutResult>>({});
   const [registrations, setRegistrations] = useState<Record<string, CheckoutResult>>({});
@@ -497,17 +505,65 @@ export default function MapView({
    * institutions layer.
    */
   const scopeIds = selectedNetworkId ? new Set([selectedNetworkId, ...descendantIds(selectedNetworkId)]) : null;
-  const visibleEvents = scopeIds ? MOCK_EVENTS.filter((e) => e.hostEntityId && scopeIds.has(e.hostEntityId)) : MOCK_EVENTS;
-  const visiblePlaces = scopeIds ? PLACED_ENTITIES.filter((e) => scopeIds.has(e.id)) : PLACED_ENTITIES;
+
   const networkFiltered = (selectedNetworkId ? activeData.filter((p) => entityIdsForName(p.name).has(selectedNetworkId)) : activeData).filter(
     role.match
   );
+  const myMembership = expandMembership(myEntityIds);
+  const myNetworks = TOP_NETWORKS.filter((n) => myMembership.has(n.id));
+
+  const q = (sec: Section) => sectionQuery[sec].trim().toLowerCase();
+  const hit = (...fields: Array<string | null | undefined>) => (needle: string) =>
+    !needle || fields.some((f) => (f ?? "").toLowerCase().includes(needle));
+
+  const filteredEvents = MOCK_EVENTS.filter((e) => {
+    if (!hit(e.name, e.city, e.venue, entityById(e.hostEntityId ?? "")?.name)(q("events"))) return false;
+    const f = sectionFilter.events;
+    if (f === "free") return !e.tickets;
+    if (f === "paid") return Boolean(e.tickets);
+    if (f === "mine") return Boolean(e.hostEntityId && myMembership.has(e.hostEntityId));
+    return true;
+  });
+
+  const filteredCompanies = MOCK_COMPANIES.filter((c) => {
+    if (!hit(c.name, c.industry, c.city)(q("companies"))) return false;
+    const f = sectionFilter.companies;
+    if (f === "hiring") return c.openRoles.length > 0;
+    if (f === "all") return true;
+    return c.industry === f;
+  });
+
+  const filteredPlaces = PLACED_ENTITIES.filter((e) => {
+    if (!hit(e.name, e.place?.city, e.label)(q("institutions"))) return false;
+    const f = sectionFilter.institutions;
+    if (f === "mine") return myMembership.has(e.id);
+    if (f === "all") return true;
+    return e.label === f;
+  });
+
+  const filteredNetworks = (sectionFilter.network === "mine" ? myNetworks : TOP_NETWORKS).filter((n) =>
+    hit(n.name, n.blurbMock)(q("network"))
+  );
+
+  const chatPeople = MOCK_ACCEPTED_NAMES.map((name) => {
+    const p = [...worldProfiles, ...profiles].find((x) => x.name === name);
+    const msgs = MOCK_THREADS[name] ?? [];
+    return { name, p, last: msgs[msgs.length - 1], count: msgs.length };
+  })
+    .filter((t) => hit(t.name, t.p?.headline, t.last?.body)(q("chats")))
+    .filter((t) => (sectionFilter.chats === "unread" ? !t.last?.mine : true))
+    .sort((a, b) => (chatSort === "name" ? a.name.localeCompare(b.name) : b.count - a.count));
+
   const showEventsLayer = section === "events";
   const showCompaniesLayer = section === "companies";
   const showInstitutionsLayer = section === "institutions" || section === "network";
-  const peopleOnMap = section === "events" || section === "companies" ? [] : networkFiltered;
-  const myMembership = expandMembership(myEntityIds);
-  const myNetworks = TOP_NETWORKS.filter((n) => myMembership.has(n.id));
+  const chatNames = new Set(chatPeople.map((c) => c.name));
+  const peopleOnMap =
+    section === "events" || section === "companies"
+      ? []
+      : section === "chats"
+        ? networkFiltered.filter((p) => chatNames.has(p.name))
+        : networkFiltered;
 
   const stack = section ? stacks[section] : [];
 
@@ -633,104 +689,224 @@ export default function MapView({
     return conn[p.id];
   }
 
+  /** Compact map controls for the Network popup — these change the pins, not just the list. */
   const peopleControls = (
-    <div className="card mb-3 p-3">
-      <p className="label">People on the map</p>
-      <div className="flex flex-wrap gap-1.5">
+    <div className="mt-2 flex flex-col gap-1.5 border-t border-[var(--line)] pt-2">
+      <div className="flex flex-wrap gap-1">
         {ROLE_FILTERS.map((r) => (
           <button
             key={r.id}
             onClick={() => setRoleFilter(r.id)}
-            className="pill"
+            className="rounded-full px-2 py-0.5 text-[11px] font-semibold transition-colors"
             style={
               roleFilter === r.id
-                ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)", border: "1px solid var(--brand)" }
-                : { background: "var(--sunk)", color: "var(--ink-soft)", border: "1px solid transparent" }
+                ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)" }
+                : { background: "var(--sunk)", color: "var(--ink-soft)" }
             }
           >
             {r.emoji} {r.label}
           </button>
         ))}
       </div>
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-1">
         <div className="flex flex-none items-center gap-0.5 rounded-full p-0.5" style={{ background: "var(--sunk)" }}>
-          <button
-            onClick={() => setMode("nearby")}
-            className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
-            style={mode === "nearby" ? { background: "var(--card)", boxShadow: "var(--shadow)" } : { color: "var(--ink-soft)" }}
-          >
-            Near me
-          </button>
-          <button
-            onClick={() => setMode("network")}
-            className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
-            style={mode === "network" ? { background: "var(--card)", boxShadow: "var(--shadow)" } : { color: "var(--ink-soft)" }}
-          >
-            Worldwide
-          </button>
+          {(["nearby", "network"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className="rounded-full px-2 py-0.5 text-[11px] font-semibold"
+              style={mode === m ? { background: "var(--card)", color: "var(--ink)" } : { color: "var(--ink-soft)" }}
+            >
+              {m === "nearby" ? "Near me" : "Worldwide"}
+            </button>
+          ))}
         </div>
         {mode === "nearby" && (
-          <>
-            <select className="chip-select" value={radiusKm} onChange={(e) => setRadiusKm(Number(e.target.value))}>
-              {RADIUS_OPTIONS_KM.map((km) => (
-                <option key={km} value={km}>
-                  {km} km
-                </option>
-              ))}
-            </select>
-            <button onClick={useMyLocation} disabled={locating} className="btn btn-ghost btn-sm">
-              {locating ? "Locating…" : "Use my location"}
-            </button>
-          </>
+          <select className="chip-select" value={radiusKm} onChange={(e) => setRadiusKm(Number(e.target.value))}>
+            {RADIUS_OPTIONS_KM.map((km) => (
+              <option key={km} value={km}>
+                {km} km
+              </option>
+            ))}
+          </select>
         )}
-        <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
-          {peopleOnMap.length} shown
-        </span>
+        <button onClick={useMyLocation} disabled={locating} className="rounded-full px-2 py-0.5 text-[11px] font-semibold text-[var(--ink-soft)] hover:text-[var(--ink)]">
+          {locating ? "Locating…" : "Locate me"}
+        </button>
+        {canAct && ownVisible && ownLat != null && !myDrop && !dropOpen && (
+          <button onClick={() => setDropOpen(true)} className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ color: "var(--brand)" }}>
+            Drop a pin ✦
+          </button>
+        )}
       </div>
-
-      {canAct && ownVisible && ownLat != null && (
-        <div className="mt-2.5 border-t border-[var(--line)] pt-2.5">
-          {myDrop ? (
-            <span className="pill" style={{ background: "color-mix(in srgb, var(--gold) 16%, var(--card))", color: "var(--gold)" }}>
-              🟡 “{myDrop.label}” · {minutesLeft(myDrop.expiresAt, now)}m
-              <button onClick={endDrop} disabled={dropBusy} className="ml-1 font-bold underline">
-                end
-              </button>
-            </span>
-          ) : dropOpen ? (
-            <form onSubmit={submitDrop} className="flex flex-wrap items-center gap-2">
-              <input
-                className="input min-w-[160px] flex-1 text-[12.5px]"
-                placeholder="At Third Wave, open to chat…"
-                value={dropLabel}
-                onChange={(e) => setDropLabel(e.target.value.slice(0, MAX_DROP_LABEL))}
-                autoFocus
-                required
-              />
-              <select className="chip-select" value={dropDuration} onChange={(e) => setDropDuration(Number(e.target.value))}>
-                {DROP_DURATION_OPTIONS_MIN.map((m) => (
-                  <option key={m} value={m}>
-                    {m}m
-                  </option>
-                ))}
-              </select>
-              <button type="submit" disabled={dropBusy} className="btn btn-primary btn-sm">
-                Go live
-              </button>
-              <button type="button" onClick={() => setDropOpen(false)} className="btn btn-ghost btn-sm">
-                Cancel
-              </button>
-              {dropError && <p className="w-full text-[12px] font-medium text-[var(--warn)]">{dropError}</p>}
-            </form>
-          ) : (
-            <button onClick={() => setDropOpen(true)} className="btn btn-primary btn-sm">
-              Drop a pin ✦
-            </button>
-          )}
-        </div>
+      {myDrop && (
+        <span className="pill w-fit" style={{ background: "color-mix(in srgb, var(--gold) 16%, var(--card))", color: "var(--gold)" }}>
+          🟡 “{myDrop.label}” · {minutesLeft(myDrop.expiresAt, now)}m
+          <button onClick={endDrop} disabled={dropBusy} className="ml-1 font-bold underline">
+            end
+          </button>
+        </span>
+      )}
+      {dropOpen && (
+        <form onSubmit={submitDrop} className="flex flex-wrap items-center gap-1.5">
+          <input
+            className="input min-w-[140px] flex-1 text-[12px]"
+            placeholder="At Third Wave, open to chat…"
+            value={dropLabel}
+            onChange={(e) => setDropLabel(e.target.value.slice(0, MAX_DROP_LABEL))}
+            autoFocus
+            required
+          />
+          <select className="chip-select" value={dropDuration} onChange={(e) => setDropDuration(Number(e.target.value))}>
+            {DROP_DURATION_OPTIONS_MIN.map((m) => (
+              <option key={m} value={m}>
+                {m}m
+              </option>
+            ))}
+          </select>
+          <button type="submit" disabled={dropBusy} className="btn btn-primary btn-sm">
+            Go live
+          </button>
+          <button type="button" onClick={() => setDropOpen(false)} className="btn btn-ghost btn-sm">
+            Cancel
+          </button>
+          {dropError && <p className="w-full text-[11px] font-medium text-[var(--warn)]">{dropError}</p>}
+        </form>
       )}
     </div>
   );
+
+  /** The popup's rows — the same filtered collections the map is drawing. */
+  function popupItems(): PopupItem[] {
+    switch (section) {
+      case "network":
+        return [
+          ...(q("network")
+            ? []
+            : [
+                { id: HOME_FEED_ID, emoji: "🏠", title: "Your feed", subtitle: "Everything from every community you're in" },
+                { id: PUBLIC_ENTITY_ID, emoji: "🌍", title: "Public Network", subtitle: "Everyone — no membership needed", active: selectedNetworkId === null },
+              ]),
+          ...filteredNetworks.map((n) => ({
+            id: n.id,
+            emoji: n.emoji,
+            title: n.name,
+            subtitle: n.blurbMock,
+            meta: `${n.memberCountMock.toLocaleString()} members${myMembership.has(n.id) ? " · joined" : ""}`,
+            active: selectedNetworkId === n.id,
+          })),
+        ];
+      case "chats":
+        return chatPeople.map((t) => ({
+          id: t.p?.id ?? t.name,
+          photo: t.p?.photoUrl ?? avatarUrl(t.name),
+          title: t.name,
+          subtitle: t.p?.headline ?? undefined,
+          meta: t.last ? `${t.last.mine ? "You: " : ""}${t.last.body}` : "Say hello",
+        }));
+      case "events":
+        return filteredEvents.map((e) => ({
+          id: e.id,
+          emoji: "📅",
+          title: e.name,
+          subtitle: `${e.dateLabel} · ${e.city}`,
+          meta: `${e.tickets ? `from ${e.tickets[0].priceLabel}` : "free"} · ${e.attendeesMock.toLocaleString()} attending`,
+        }));
+      case "institutions":
+        return filteredPlaces.map((n) => ({
+          id: n.id,
+          emoji: n.emoji,
+          title: n.name,
+          subtitle: `${n.label}${n.place ? ` · ${n.place.city}` : ""}`,
+          meta: `${n.memberCountMock.toLocaleString()} members`,
+        }));
+      case "companies":
+        return filteredCompanies.map((c) => ({
+          id: c.id,
+          emoji: "🏢",
+          title: c.name,
+          subtitle: `${c.industry} · ${c.city}`,
+          meta: `${c.sizeLabel} · ${c.openRoles.length} open roles`,
+        }));
+      default:
+        return [];
+    }
+  }
+
+  function popupChips(): Chip[] {
+    switch (section) {
+      case "network":
+        return [
+          { id: "mine", label: `Mine (${myNetworks.length})` },
+          { id: "all", label: `All (${TOP_NETWORKS.length})` },
+        ];
+      case "chats":
+        return [
+          { id: "all", label: "All" },
+          { id: "unread", label: "Waiting on you" },
+        ];
+      case "events":
+        return [
+          { id: "all", label: "All" },
+          { id: "mine", label: "My networks" },
+          { id: "free", label: "Free" },
+          { id: "paid", label: "Ticketed" },
+        ];
+      case "institutions":
+        return [
+          { id: "all", label: "All" },
+          { id: "mine", label: "Mine" },
+          { id: "Chapter", label: "Chapters" },
+          { id: "Network", label: "Institutions" },
+        ];
+      case "companies": {
+        const industries = Array.from(new Set(MOCK_COMPANIES.map((c) => c.industry))).slice(0, 3);
+        return [{ id: "all", label: "All" }, { id: "hiring", label: "Hiring" }, ...industries.map((i) => ({ id: i, label: i }))];
+      }
+      default:
+        return [];
+    }
+  }
+
+  /** Says plainly what the filter is doing to the map underneath. */
+  function popupCount(): string {
+    switch (section) {
+      case "network":
+        return selectedNetworkId ? `${peopleOnMap.length} on the map` : `${peopleOnMap.length} people`;
+      case "chats":
+        return `${chatPeople.length} on the map`;
+      case "events":
+        return `${filteredEvents.length} on the map`;
+      case "institutions":
+        return `${filteredPlaces.length} on the map`;
+      case "companies":
+        return `${filteredCompanies.length} on the map`;
+      default:
+        return "";
+    }
+  }
+
+  function pageTitle(): string {
+    const id = stack[stack.length - 1];
+    if (!section || !id) return "";
+    if (section === "chats") return [...worldProfiles, ...profiles].find((x) => x.id === id)?.name ?? "Chat";
+    if (section === "events") return MOCK_EVENTS.find((e) => e.id === id)?.name ?? "Event";
+    if (section === "companies") return MOCK_COMPANIES.find((c) => c.id === id)?.name ?? "Company";
+    if (id === HOME_FEED_ID) return "Your feed";
+    if (id === PUBLIC_ENTITY_ID) return "Public Network";
+    return entityById(id)?.name ?? "Network";
+  }
+
+  function pageEmoji(): string {
+    const id = stack[stack.length - 1];
+    if (!section || !id) return "";
+    if (section === "chats") return "💬";
+    if (section === "events") return "📅";
+    if (section === "companies") return "🏢";
+    if (id === HOME_FEED_ID) return "🏠";
+    if (id === PUBLIC_ENTITY_ID) return "🌍";
+    return entityById(id)?.emoji ?? "🌐";
+  }
 
   /**
    * Whatever's drilled into within the open section. Every section's detail
@@ -958,7 +1134,7 @@ export default function MapView({
         {/* Experience-prototype layers — Events, Companies & Institutions
             are mock data (lib/prototypeData.ts), shown only in Nearby mode. */}
         {showEventsLayer &&
-          visibleEvents.map((ev) => {
+          filteredEvents.map((ev) => {
             const open = hoveredExtraId === ev.id || pinnedExtraId === ev.id;
             return (
               <Marker key={ev.id} longitude={ev.lng} latitude={ev.lat} anchor="center">
@@ -998,7 +1174,7 @@ export default function MapView({
           })}
 
         {showCompaniesLayer &&
-          MOCK_COMPANIES.map((co) => {
+          filteredCompanies.map((co) => {
             const open = hoveredExtraId === co.id || pinnedExtraId === co.id;
             const peopleHere = countPeopleAtCompany(profiles, co.name);
             return (
@@ -1040,7 +1216,7 @@ export default function MapView({
           })}
 
         {showInstitutionsLayer &&
-          visiblePlaces.map((net) => {
+          (scopeIds && section === "network" ? PLACED_ENTITIES.filter((e) => scopeIds.has(e.id)) : filteredPlaces).map((net) => {
             const open = hoveredExtraId === net.id || pinnedExtraId === net.id;
             const place = net.place!;
             return (
@@ -1091,37 +1267,61 @@ export default function MapView({
         open={dockOpen}
         active={section}
         unread={MOCK_ACCEPTED_NAMES.length}
-        query={query}
-        results={results}
         onOpenChange={(v) => {
           setDockOpen(v);
           if (!v) setSection(null);
         }}
         onSelect={(s) => setSection((cur) => (cur === s ? null : s))}
+      />
+
+      <TopSearch
+        open={searchOpen}
+        query={query}
+        results={results}
+        onOpenChange={setSearchOpen}
         onQueryChange={setQuery}
-        onPickResult={(r) => {
+        onPick={(r) => {
           setCenter({ lat: r.lat, lng: r.lng });
           setQuery(r.label);
           setResults([]);
+          setSearchOpen(false);
         }}
       />
 
-      {section && (
-        <SectionPanel
+      {section && stack.length === 0 && (
+        <SectionPopup
           section={section}
-          stack={stacks[section]}
+          items={popupItems()}
+          query={sectionQuery[section]}
+          chips={popupChips()}
+          activeChip={sectionFilter[section]}
+          sorts={section === "chats" ? [{ id: "recent", label: "Recent" }, { id: "name", label: "A–Z" }] : undefined}
+          activeSort={chatSort}
+          count={popupCount()}
+          onQuery={(v) => setSectionQuery((cur) => ({ ...cur, [section]: v }))}
+          onChip={(id) => setSectionFilter((cur) => ({ ...cur, [section]: id }))}
+          onSort={setChatSort}
+          onPick={(id) => {
+            if (section === "network") setSelectedNetworkId(id === PUBLIC_ENTITY_ID || id === HOME_FEED_ID ? null : id);
+            pushInSection(id);
+          }}
+          onClose={() => setSection(null)}
+          controls={section === "network" ? peopleControls : undefined}
+        />
+      )}
+
+      {section && stack.length > 0 && (
+        <FloatingPage
+          title={pageTitle()}
+          emoji={pageEmoji()}
+          canGoBack
           size={panelSize}
-          width={panelWidth}
-          myNetworks={myNetworks}
-          people={activeData}
-          onOpenStack={pushInSection}
           onBack={popInSection}
           onClose={() => setSection(null)}
           onSize={setPanelSize}
-          onWidth={setPanelWidth}
-          controls={section === "network" && stacks.network.length === 0 ? peopleControls : null}
-          detail={sectionDetail()}
-        />
+        >
+          {sectionDetail()}
+        </FloatingPage>
       )}
     </div>
   );
