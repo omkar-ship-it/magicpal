@@ -50,6 +50,7 @@ import EntityPanel from "./EntityPanel";
 import EventPanel from "./EventPanel";
 import CompanyPanel from "./CompanyPanel";
 import Compass, { type CompassLine } from "./Compass";
+import ScopePill from "./ScopePill";
 import DockBar, { type Section } from "./DockBar";
 import SectionPopup, { type Chip, type PopupItem } from "./SectionPopup";
 import FloatingPage, { type PageSize } from "./FloatingPage";
@@ -199,6 +200,9 @@ export default function MapView({
   /** "My Network" is a scope in its own right — just the people you're connected to. */
   const [connectionsOnly, setConnectionsOnly] = useState(false);
   const [compassDismissed, setCompassDismissed] = useState(false);
+  /** A network page stood down: its scope stays on the map, the page is out of the way. */
+  const [minimisedId, setMinimisedId] = useState<string | null>(null);
+  const [cityFilter, setCityFilter] = useState<string | null>(null);
   /** Per-section search and filter — the same state drives the popup list and the map. */
   const [sectionQuery, setSectionQuery] = useState<Record<Section, string>>({ network: "", chats: "", events: "", institutions: "", companies: "" });
   const [sectionFilter, setSectionFilter] = useState<Record<Section, string>>({ network: "mine", chats: "all", events: "all", institutions: "all", companies: "all" });
@@ -547,6 +551,8 @@ export default function MapView({
   const myMembership = expandMembership(myEntityIds);
   const myNetworks = TOP_NETWORKS.filter((n) => myMembership.has(n.id));
 
+  const cityOf = (p: Profile) => p.locationLabel?.split(",").pop()?.trim() ?? "";
+
   /** Rough great-circle distance in km — good enough for a "near me" filter. */
   function kmFrom(lat: number, lng: number) {
     const dLat = ((lat - center.lat) * Math.PI) / 180;
@@ -607,6 +613,18 @@ export default function MapView({
   const showInstitutionsLayer = section === "institutions" || section === "network";
   const chatNames = new Set(chatPeople.map((c) => c.name));
   const connectionScoped = connectionsOnly ? networkFiltered.filter((p) => connFor(p)?.status === "accepted") : networkFiltered;
+  const cityScoped = cityFilter ? connectionScoped.filter((p) => cityOf(p) === cityFilter) : connectionScoped;
+  /** Cities present in the scoped set, biggest first — the location filter is built from who's actually there. */
+  const scopedCities = Object.entries(
+    connectionScoped.reduce<Record<string, number>>((acc, p) => {
+      const c = cityOf(p);
+      if (c) acc[c] = (acc[c] ?? 0) + 1;
+      return acc;
+    }, {})
+  )
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
 
   // Opening a section — or filtering one — moves the camera to what it's
   // showing. Without this the pins render correctly but sit on another
@@ -614,7 +632,11 @@ export default function MapView({
   const activeFilter = section ? sectionFilter[section] : "";
   const activeQuery = section ? sectionQuery[section] : "";
   useEffect(() => {
-    if (!mapReady || !section) return;
+    if (!mapReady || (!section && !minimisedId)) return;
+    if (!section && minimisedId) {
+      fitPoints(peopleOnMap.map((p) => [p.lng, p.lat] as [number, number]));
+      return;
+    }
     const pts: Array<[number, number]> =
       section === "events"
         ? filteredEvents.map((e) => [e.lng, e.lat])
@@ -633,13 +655,13 @@ export default function MapView({
     fitPoints(pts);
     // Re-frames when the section changes or its own filter/search does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [section, activeFilter, activeQuery, selectedNetworkId, connectionsOnly, mapReady, worldProfiles.length, profiles.length]);
+  }, [section, minimisedId, activeFilter, activeQuery, selectedNetworkId, connectionsOnly, cityFilter, mapReady, worldProfiles.length, profiles.length]);
   const peopleOnMap =
     section === "events" || section === "companies"
       ? []
       : section === "chats"
-        ? connectionScoped.filter((p) => chatNames.has(p.name))
-        : connectionScoped;
+        ? cityScoped.filter((p) => chatNames.has(p.name))
+        : cityScoped;
 
   const stack = section ? stacks[section] : [];
 
@@ -1485,7 +1507,13 @@ export default function MapView({
           setDockOpen(v);
           if (!v) setSection(null);
         }}
-        onSelect={(s) => setSection((cur) => (cur === s ? null : s))}
+        onSelect={(s) => {
+          // A dock block is an entry point, not a bookmark — it always lands
+          // on the section's list. The scope pill is what takes you back to
+          // where you were.
+          setSection((cur) => (cur === s ? null : s));
+          setStacks((cur) => ({ ...cur, [s]: [] }));
+        }}
       />
 
       <TopSearch
@@ -1502,7 +1530,29 @@ export default function MapView({
         }}
       />
 
-      {dockOpen && !section && !compassDismissed && (
+      {minimisedId && (
+        <ScopePill
+          emoji={entityById(minimisedId)?.emoji ?? "🌐"}
+          name={entityById(minimisedId)?.name ?? "Network"}
+          count={peopleOnMap.length}
+          cities={scopedCities}
+          activeCity={cityFilter}
+          onCity={setCityFilter}
+          onRestore={() => {
+            setMinimisedId(null);
+            setDockOpen(true);
+            setSection("network");
+            setStacks((cur) => ({ ...cur, network: [minimisedId] }));
+          }}
+          onClear={() => {
+            setMinimisedId(null);
+            setSelectedNetworkId(null);
+            setCityFilter(null);
+          }}
+        />
+      )}
+
+      {dockOpen && !section && !compassDismissed && !minimisedId && (
         <Compass place={profiles[0]?.locationLabel?.split(",").pop()?.trim() ?? ""} lines={compassLines()} onDismiss={() => setCompassDismissed(true)} />
       )}
 
@@ -1521,7 +1571,11 @@ export default function MapView({
           onSort={setChatSort}
           onPick={(id) => {
             if (section === "network") {
+              setCityFilter(null);
               setConnectionsOnly(id === MY_NETWORK_ID);
+              // A network is a worldwide thing; a radius is a public-map idea.
+              // Selecting one widens to the full roster so its cities are real.
+              if (id !== PUBLIC_ENTITY_ID && id !== HOME_FEED_ID) setMode("network");
               setSelectedNetworkId(id === PUBLIC_ENTITY_ID || id === HOME_FEED_ID || id === MY_NETWORK_ID ? null : id);
             }
             pushInSection(id);
@@ -1539,6 +1593,14 @@ export default function MapView({
           size={panelSize}
           onBack={popInSection}
           onClose={() => setSection(null)}
+          onMinimise={
+            section === "network" && selectedNetworkId
+              ? () => {
+                  setMinimisedId(selectedNetworkId);
+                  setSection(null);
+                }
+              : undefined
+          }
           onSize={setPanelSize}
         >
           {sectionDetail()}

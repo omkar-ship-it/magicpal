@@ -16,6 +16,7 @@ export default function FloatingPage({
   size,
   onBack,
   onClose,
+  onMinimise,
   onSize,
   children,
 }: {
@@ -25,6 +26,8 @@ export default function FloatingPage({
   size: PageSize;
   onBack: () => void;
   onClose: () => void;
+  /** Stands the page down while leaving its scope on the map. Absent = no minimise affordance. */
+  onMinimise?: () => void;
   onSize: (s: PageSize) => void;
   children: ReactNode;
 }) {
@@ -58,6 +61,11 @@ export default function FloatingPage({
           {emoji} {title}
         </span>
         <div className="flex flex-none items-center gap-0.5">
+          {onMinimise && (
+            <button onClick={onMinimise} className="win-btn" title="Minimise — keep these people on the map">
+              ▾
+            </button>
+          )}
           <button onClick={() => onSize(size === "wide" ? "side" : "wide")} className="win-btn" title={size === "wide" ? "Narrow" : "Expand"}>
             {size === "wide" ? "▸" : "◂"}
           </button>

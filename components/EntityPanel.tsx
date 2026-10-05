@@ -7,6 +7,7 @@ import {
   PUBLIC_ENTITY_ID,
   TOP_CLUBS,
   ancestorsOf,
+  childGroupsOf,
   childrenOf,
   entityById,
   membersOfEntity,
@@ -92,6 +93,7 @@ export default function EntityPanel({
   now: number;
 }) {
   const [hoveredMemberId, setHoveredMemberId] = useState<string | null>(null);
+  const [tab, setTab] = useState("feed");
   const [joining, setJoining] = useState(false);
   /** Admin decisions on join requests — prototype-only, resets with the session. */
   const [handled, setHandled] = useState<Record<string, "in" | "out">>({});
@@ -110,8 +112,7 @@ export default function EntityPanel({
       : entity!.blurbMock;
   const memberCount = isPublic ? null : entity!.memberCountMock;
   const trail = isPublic ? [] : ancestorsOf(entityId);
-  const children = isHome ? [] : isPublic ? TOP_CLUBS : childrenOf(entityId);
-  const childLabel = isPublic ? "Independent clubs" : (entity!.childLabel ?? "Groups");
+  const groups = isHome ? [] : isPublic ? [{ label: "Independent clubs", items: TOP_CLUBS }] : childGroupsOf(entityId);
   const members = isHome ? [] : membersOfEntity(people, entityId);
   const events = isHome ? [] : MOCK_EVENTS.filter((e) => e.hostEntityId === entityId);
   const tiers = entity?.membershipTiers;
@@ -281,107 +282,126 @@ export default function EntityPanel({
           )}
         </div>
       ) : (
-        <div className="mt-5 border-t border-[var(--line)] pt-4">
-          <h3 className="mb-2.5 text-[12.5px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Feed</h3>
-          <Feed
-            posts={posts}
-            showSource={isHome}
-            entityName={isHome ? "your networks" : title}
-            canPost={isPublic || isMember || isAdmin}
-            likes={likes}
-            comments={comments}
-            votes={votes}
-            onPost={(body, kind) => onPost(entityId, body, kind)}
-            onToggleLike={onToggleLike}
-            onComment={onComment}
-            onVote={onVote}
-            onOpenEvent={onOpenEvent}
-            onOpenEntity={onOpen}
-            postingAs={isAdmin ? title : undefined}
-          />
-        </div>
-      )}
-
-      {children.length > 0 && (
-        <div className="mt-5 border-t border-[var(--line)] pt-4">
-          <h3 className="text-[12.5px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
-            {childLabel} ({children.length})
-          </h3>
-          <div className={`mt-2.5 grid gap-2 ${wide ? "sm:grid-cols-2" : ""}`}>
-            {children.map((c) => (
-              <button key={c.id} onClick={() => onOpen(c.id)} className="card p-3 text-left transition-colors hover:border-[var(--brand)]">
-                <p className="text-[13.5px] font-semibold leading-tight">
-                  {c.emoji} {c.name}
-                </p>
-                <p className="mt-0.5 line-clamp-2 text-[12px] text-[var(--ink-soft)]">{c.blurbMock}</p>
-                <p className="mt-1 text-[11px] text-[var(--ink-soft)]">
-                  {(c.access ?? "open") === "request" && "🔒 "}
-                  {c.memberCountMock.toLocaleString()} members
-                  {c.childLabel ? ` · ${childrenOf(c.id).length} ${c.childLabel.toLowerCase()}` : ""} →
-                </p>
+        <>
+          {/* Sections, not one long scroll — a feed is a place you dwell, a
+              roster is a thing you scan, and they shouldn't fight. */}
+          <div className="mt-4 flex flex-wrap gap-1 border-b border-[var(--line)] pb-2">
+            {[
+              { id: "feed", label: "Feed" },
+              ...groups.map((g) => ({ id: `g:${g.label}`, label: `${g.label} (${g.items.length})` })),
+              { id: "people", label: `People (${members.length})` },
+              ...(events.length > 0 ? [{ id: "events", label: `Events (${events.length})` }] : []),
+            ].map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className="rounded-full px-3 py-1.5 text-[12px] font-semibold transition-colors"
+                style={
+                  tab === t.id
+                    ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)" }
+                    : { color: "var(--ink-soft)" }
+                }
+              >
+                {t.label}
               </button>
             ))}
           </div>
-        </div>
-      )}
 
-      {events.length > 0 && (
-        <div className="mt-5 border-t border-[var(--line)] pt-4">
-          <h3 className="text-[12.5px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Upcoming events ({events.length})</h3>
-          <div className={`mt-2.5 grid gap-2 ${wide ? "sm:grid-cols-2" : ""}`}>
-            {events.map((ev) => (
-              <button key={ev.id} onClick={() => onOpenEvent(ev.id)} className="card p-3 text-left transition-colors hover:border-[var(--brand)]">
-                <span
-                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold"
-                  style={{ background: "color-mix(in srgb, var(--layer-event) 14%, var(--card))", color: "var(--layer-event)" }}
-                >
-                  <CalendarIcon /> Event
-                </span>
-                <p className="mt-1.5 text-[13.5px] font-semibold leading-tight">{ev.name}</p>
-                <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">{ev.dateLabel}</p>
-                <p className="text-[12px] text-[var(--ink-soft)]">
-                  {ev.venue}, {ev.city}
-                </p>
-                <p className="mt-1 text-[11px] text-[var(--ink-soft)]">
-                  {ev.tickets ? `From ${ev.tickets[0].priceLabel}` : "Free"} · {ev.attendeesMock.toLocaleString()} attending →
-                </p>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!locked && (
-      <div className="mt-5 border-t border-[var(--line)] pt-4">
-        <h3 className="text-[12.5px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
-          Members worldwide {members.length > 0 ? `(${members.length})` : ""}
-        </h3>
-        {loading ? (
-          <p className="mt-2 text-[13px] text-[var(--ink-soft)]">Loading members from around the world…</p>
-        ) : members.length === 0 ? (
-          <p className="mt-2 text-[13px] text-[var(--ink-soft)]">No one here yet.</p>
-        ) : (
-          <div className={`mt-2.5 grid gap-2.5 ${wide ? "sm:grid-cols-2" : ""}`}>
-            {members.map((p) => (
-              <ProfileListRow
-                key={p.id}
-                p={p}
-                conn={conn[p.id]}
-                hoveredId={hoveredMemberId}
-                now={now}
-                canAct={canAct}
-                onHover={setHoveredMemberId}
-                onUnhover={(id) => setHoveredMemberId((cur) => (cur === id ? null : cur))}
-                onConnect={onConnect}
-                onRespond={onRespond}
-                onMessage={onMessage}
+          {tab === "feed" && (
+            <div className="mt-4">
+              <Feed
+                posts={posts}
+                showSource={isHome}
+                entityName={isHome ? "your networks" : title}
+                canPost={isPublic || isMember || isAdmin}
+                likes={likes}
+                comments={comments}
+                votes={votes}
+                onPost={(body, kind) => onPost(entityId, body, kind)}
+                onToggleLike={onToggleLike}
+                onComment={onComment}
+                onVote={onVote}
+                onOpenEvent={onOpenEvent}
                 onOpenEntity={onOpen}
-                communityName={isPublic ? undefined : title}
+                postingAs={isAdmin ? title : undefined}
               />
-            ))}
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+
+          {groups.map(
+            (g) =>
+              tab === `g:${g.label}` && (
+                <div key={g.label} className={`mt-4 grid gap-2 ${wide ? "sm:grid-cols-2" : ""}`}>
+                  {g.items.map((c) => (
+                    <button key={c.id} onClick={() => onOpen(c.id)} className="card p-3 text-left transition-colors hover:border-[var(--brand)]">
+                      <p className="text-[13.5px] font-semibold leading-tight">
+                        {c.emoji} {c.name}
+                      </p>
+                      <p className="mt-0.5 line-clamp-2 text-[12px] text-[var(--ink-soft)]">{c.blurbMock}</p>
+                      <p className="mt-1 text-[11px] text-[var(--ink-soft)]">
+                        {(c.access ?? "open") === "request" && "🔒 "}
+                        {c.memberCountMock.toLocaleString()} members
+                        {c.childLabel ? ` · ${childrenOf(c.id).length} ${c.childLabel.toLowerCase()}` : ""} →
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )
+          )}
+
+          {tab === "events" && (
+            <div className={`mt-4 grid gap-2 ${wide ? "sm:grid-cols-2" : ""}`}>
+              {events.map((ev) => (
+                <button key={ev.id} onClick={() => onOpenEvent(ev.id)} className="card p-3 text-left transition-colors hover:border-[var(--brand)]">
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold"
+                    style={{ background: "color-mix(in srgb, var(--layer-event) 14%, var(--card))", color: "var(--layer-event)" }}
+                  >
+                    <CalendarIcon /> Event
+                  </span>
+                  <p className="mt-1.5 text-[13.5px] font-semibold leading-tight">{ev.name}</p>
+                  <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">{ev.dateLabel}</p>
+                  <p className="text-[12px] text-[var(--ink-soft)]">
+                    {ev.venue}, {ev.city}
+                  </p>
+                  <p className="mt-1 text-[11px] text-[var(--ink-soft)]">
+                    {ev.tickets ? `From ${ev.tickets[0].priceLabel}` : "Free"} · {ev.attendeesMock.toLocaleString()} attending →
+                  </p>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {tab === "people" && (
+            <div className="mt-4">
+              {loading ? (
+                <p className="text-[13px] text-[var(--ink-soft)]">Loading members from around the world…</p>
+              ) : members.length === 0 ? (
+                <p className="text-[13px] text-[var(--ink-soft)]">No one here yet.</p>
+              ) : (
+                <div className={`grid gap-2.5 ${wide ? "sm:grid-cols-2" : ""}`}>
+                  {members.map((p) => (
+                    <ProfileListRow
+                      key={p.id}
+                      p={p}
+                      conn={conn[p.id]}
+                      hoveredId={hoveredMemberId}
+                      now={now}
+                      canAct={canAct}
+                      onHover={setHoveredMemberId}
+                      onUnhover={(id) => setHoveredMemberId((cur) => (cur === id ? null : cur))}
+                      onConnect={onConnect}
+                      onRespond={onRespond}
+                      onMessage={onMessage}
+                      onOpenEntity={onOpen}
+                      communityName={isPublic ? undefined : title}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

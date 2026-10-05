@@ -29,6 +29,13 @@ export type MockEntity = {
   label: string;
   /** Plural term this node uses for its children. Absent means it's a leaf. */
   childLabel?: string;
+  /**
+   * Which heading this node sits under on its parent's page. Real alumni
+   * orgs have more than one axis — IIT Bombay has city chapters *and* batch
+   * years — so a parent can group its children under several headings
+   * instead of being forced into one list.
+   */
+  childGroup?: string;
   emoji: string;
   memberCountMock: number;
   blurbMock: string;
@@ -59,7 +66,13 @@ function node(
   emoji: string,
   memberCountMock: number,
   blurbMock: string,
-  opts: { childLabel?: string; place?: { city: string; lat: number; lng: number }; membershipTiers?: PriceTier[]; access?: MockEntity["access"] } = {}
+  opts: {
+    childLabel?: string;
+    childGroup?: string;
+    place?: { city: string; lat: number; lng: number };
+    membershipTiers?: PriceTier[];
+    access?: MockEntity["access"];
+  } = {}
 ): MockEntity {
   return { id, name, parentId, label, emoji, memberCountMock, blurbMock, ...opts };
 }
@@ -199,9 +212,9 @@ const ISB_TREE: MockEntity[] = [
     childLabel: "Programmes",
     place: { city: "Hyderabad", lat: 17.4239, lng: 78.3413 },
   }),
-  node("isb-pgp", "PGP", "isb", "Programme", "📘", 9800, "Post Graduate Programme in Management — the one-year flagship.", { childLabel: "Classes" }),
-  node("isb-egp", "EGP", "isb", "Programme", "📗", 2600, "Executive Graduate Programme — for working senior managers.", { childLabel: "Classes" }),
-  node("isb-ivi", "IVI", "isb", "Programme", "🚀", 480, "I-Venture @ ISB — the incubator and its founder cohorts.", { childLabel: "Cohorts" }),
+  node("isb-pgp", "PGP", "isb", "Programme", "📘", 9800, "Post Graduate Programme in Management — the one-year flagship.", { childLabel: "Classes", childGroup: "Programmes" }),
+  node("isb-egp", "EGP", "isb", "Programme", "📗", 2600, "Executive Graduate Programme — for working senior managers.", { childLabel: "Classes", childGroup: "Programmes" }),
+  node("isb-ivi", "IVI", "isb", "Programme", "🚀", 480, "I-Venture @ ISB — the incubator and its founder cohorts.", { childLabel: "Cohorts", childGroup: "Programmes" }),
   ...[2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025].map((y) =>
     node(`isb-pgp-${y}`, `Class of ${y}`, "isb-pgp", "Class", "🎓", 600 + (y % 7) * 40, `The PGP cohort that graduated in ${y}.`, { access: "request" })
   ),
@@ -217,14 +230,21 @@ const IITB_TREE: MockEntity[] = [
     childLabel: "Chapters",
     place: { city: "Mumbai", lat: 19.1334, lng: 72.9133 },
   }),
-  node("iitb-bay", "Bay Area Chapter", "iitb", "Chapter", "📍", 980, "IITB alumni around San Francisco and the peninsula.", { childLabel: "Groups", place: { city: "San Francisco", lat: 37.7749, lng: -122.4194 } }),
-  node("iitb-blr", "Bengaluru Chapter", "iitb", "Chapter", "📍", 1640, "The largest IITB chapter outside Mumbai.", { childLabel: "Groups", place: { city: "Bengaluru", lat: 12.9716, lng: 77.5946 } }),
-  node("iitb-nyc", "New York Chapter", "iitb", "Chapter", "📍", 720, "East-coast alumni, finance and tech heavy.", { place: { city: "New York", lat: 40.7128, lng: -74.006 } }),
-  node("iitb-sg", "Singapore Chapter", "iitb", "Chapter", "📍", 540, "Alumni across Southeast Asia.", { place: { city: "Singapore", lat: 1.3521, lng: 103.8198 } }),
+  node("iitb-bay", "Bay Area Chapter", "iitb", "Chapter", "📍", 980, "IITB alumni around San Francisco and the peninsula.", { childLabel: "Groups", childGroup: "Chapters", place: { city: "San Francisco", lat: 37.7749, lng: -122.4194 } }),
+  node("iitb-blr", "Bengaluru Chapter", "iitb", "Chapter", "📍", 1640, "The largest IITB chapter outside Mumbai.", { childLabel: "Groups", childGroup: "Chapters", place: { city: "Bengaluru", lat: 12.9716, lng: 77.5946 } }),
+  node("iitb-nyc", "New York Chapter", "iitb", "Chapter", "📍", 720, "East-coast alumni, finance and tech heavy.", { childGroup: "Chapters", place: { city: "New York", lat: 40.7128, lng: -74.006 } }),
+  node("iitb-sg", "Singapore Chapter", "iitb", "Chapter", "📍", 540, "Alumni across Southeast Asia.", { childGroup: "Chapters", place: { city: "Singapore", lat: 1.3521, lng: 103.8198 } }),
+  // The other axis: batch years, straight off the institution — "IIT Bombay → 2018".
+  ...[2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022].map((y) =>
+    node(`iitb-${y}`, `Class of ${y}`, "iitb", "Batch", "🎓", 420 + (y % 9) * 30, `Everyone who graduated in ${y}.`, {
+      childGroup: "Batches",
+      access: y === 2018 ? "open" : "request",
+    })
+  ),
   node("iitb-bay-founders", "Bay Area Founders", "iitb-bay", "Group", "👥", 310, "Alumni who've started something in the valley."),
   node("iitb-bay-deeptech", "Deep Tech", "iitb-bay", "Group", "👥", 180, "Semiconductors, robotics, and hard science."),
   node("iitb-blr-founders", "Bengaluru Founders", "iitb-blr", "Group", "👥", 420, "Seed to Series C founders in the city."),
-  node("iitb-blr-08", "Class of 2008", "iitb-blr", "Group", "👥", 140, "Batchmates keeping the hostel group chat alive since '08.", { access: "request" }),
+  node("iitb-blr-social", "Chapter Socials", "iitb-blr", "Group", "👥", 140, "Monthly meet-ups, quizzes, and the annual picnic."),
 ];
 
 const STANFORD_TREE: MockEntity[] = [
@@ -287,6 +307,24 @@ for (const e of ALL_ENTITIES) {
 
 export function entityById(id: string): MockEntity | undefined {
   return BY_ID.get(id);
+}
+
+/** Children bucketed by their heading — one bucket for most nodes, several where a node has more than one axis. */
+export function childGroupsOf(id: string): Array<{ label: string; items: MockEntity[] }> {
+  const kids = childrenOf(id);
+  if (kids.length === 0) return [];
+  const fallback = entityById(id)?.childLabel ?? "Groups";
+  const order: string[] = [];
+  const byLabel = new Map<string, MockEntity[]>();
+  for (const k of kids) {
+    const label = k.childGroup ?? fallback;
+    if (!byLabel.has(label)) {
+      byLabel.set(label, []);
+      order.push(label);
+    }
+    byLabel.get(label)!.push(k);
+  }
+  return order.map((label) => ({ label, items: byLabel.get(label)! }));
 }
 
 export function childrenOf(id: string): MockEntity[] {
