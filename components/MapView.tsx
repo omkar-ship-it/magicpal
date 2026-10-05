@@ -257,8 +257,11 @@ export default function MapView({
     };
   }, [center, radiusKm, mode, seedConnFromProfiles]);
 
+  // Also fetched when a Community Hub is open, even while browsing Nearby —
+  // "view the alumni all over the world" needs the actual worldwide roster,
+  // not whatever happens to be within the current street-level radius.
   useEffect(() => {
-    if (mode !== "network") return;
+    if (mode !== "network" && !hubGroupId) return;
     let cancelled = false;
     Promise.resolve().then(() => {
       if (!cancelled) setWorldLoading(true);
@@ -278,7 +281,7 @@ export default function MapView({
     return () => {
       cancelled = true;
     };
-  }, [mode, ownLat, ownLng, seedConnFromProfiles]);
+  }, [mode, hubGroupId, ownLat, ownLng, seedConnFromProfiles]);
 
   // Nearby mode flies back to a street-level view of `center`; network mode
   // zooms out and fits every connection (plus your own pin) into frame —
@@ -1046,7 +1049,8 @@ export default function MapView({
         <CommunityHub
           groupId={hubGroupId}
           onClose={() => setHubGroupId(null)}
-          people={activeData}
+          people={worldProfiles}
+          loading={worldLoading && worldProfiles.length === 0}
           conn={conn}
           onConnect={connectTo}
           onRespond={respondTo}

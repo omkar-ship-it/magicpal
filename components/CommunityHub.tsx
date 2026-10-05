@@ -17,6 +17,7 @@ export default function CommunityHub({
   groupId,
   onClose,
   people,
+  loading,
   conn,
   onConnect,
   onRespond,
@@ -25,7 +26,10 @@ export default function CommunityHub({
 }: {
   groupId: string;
   onClose: () => void;
+  /** Always the full worldwide roster, regardless of whether the map behind this is in Nearby or My Network mode — "view alumni all over the world" shouldn't depend on which mode you happened to be browsing in. */
   people: Profile[];
+  /** True while the worldwide roster is still being fetched — distinct from "genuinely nobody's a member yet". */
+  loading?: boolean;
   conn: Record<string, ConnState>;
   onConnect: (id: string, note?: string) => void;
   onRespond: (p: Profile, accept: boolean) => void;
@@ -152,12 +156,12 @@ export default function CommunityHub({
 
         <div className="mt-5 border-t border-[var(--line)] pt-4">
           <h3 className="text-[12.5px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
-            Members {members.length > 0 ? `(${members.length} in view)` : ""}
+            Members worldwide {members.length > 0 ? `(${members.length})` : ""}
           </h3>
-          {members.length === 0 ? (
-            <p className="mt-2 text-[13px] text-[var(--ink-soft)]">
-              No one in your current map view is in this community yet — try widening your radius or switching to My Network.
-            </p>
+          {loading ? (
+            <p className="mt-2 text-[13px] text-[var(--ink-soft)]">Loading members from around the world…</p>
+          ) : members.length === 0 ? (
+            <p className="mt-2 text-[13px] text-[var(--ink-soft)]">No one&apos;s a member of this network yet.</p>
           ) : (
             <div className="mt-2.5 flex flex-col gap-2.5">
               {members.map((p) => (

@@ -130,8 +130,32 @@ export function mockConnectionCount(id: string): number {
   return 12 + (hashSeed(id) % 480);
 }
 
-/** 0–2 groups per person, picked deterministically from their name so the same person always shows the same affiliations. */
+/**
+ * Guaranteed, worldwide membership for the three networks the demo leans on
+ * most heavily — rather than leaving it to chance whether a generic name
+ * hash happens to land a rich, globally-spread roster in any one of them.
+ * Each list mixes a few India-based seed people with several from the
+ * worldwide cluster (seed.mjs's WORLD_PEOPLE), so "view the alumni all over
+ * the world" has somewhere real to point at. Overrides the hash for exactly
+ * these names — everyone else still gets the deterministic hash below.
+ */
+const CURATED_ALUMNI: Record<string, string[]> = {
+  "grp-iitb": ["Arjun Bose", "Dev Chandran", "Meera Pillai", "Divya Menon", "Imran Baig", "Suresh Pai", "Marcus Webb", "Wei Zhang", "Gabriel Souza", "Jiwoo Kim"],
+  "grp-isb": ["Priya Raman", "Vikram Nair", "Tara Bhatt", "Nisha Reddy", "Pranathi Rao", "Tejaswini Rao", "Sarah Chen", "Priyanka Malhotra", "Hana Al-Rashid", "Amara Njoroge"],
+  "grp-stanford": ["Rohan Mehta", "Kabir Singh", "Ananya Krishnan", "Rohit Agarwal", "Emma Whitfield", "Aiko Tanaka", "Olivia Bennett", "Noah Fortin", "Elin Berg", "Diego Fernández"],
+};
+
+function curatedGroupFor(name: string): MockGroup | undefined {
+  for (const [groupId, names] of Object.entries(CURATED_ALUMNI)) {
+    if (names.includes(name)) return MOCK_GROUPS.find((g) => g.id === groupId);
+  }
+  return undefined;
+}
+
+/** 0–2 groups per person, picked deterministically from their name so the same person always shows the same affiliations — except the curated roster above, who always get exactly their assigned network. */
 export function mockGroupsForName(name: string): MockGroup[] {
+  const curated = curatedGroupFor(name);
+  if (curated) return [curated];
   const h = hashSeed(name);
   if (h % 5 === 0) return [];
   const first = MOCK_GROUPS[h % MOCK_GROUPS.length];
@@ -153,6 +177,15 @@ export function membersInGroup<T extends { name: string }>(people: T[], groupId:
 const MY_EXTRA_GROUPS_KEY = "mp_my_extra_groups";
 
 /**
+ * Every fresh viewer's starting affiliations, before they've touched the
+ * picker — the three flagship networks this demo is built to show off, so
+ * "view all my alumni networks" has something real in it from the first
+ * look rather than requiring a few clicks first. Still fully editable and
+ * removable from the profile page.
+ */
+const DEFAULT_EXTRA_GROUP_IDS = ["grp-iitb", "grp-isb", "grp-stanford"];
+
+/**
  * A real person can be alumni of more schools than a 0–2 name-hash would
  * ever assign (e.g. undergrad + an MBA + a past employer's alumni network).
  * This lets *you specifically* declare extra affiliations beyond your
@@ -161,13 +194,14 @@ const MY_EXTRA_GROUPS_KEY = "mp_my_extra_groups";
  * app in one session without pretending to be real, persisted membership.
  */
 export function getMyExtraGroupIds(): string[] {
-  if (typeof window === "undefined") return [];
+  if (typeof window === "undefined") return DEFAULT_EXTRA_GROUP_IDS;
   try {
     const raw = window.localStorage.getItem(MY_EXTRA_GROUPS_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
+    if (raw == null) return DEFAULT_EXTRA_GROUP_IDS;
+    const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
   } catch {
-    return [];
+    return DEFAULT_EXTRA_GROUP_IDS;
   }
 }
 
