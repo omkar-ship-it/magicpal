@@ -708,7 +708,15 @@ export default function MapView({
 
   const showEventsLayer = section === "events";
   const showCompaniesLayer = section === "companies";
-  const showInstitutionsLayer = section === "institutions" || section === "network";
+  /**
+   * Institution pins belong to the Institutions section, or to a network
+   * you've actually selected — picking TiE Global should put its chapters on
+   * the map. The Network section with nothing selected is the Public Network,
+   * which is about people: drawing the whole tree's places there buried them
+   * under seventy chapter pins.
+   */
+  const institutionPins = section === "institutions" ? filteredPlaces : scopeIds ? PLACED_ENTITIES.filter((e) => scopeIds.has(e.id)) : [];
+  const showInstitutionsLayer = (section === "institutions" || section === "network") && institutionPins.length > 0;
   // The Chats section puts whoever the list is showing on the map — the people
   // you talk to, or, on the Requests tab, the people waiting on you.
   const chatNames =
@@ -754,7 +762,10 @@ export default function MapView({
                     ...PLACED_ENTITIES.filter((e) => scopeIds?.has(e.id)).map((e): [number, number] => [e.place!.lng, e.place!.lat]),
                     ...peopleOnMap.map((p): [number, number] => [p.lng, p.lat]),
                   ]
-                : [];
+                : // Public Network and My Network have no places of their own —
+                  // frame their people, or the camera keeps whatever view the
+                  // network you just left had put it on.
+                  peopleOnMap.map((p): [number, number] => [p.lng, p.lat]);
     fitPoints(pts);
     // Re-frames when the section changes or its own filter/search does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1749,7 +1760,7 @@ export default function MapView({
           })}
 
         {showInstitutionsLayer &&
-          (scopeIds && section === "network" ? PLACED_ENTITIES.filter((e) => scopeIds.has(e.id)) : filteredPlaces).map((net) => {
+          institutionPins.map((net) => {
             const open = hoveredExtraId === net.id || pinnedExtraId === net.id;
             const place = net.place!;
             return (
