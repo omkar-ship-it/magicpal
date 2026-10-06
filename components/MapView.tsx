@@ -44,7 +44,7 @@ import {
   setMyPendingIds,
   type MockEntity,
 } from "@/lib/networks";
-import { MOCK_ACCEPTED_NAMES, MOCK_THREADS } from "@/lib/chatData";
+import { MOCK_ACCEPTED_NAMES, MOCK_INCOMING_REQUESTS, MOCK_THREADS } from "@/lib/chatData";
 import FloatingAccountMenu from "./FloatingAccountMenu";
 import EntityPanel from "./EntityPanel";
 import EventPanel from "./EventPanel";
@@ -54,7 +54,11 @@ import ScopePill from "./ScopePill";
 import DockBar, { type Section } from "./DockBar";
 import SectionPopup, { type Chip, type PopupItem } from "./SectionPopup";
 import FloatingPage, { type PageSize } from "./FloatingPage";
-import TopSearch from "./TopSearch";
+import UniversalSearch, { type SearchHit } from "./UniversalSearch";
+import RequestPanel, { type IncomingRequest } from "./RequestPanel";
+import { formatRoute, parseRoute, type MapRoute } from "@/lib/mapRoute";
+import YouPanel, { type OwnProfile } from "./YouPanel";
+import RealThread from "./RealThread";
 import type { CheckoutResult } from "./Checkout";
 import ChatWindow from "./ChatWindow";
 
@@ -138,25 +142,39 @@ function ArcOverlay({ layers }: { layers: ArcLayer[] }) {
   return null;
 }
 
+/** One of your real accepted connections, as the Chats list needs it. */
+type RealConnection = { id: string; name: string; headline: string | null; photoUrl: string | null };
+
 export default function MapView({
+  ownId,
   ownLat,
   ownLng,
   ownName,
   ownPhotoUrl,
   ownVisible,
+  ownProfile,
   canAct,
   isSignedIn,
 }: {
+  /** Your user id — needed to tell your own messages apart in a real thread. */
+  ownId: string | null;
   ownLat: number | null;
   ownLng: number | null;
   ownName: string;
   ownPhotoUrl: string | null;
   ownVisible: boolean;
+  /** Your saved profile, so the You page can open in-world with no extra round trip. */
+  ownProfile: OwnProfile | null;
   /** False for a signed-out visitor, or a signed-in person who hasn't finished onboarding. */
   canAct: boolean;
   isSignedIn: boolean;
 }) {
-  const [mode, setMode] = useState<Mode>("nearby");
+  /**
+   * Where the URL says we are. MapView is client-only (see MapViewLoader), so
+   * there's no server render to mismatch — the hash can seed state directly.
+   */
+  const [route0] = useState<MapRoute>(() => parseRoute(typeof window === "undefined" ? "" : window.location.hash));
+  const [mode, setMode] = useState<Mode>(route0.network || route0.minimised ? "network" : "nearby");
   const [center, setCenter] = useState<{ lat: number; lng: number }>(
     ownLat != null && ownLng != null ? { lat: ownLat, lng: ownLng } : DEFAULT_CENTER
   );
@@ -189,24 +207,37 @@ export default function MapView({
   // What's on the map follows the open section — exactly one overlay at a
   // time, instead of four toggles parked on screen.
   /** null = the all-encompassing Public Network. Otherwise exactly one network at a time. */
-  const [selectedNetworkId, setSelectedNetworkId] = useState<string | null>(null);
+  const [selectedNetworkId, setSelectedNetworkId] = useState<string | null>(route0.network);
   const [myEntityIds, setMyEntityIdsState] = useState<string[]>(() => getMyEntityIds());
   const [panelSize, setPanelSize] = useState<PageSize>("side");
-  /** Default state is a bare map: the dock is a single icon and nothing is open. */
-  const [dockOpen, setDockOpen] = useState(false);
-  const [section, setSection] = useState<Section | null>(null);
-  const [stacks, setStacks] = useState<Stacks>(EMPTY_STACKS);
+  /** Default state is a bare map: the dock is a single icon and nothing is open — unless the URL says otherwise. */
+  const [dockOpen, setDockOpen] = useState(Boolean(route0.section || route0.minimised));
+  const [section, setSection] = useState<Section | null>(route0.section);
+  const [stacks, setStacks] = useState<Stacks>(() => (route0.section ? { ...EMPTY_STACKS, [route0.section]: route0.path } : EMPTY_STACKS));
   const [searchOpen, setSearchOpen] = useState(false);
   /** "My Network" is a scope in its own right — just the people you're connected to. */
-  const [connectionsOnly, setConnectionsOnly] = useState(false);
+  const [connectionsOnly, setConnectionsOnly] = useState(route0.connectionsOnly);
   const [compassDismissed, setCompassDismissed] = useState(false);
   /** A network page stood down: its scope stays on the map, the page is out of the way. */
-  const [minimisedId, setMinimisedId] = useState<string | null>(null);
-  const [cityFilter, setCityFilter] = useState<string | null>(null);
+  const [minimisedId, setMinimisedId] = useState<string | null>(route0.minimised);
+  const [cityFilter, setCityFilter] = useState<string | null>(route0.city);
   /** Per-section search and filter — the same state drives the popup list and the map. */
   const [sectionQuery, setSectionQuery] = useState<Record<Section, string>>({ network: "", chats: "", events: "", institutions: "", companies: "" });
-  const [sectionFilter, setSectionFilter] = useState<Record<Section, string>>({ network: "mine", chats: "all", events: "all", institutions: "all", companies: "all" });
+  const [sectionFilter, setSectionFilter] = useState<Record<Section, string>>(() => {
+    const base = { network: "mine", chats: "all", events: "all", institutions: "all", companies: "all" };
+    return route0.section && route0.filter ? { ...base, [route0.section]: route0.filter } : base;
+  });
   const [chatSort, setChatSort] = useState("recent");
+  /** Real pending requests from the API, merged with the seeded ones below. */
+  const [realRequests, setRealRequests] = useState<IncomingRequest[]>([]);
+  /** How you answered each request this session. */
+  const [requestVerdict, setRequestVerdict] = useState<Record<string, "in" | "out">>({});
+  /** People you accepted this session — they get a thread and a connected pin. */
+  const [newlyAccepted, setNewlyAccepted] = useState<string[]>([]);
+  /** Your real accepted connections — these open the real message thread, not a mocked one. */
+  const [realThreads, setRealThreads] = useState<RealConnection[]>([]);
+  /** The You page — opened from the account menu, not a separate route. */
+  const [youOpen, setYouOpen] = useState(route0.page === "you");
   /** Paid things you've bought this session — community memberships and event tickets. */
   const [paidMemberships, setPaidMemberships] = useState<Record<string, CheckoutResult>>({});
   const [registrations, setRegistrations] = useState<Record<string, CheckoutResult>>({});
@@ -304,6 +335,48 @@ export default function MapView({
     return () => navigator.geolocation.clearWatch(watchId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Your real requests and threads, so the dock is the only place either
+  // lives — the /requests and /connections pages are gone.
+  useEffect(() => {
+    if (!isSignedIn) return;
+    let cancelled = false;
+    type Row = { id: string; otherName: string | null; otherHeadline: string | null; otherPhotoUrl: string | null; requestNote?: string | null };
+    fetch("/api/connections?pending=1")
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        setRealRequests(
+          ((d.incoming ?? []) as Row[]).map((r) => ({
+            id: r.id,
+            name: r.otherName ?? "Someone",
+            headline: r.otherHeadline,
+            photoUrl: r.otherPhotoUrl,
+            note: r.requestNote ?? null,
+            timeLabel: "recently",
+            real: true,
+          }))
+        );
+      })
+      .catch(() => {});
+    fetch("/api/connections?accepted=1")
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        setRealThreads(
+          ((d.connections ?? []) as Row[]).map((r) => ({
+            id: r.id,
+            name: r.otherName ?? "Someone",
+            headline: r.otherHeadline,
+            photoUrl: r.otherPhotoUrl,
+          }))
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn]);
 
   useEffect(() => {
     if (mode !== "nearby") return;
@@ -599,7 +672,32 @@ export default function MapView({
     hit(n.name, n.blurbMock)(q("network"))
   );
 
-  const chatPeople = MOCK_ACCEPTED_NAMES.map((name) => {
+  /**
+   * Everyone asking to connect — real pending rows first, then the seeded
+   * ones so the inbox demonstrates something for any viewer.
+   */
+  const incomingRequests: IncomingRequest[] = [
+    ...realRequests,
+    ...MOCK_INCOMING_REQUESTS.map((r) => ({ ...r, photoUrl: null, real: false })),
+  ];
+  const openRequests = incomingRequests.filter((r) => !requestVerdict[r.id]);
+
+  /** Seeded connections plus anyone you accepted this session. */
+  const acceptedNames = [...MOCK_ACCEPTED_NAMES, ...newlyAccepted];
+
+  /**
+   * What's actually waiting on you — open requests plus threads where they
+   * spoke last. The dock badge used to be the thread count, which meant it
+   * read "6" forever and so meant nothing.
+   */
+  const attentionCount =
+    openRequests.length +
+    acceptedNames.filter((n) => {
+      const msgs = MOCK_THREADS[n] ?? [];
+      return msgs.length > 0 && !msgs[msgs.length - 1].mine;
+    }).length;
+
+  const chatPeople = acceptedNames.map((name) => {
     const p = [...worldProfiles, ...profiles].find((x) => x.name === name);
     const msgs = MOCK_THREADS[name] ?? [];
     return { name, p, last: msgs[msgs.length - 1], count: msgs.length };
@@ -611,7 +709,12 @@ export default function MapView({
   const showEventsLayer = section === "events";
   const showCompaniesLayer = section === "companies";
   const showInstitutionsLayer = section === "institutions" || section === "network";
-  const chatNames = new Set(chatPeople.map((c) => c.name));
+  // The Chats section puts whoever the list is showing on the map — the people
+  // you talk to, or, on the Requests tab, the people waiting on you.
+  const chatNames =
+    sectionFilter.chats === "requests"
+      ? new Set(incomingRequests.map((r) => r.name))
+      : new Set(chatPeople.map((c) => c.name));
   const connectionScoped = connectionsOnly ? networkFiltered.filter((p) => connFor(p)?.status === "accepted") : networkFiltered;
   const cityScoped = cityFilter ? connectionScoped.filter((p) => cityOf(p) === cityFilter) : connectionScoped;
   /** Cities present in the scoped set, biggest first — the location filter is built from who's actually there. */
@@ -679,6 +782,106 @@ export default function MapView({
   function popInSection() {
     if (!section) return;
     setStacks((cur) => ({ ...cur, [section]: cur[section].slice(0, -1) }));
+  }
+
+  // ── The URL is the back stack ──────────────────────────────────────────
+  // Every navigable move writes a history entry, so the browser's own back
+  // button unwinds page → list → map, a refresh lands where you left off, and
+  // a feed five levels down is a link you can send someone.
+  const routeStr = formatRoute({
+    page: youOpen ? "you" : null,
+    section,
+    path: stack,
+    filter: section ? sectionFilter[section] : null,
+    network: selectedNetworkId,
+    city: cityFilter,
+    minimised: minimisedId,
+    connectionsOnly,
+  });
+  const lastRoute = useRef(routeStr);
+  /** Set while applying a popstate, so we don't push the entry we just popped to. */
+  const fromHistory = useRef(false);
+
+  useEffect(() => {
+    if (routeStr === lastRoute.current) return;
+    lastRoute.current = routeStr;
+    if (fromHistory.current) {
+      fromHistory.current = false;
+      return;
+    }
+    window.history.pushState(null, "", routeStr || window.location.pathname);
+  }, [routeStr]);
+
+  const applyRoute = useCallback((r: MapRoute) => {
+    setYouOpen(r.page === "you");
+    setSection(r.section);
+    setDockOpen(Boolean(r.section || r.minimised));
+    setStacks(r.section ? { ...EMPTY_STACKS, [r.section]: r.path } : EMPTY_STACKS);
+    if (r.section && r.filter) setSectionFilter((cur) => ({ ...cur, [r.section!]: r.filter! }));
+    setSelectedNetworkId(r.network);
+    setCityFilter(r.city);
+    setMinimisedId(r.minimised);
+    setConnectionsOnly(r.connectionsOnly);
+    if (r.network || r.minimised) setMode("network");
+  }, []);
+
+  useEffect(() => {
+    function onPop() {
+      fromHistory.current = true;
+      applyRoute(parseRoute(window.location.hash));
+    }
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [applyRoute]);
+
+  /**
+   * Everyone this viewer could possibly search — the world roster plus the
+   * nearby one, deduped, so a name is findable whichever mode the map is in.
+   */
+  const searchablePeople = [...worldProfiles, ...profiles].filter((p, i, all) => all.findIndex((x) => x.id === p.id) === i);
+
+  /**
+   * One search, five kinds of answer. A person clears the scopes that would
+   * hide them and drops their card open; a chapter 74 deep opens its page
+   * directly, which is the whole point — nobody should click through five
+   * regions to reach TiE Hyderabad.
+   */
+  function pickSearchHit(h: SearchHit) {
+    setSearchOpen(false);
+    setQuery("");
+    setResults([]);
+    if (h.kind === "person") {
+      const p = searchablePeople.find((x) => x.id === h.id);
+      if (!p) return;
+      // Drop every scope that could be filtering them off the map.
+      setSection(null);
+      setMinimisedId(null);
+      setSelectedNetworkId(null);
+      setCityFilter(null);
+      setConnectionsOnly(false);
+      setRoleFilter(ROLE_FILTERS[0].id);
+      if (!profiles.some((x) => x.id === p.id)) setMode("network");
+      mapRef.current?.flyTo({ center: [p.lng, p.lat], zoom: 11, duration: 1200 });
+      setPinnedId(p.id);
+      return;
+    }
+    if (h.kind === "entity") {
+      setMinimisedId(null);
+      openSection("network", h.id);
+      setSelectedNetworkId(h.id);
+      setMode("network");
+      return;
+    }
+    if (h.kind === "event") {
+      openSection("events", h.id);
+      return;
+    }
+    if (h.kind === "company") {
+      openSection("companies", h.id);
+      return;
+    }
+    setSection(null);
+    setCenter({ lat: h.lat, lng: h.lng });
   }
 
   /** Drilling from inside a network page (a chapter, a class) stays in the Network section. */
@@ -783,8 +986,24 @@ export default function MapView({
    * rather than the real messages page, since the thread itself is mocked.
    */
   function connFor(p: Profile): ConnState | undefined {
-    if (MOCK_ACCEPTED_NAMES.includes(p.name)) return { status: "accepted", connectionId: null };
+    if (acceptedNames.includes(p.name)) return { status: "accepted", connectionId: null };
     return conn[p.id];
+  }
+
+  /**
+   * Answering a request in place. A real one goes through the same endpoint
+   * the old /requests page used; a seeded one turns into a thread and a
+   * connected pin, which is the point of accepting.
+   */
+  async function respondToRequest(r: IncomingRequest, accept: boolean) {
+    setRequestVerdict((cur) => ({ ...cur, [r.id]: accept ? "in" : "out" }));
+    if (accept) setNewlyAccepted((cur) => (cur.includes(r.name) ? cur : [...cur, r.name]));
+    if (!r.real) return;
+    await fetch(`/api/connections/${r.id}/respond`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accept }),
+    }).catch(() => {});
   }
 
   /** Compact map controls for the Network popup — these change the pins, not just the list. */
@@ -914,7 +1133,20 @@ export default function MapView({
       });
     }
 
-    const waiting = MOCK_ACCEPTED_NAMES.filter((n) => {
+    // Requests go first — they're the only thing here with someone waiting on
+    // the other end.
+    if (openRequests.length > 0) {
+      const shared = sharedContextFor(openRequests[0].name);
+      lines.push({
+        id: "requests",
+        emoji: "🤝",
+        headline: `${openRequests.length} ${openRequests.length === 1 ? "person wants" : "people want"} to connect`,
+        detail: shared ? `${openRequests[0].name} — also in ${shared.label}` : `${openRequests[0].name} and others are waiting on you`,
+        onClick: jump("chats", "requests"),
+      });
+    }
+
+    const waiting = acceptedNames.filter((n) => {
       const msgs = MOCK_THREADS[n] ?? [];
       return msgs.length > 0 && !msgs[msgs.length - 1].mine;
     });
@@ -987,14 +1219,52 @@ export default function MapView({
           ...others.map((n) => row(n, `Other networks (${others.length})`)),
         ];
       }
-      case "chats":
-        return chatPeople.map((t) => ({
-          id: t.p?.id ?? t.name,
-          photo: t.p?.photoUrl ?? avatarUrl(t.name),
-          title: t.name,
-          subtitle: t.p?.headline ?? undefined,
-          meta: t.last ? `${t.last.mine ? "You: " : ""}${t.last.body}` : "Say hello",
-        }));
+      case "chats": {
+        // Your real threads sit above the seeded ones and open the real
+        // message view — this is where /connections and /messages went.
+        const real: PopupItem[] = realThreads
+          .filter((t) => hit(t.name, t.headline)(q("chats")))
+          .map((t) => ({
+            id: `conn:${t.id}`,
+            group: "Your connections",
+            photo: t.photoUrl ?? avatarUrl(t.name),
+            title: t.name,
+            subtitle: t.headline ?? undefined,
+            meta: "Open your conversation",
+          }));
+        if (sectionFilter.chats === "requests") {
+          return incomingRequests
+            .filter((r) => hit(r.name, r.headline, r.note)(q("chats")))
+            .map((r) => {
+              const verdict = requestVerdict[r.id];
+              const shared = sharedContextFor(r.name);
+              return {
+                id: `req:${r.id}`,
+                photo: r.photoUrl ?? avatarUrl(r.name),
+                title: r.name,
+                subtitle: r.headline ?? undefined,
+                meta: verdict
+                  ? verdict === "in"
+                    ? "Accepted — you can message them"
+                    : "Declined"
+                  : shared
+                    ? `${shared.emoji} also in ${shared.label} · wants to connect`
+                    : `Wants to connect · ${r.timeLabel}`,
+              };
+            });
+        }
+        return [
+          ...real,
+          ...chatPeople.map((t) => ({
+            id: t.p?.id ?? t.name,
+            group: real.length > 0 ? "Prototype threads" : undefined,
+            photo: t.p?.photoUrl ?? avatarUrl(t.name),
+            title: t.name,
+            subtitle: t.p?.headline ?? undefined,
+            meta: t.last ? `${t.last.mine ? "You: " : ""}${t.last.body}` : "Say hello",
+          })),
+        ];
+      }
       case "events":
         return filteredEvents.map((e) => ({
           id: e.id,
@@ -1033,8 +1303,9 @@ export default function MapView({
         ];
       case "chats":
         return [
-          { id: "all", label: "All" },
+          { id: "all", label: `Chats (${chatPeople.length})` },
           { id: "unread", label: "Waiting on you" },
+          { id: "requests", label: openRequests.length > 0 ? `Requests (${openRequests.length})` : "Requests" },
         ];
       case "events":
         return [
@@ -1073,7 +1344,7 @@ export default function MapView({
       case "network":
         return `${peopleOnMap.length} on the map`;
       case "chats":
-        return `${chatPeople.length} on the map`;
+        return sectionFilter.chats === "requests" ? `${openRequests.length} waiting on you` : `${chatPeople.length} on the map`;
       case "events":
         return `${filteredEvents.length} on the map`;
       case "institutions":
@@ -1088,7 +1359,11 @@ export default function MapView({
   function pageTitle(): string {
     const id = stack[stack.length - 1];
     if (!section || !id) return "";
-    if (section === "chats") return [...worldProfiles, ...profiles].find((x) => x.id === id)?.name ?? "Chat";
+    if (section === "chats") {
+      if (id.startsWith("req:")) return incomingRequests.find((r) => `req:${r.id}` === id)?.name ?? "Request";
+      if (id.startsWith("conn:")) return realThreads.find((t) => `conn:${t.id}` === id)?.name ?? "Chat";
+      return [...worldProfiles, ...profiles].find((x) => x.id === id)?.name ?? "Chat";
+    }
     if (section === "events") return MOCK_EVENTS.find((e) => e.id === id)?.name ?? "Event";
     if (section === "companies") return MOCK_COMPANIES.find((c) => c.id === id)?.name ?? "Company";
     if (id === HOME_FEED_ID) return "Your feed";
@@ -1100,7 +1375,7 @@ export default function MapView({
   function pageEmoji(): string {
     const id = stack[stack.length - 1];
     if (!section || !id) return "";
-    if (section === "chats") return "💬";
+    if (section === "chats") return id.startsWith("req:") ? "🤝" : "💬";
     if (section === "events") return "📅";
     if (section === "companies") return "🏢";
     if (id === HOME_FEED_ID) return "🏠";
@@ -1118,8 +1393,30 @@ export default function MapView({
     if (!section || !id) return null;
 
     if (section === "chats") {
+      if (id.startsWith("conn:")) {
+        const t = realThreads.find((x) => `conn:${x.id}` === id);
+        if (!t || !ownId) return null;
+        return <RealThread connectionId={t.id} meId={ownId} otherName={t.name} otherHeadline={t.headline} otherPhotoUrl={t.photoUrl} />;
+      }
+      if (id.startsWith("req:")) {
+        const r = incomingRequests.find((x) => `req:${x.id}` === id);
+        if (!r) return null;
+        return (
+          <RequestPanel
+            request={r}
+            verdict={requestVerdict[r.id]}
+            onRespond={respondToRequest}
+            onMessage={(name) => {
+              const p = [...worldProfiles, ...profiles].find((x) => x.name === name);
+              setSectionFilter((cur) => ({ ...cur, chats: "all" }));
+              setStacks((cur) => ({ ...cur, chats: [p?.id ?? name] }));
+            }}
+          />
+        );
+      }
       const p = [...worldProfiles, ...profiles].find((x) => x.id === id);
-      return <ChatWindow key={id} name={p?.name ?? "Chat"} photoUrl={p?.photoUrl ?? null} headline={p?.headline ?? null} wide={panelSize !== "side"} />;
+      const name = p?.name ?? incomingRequests.find((r) => r.name === id)?.name ?? id;
+      return <ChatWindow key={id} name={p?.name ?? name} photoUrl={p?.photoUrl ?? null} headline={p?.headline ?? null} wide={panelSize !== "side"} />;
     }
 
     if (section === "events") {
@@ -1495,14 +1792,31 @@ export default function MapView({
 
       <div className="pointer-events-none absolute right-3 top-3 z-[1000] sm:right-5 sm:top-5">
         <div className="pointer-events-auto">
-          <FloatingAccountMenu isSignedIn={isSignedIn} canAct={canAct} name={ownName} photoUrl={ownPhotoUrl} />
+          <FloatingAccountMenu
+            isSignedIn={isSignedIn}
+            canAct={canAct}
+            name={ownName}
+            photoUrl={ownPhotoUrl}
+            attention={openRequests.length}
+            onOpenYou={() => setYouOpen(true)}
+            onOpenRequests={() => {
+              setSectionFilter((cur) => ({ ...cur, chats: "requests" }));
+              openSection("chats");
+              setStacks((cur) => ({ ...cur, chats: [] }));
+            }}
+            onOpenChats={() => {
+              setSectionFilter((cur) => ({ ...cur, chats: "all" }));
+              openSection("chats");
+              setStacks((cur) => ({ ...cur, chats: [] }));
+            }}
+          />
         </div>
       </div>
 
       <DockBar
         open={dockOpen}
         active={section}
-        unread={MOCK_ACCEPTED_NAMES.length}
+        unread={attentionCount}
         onOpenChange={(v) => {
           setDockOpen(v);
           if (!v) setSection(null);
@@ -1516,18 +1830,14 @@ export default function MapView({
         }}
       />
 
-      <TopSearch
+      <UniversalSearch
         open={searchOpen}
+        people={searchablePeople}
+        places={results}
         query={query}
-        results={results}
         onOpenChange={setSearchOpen}
         onQueryChange={setQuery}
-        onPick={(r) => {
-          setCenter({ lat: r.lat, lng: r.lng });
-          setQuery(r.label);
-          setResults([]);
-          setSearchOpen(false);
-        }}
+        onPick={pickSearchHit}
       />
 
       {minimisedId && (
@@ -1604,6 +1914,33 @@ export default function MapView({
           onSize={setPanelSize}
         >
           {sectionDetail()}
+        </FloatingPage>
+      )}
+
+      {youOpen && (
+        <FloatingPage
+          title={canAct ? "You" : "Set up your profile"}
+          emoji="🙋"
+          canGoBack={false}
+          size={panelSize === "side" ? "wide" : panelSize}
+          onBack={() => setYouOpen(false)}
+          onClose={() => setYouOpen(false)}
+          onSize={setPanelSize}
+        >
+          {ownProfile ? (
+            <YouPanel profile={ownProfile} onboarded={canAct} />
+          ) : (
+            // Reachable by link (an old /profile URL, a shared #/you), so it
+            // needs an answer rather than an empty page.
+            <div className="py-6 text-center">
+              <p className="text-[26px] leading-none">🙋</p>
+              <p className="mt-2 text-[14px] font-semibold">Sign in to set up your profile</p>
+              <p className="mt-1 text-[12.5px] text-[var(--ink-soft)]">The map is open to everyone — being on it takes an account.</p>
+              <a href="/login" className="btn btn-primary btn-sm mt-3 inline-block">
+                Sign in
+              </a>
+            </div>
+          )}
         </FloatingPage>
       )}
     </div>

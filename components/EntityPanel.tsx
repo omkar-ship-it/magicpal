@@ -8,7 +8,6 @@ import {
   TOP_CLUBS,
   ancestorsOf,
   childGroupsOf,
-  childrenOf,
   entityById,
   membersOfEntity,
   type MockPost,
@@ -17,6 +16,7 @@ import { MOCK_EVENTS } from "@/lib/prototypeData";
 import { MOCK_JOIN_REQUESTS, type PostKind } from "@/lib/feedData";
 import { type Profile, type ConnState, ProfileListRow, CalendarIcon } from "./MapPrimitives";
 import Feed from "./Feed";
+import DescendantBrowser from "./DescendantBrowser";
 import Checkout, { type CheckoutResult } from "./Checkout";
 
 /**
@@ -330,23 +330,7 @@ export default function EntityPanel({
 
           {groups.map(
             (g) =>
-              tab === `g:${g.label}` && (
-                <div key={g.label} className={`mt-4 grid gap-2 ${wide ? "sm:grid-cols-2" : ""}`}>
-                  {g.items.map((c) => (
-                    <button key={c.id} onClick={() => onOpen(c.id)} className="card p-3 text-left transition-colors hover:border-[var(--brand)]">
-                      <p className="text-[13.5px] font-semibold leading-tight">
-                        {c.emoji} {c.name}
-                      </p>
-                      <p className="mt-0.5 line-clamp-2 text-[12px] text-[var(--ink-soft)]">{c.blurbMock}</p>
-                      <p className="mt-1 text-[11px] text-[var(--ink-soft)]">
-                        {(c.access ?? "open") === "request" && "🔒 "}
-                        {c.memberCountMock.toLocaleString()} members
-                        {c.childLabel ? ` · ${childrenOf(c.id).length} ${c.childLabel.toLowerCase()}` : ""} →
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              )
+              tab === `g:${g.label}` && <DescendantBrowser key={g.label} groupLabel={g.label} items={g.items} wide={wide} onOpen={onOpen} />
           )}
 
           {tab === "events" && (

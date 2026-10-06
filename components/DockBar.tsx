@@ -25,7 +25,11 @@ export default function DockBar({
 }: {
   open: boolean;
   active: Section | null;
-  /** Shown as a dot on Chats. */
+  /**
+   * Things waiting on you — unanswered requests and conversations. Badged on
+   * Chats, and on the collapsed icon too: the default state is one icon, so a
+   * badge only inside the open dock would be a badge nobody ever sees.
+   */
   unread: number;
   onOpenChange: (v: boolean) => void;
   onSelect: (s: Section) => void;
@@ -35,12 +39,20 @@ export default function DockBar({
       <div className="pointer-events-none fixed inset-x-0 bottom-5 z-[1350] flex justify-center px-3">
         <button
           onClick={() => onOpenChange(true)}
-          className="pointer-events-auto grid h-14 w-14 place-items-center rounded-full text-[22px] text-white transition-transform hover:scale-105"
+          className="pointer-events-auto relative grid h-14 w-14 place-items-center rounded-full text-[22px] text-white transition-transform hover:scale-105"
           style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-deep))", boxShadow: "var(--shadow-lift)" }}
-          title="Open MagicPal"
-          aria-label="Open"
+          title={unread > 0 ? `${unread} waiting on you` : "Open MagicPal"}
+          aria-label={unread > 0 ? `Open — ${unread} waiting on you` : "Open"}
         >
           ✦
+          {unread > 0 && (
+            <span
+              className="absolute -right-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full px-1 text-[10px] font-bold text-white"
+              style={{ background: "var(--warn)", boxShadow: "0 0 0 2px var(--card)" }}
+            >
+              {unread}
+            </span>
+          )}
         </button>
       </div>
     );
@@ -69,7 +81,7 @@ export default function DockBar({
               {s.id === "chats" && unread > 0 && (
                 <span
                   className="absolute right-3 top-1 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[9px] font-bold text-white"
-                  style={{ background: "var(--brand)" }}
+                  style={{ background: "var(--warn)" }}
                 >
                   {unread}
                 </span>

@@ -12,27 +12,24 @@ export default function NavAuth({ user }: { user: SessionUser | null }) {
 
   if (!user.onboarded) {
     return (
-      <Link href="/profile" className="btn btn-primary btn-sm">
+      <Link href="/#/you" className="btn btn-primary btn-sm">
         Finish your profile
       </Link>
     );
   }
 
+  // Requests, connections, chats and your profile all live on the map now —
+  // this header survives only for the two pages that aren't the app itself
+  // (sign-in and the institution walkthrough), so it links back and no more.
   return (
     <nav className="flex items-center gap-5 text-sm font-medium">
       <Link href="/" className="text-[var(--ink-soft)] transition-colors hover:text-[var(--ink)]">
         Map
       </Link>
-      <Link href="/requests" className="text-[var(--ink-soft)] transition-colors hover:text-[var(--ink)]">
-        Requests
-      </Link>
-      <Link href="/connections" className="text-[var(--ink-soft)] transition-colors hover:text-[var(--ink)]">
-        Connections
-      </Link>
       <Link href="/institutions" className="text-[var(--ink-soft)] transition-colors hover:text-[var(--ink)]">
         For institutions
       </Link>
-      <Link href="/profile" className="flex items-center gap-2">
+      <Link href="/#/you" className="flex items-center gap-2">
         <span
           className="avatar h-8 w-8 text-[12px]"
           style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-deep))" }}

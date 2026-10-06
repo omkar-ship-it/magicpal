@@ -14,11 +14,33 @@ export default async function Home() {
 
   return (
     <MapView
+      ownId={user?.id ?? null}
       ownLat={row?.lat ?? null}
       ownLng={row?.lng ?? null}
       ownName={user?.name ?? "You"}
       ownPhotoUrl={user?.photoUrl ?? null}
       ownVisible={row?.visibleOnMap ?? false}
+      // The whole saved profile, so the You page opens in-world with no extra
+      // fetch — there's no /profile route to send people to any more.
+      ownProfile={
+        user
+          ? {
+              name: row?.name ?? user.name ?? "",
+              headline: row?.headline ?? "",
+              company: row?.company ?? "",
+              bio: row?.bio ?? "",
+              skills: row?.skills ?? [],
+              photoUrl: row?.photoUrl ?? null,
+              locationLabel: row?.locationLabel ?? "",
+              lat: row?.lat ?? null,
+              lng: row?.lng ?? null,
+              visibleOnMap: row?.visibleOnMap ?? true,
+              linkedinUrl: row?.linkedinUrl ?? "",
+              instagramUrl: row?.instagramUrl ?? "",
+              websiteUrl: row?.websiteUrl ?? "",
+            }
+          : null
+      }
       canAct={canAct}
       isSignedIn={Boolean(user)}
     />

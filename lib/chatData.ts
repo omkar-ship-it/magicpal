@@ -63,3 +63,20 @@ export const BOOKING_SLOTS: BookingSlot[] = [
 
 export const MEETING_KINDS = ["Coffee", "Video call", "Phone call"] as const;
 export type MeetingKind = (typeof MEETING_KINDS)[number];
+
+/**
+ * Seeded inbound requests, so the inbox demonstrates something. Real pending
+ * requests from /api/connections are merged in alongside these.
+ */
+export type MockRequest = { id: string; name: string; headline: string; note: string; timeLabel: string };
+
+/**
+ * The notes deliberately don't name a network — `sharedContextFor` computes
+ * the real one from the viewer's own memberships and shows it above the note,
+ * so a hardcoded name here would contradict the badge sitting right next to it.
+ */
+export const MOCK_INCOMING_REQUESTS: MockRequest[] = [
+  { id: "req-1", name: "Farhan Qureshi", headline: "Founder, early-stage", note: "Saw we overlap — raising our seed and would value 20 minutes on go-to-market.", timeLabel: "2h" },
+  { id: "req-2", name: "Anika Rao", headline: "Engineering Manager at Nimbus", note: "We have people in common. Moving to Bengaluru next month and building my circle here.", timeLabel: "yesterday" },
+  { id: "req-3", name: "Elin Berg", headline: "Founder at Nordlys Climate", note: "Noticed we're in the same circles — comparing notes on hardware hiring.", timeLabel: "3d" },
+];

@@ -12,11 +12,25 @@ export default function FloatingAccountMenu({
   canAct,
   name,
   photoUrl,
+  attention,
+  onOpenYou,
+  onOpenRequests,
+  onOpenChats,
 }: {
   isSignedIn: boolean;
   canAct: boolean;
   name: string;
   photoUrl: string | null;
+  /** Open requests, badged on the avatar so the inbox is visible from anywhere. */
+  attention: number;
+  /**
+   * Every item opens a floating page on the map. None of these used to be —
+   * they were links out to a separate header-nav website, which is why
+   * finishing your profile meant losing your place.
+   */
+  onOpenYou: () => void;
+  onOpenRequests: () => void;
+  onOpenChats: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -42,7 +56,7 @@ export default function FloatingAccountMenu({
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="avatar h-11 w-11 text-[14px] shadow-lift border-2"
+        className="avatar relative h-11 w-11 border-2 text-[14px] shadow-lift"
         style={{
           background: "linear-gradient(135deg, var(--brand), var(--brand-deep))",
           borderColor: "var(--card)",
@@ -55,24 +69,62 @@ export default function FloatingAccountMenu({
         ) : (
           name.slice(0, 1).toUpperCase()
         )}
+        {attention > 0 && (
+          <span
+            className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[9px] font-bold text-white"
+            style={{ background: "var(--warn)", boxShadow: "0 0 0 2px var(--card)" }}
+          >
+            {attention}
+          </span>
+        )}
       </button>
 
       {open && (
-        <div className="card absolute right-0 top-[52px] w-52 overflow-hidden p-1.5 text-[13.5px]">
+        <div className="card absolute right-0 top-[52px] w-56 overflow-hidden p-1.5 text-[13.5px]">
           {!canAct && (
-            <Link href="/profile" className="block rounded-lg px-3 py-2 font-semibold" style={{ color: "var(--brand-deep)" }}>
+            <button
+              onClick={() => {
+                setOpen(false);
+                onOpenYou();
+              }}
+              className="block w-full rounded-lg px-3 py-2 text-left font-semibold"
+              style={{ color: "var(--brand-deep)" }}
+            >
               Finish your profile
-            </Link>
+            </button>
           )}
-          <Link href="/requests" className="block rounded-lg px-3 py-2 hover:bg-[var(--sunk)]">
+          <button
+            onClick={() => {
+              setOpen(false);
+              onOpenRequests();
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-[var(--sunk)]"
+          >
             Requests
-          </Link>
-          <Link href="/connections" className="block rounded-lg px-3 py-2 hover:bg-[var(--sunk)]">
-            Connections
-          </Link>
-          <Link href="/profile" className="block rounded-lg px-3 py-2 hover:bg-[var(--sunk)]">
-            Profile
-          </Link>
+            {attention > 0 && (
+              <span className="ml-auto grid h-4 min-w-4 place-items-center rounded-full px-1 text-[9px] font-bold text-white" style={{ background: "var(--warn)" }}>
+                {attention}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => {
+              setOpen(false);
+              onOpenChats();
+            }}
+            className="block w-full rounded-lg px-3 py-2 text-left hover:bg-[var(--sunk)]"
+          >
+            Connections &amp; chats
+          </button>
+          <button
+            onClick={() => {
+              setOpen(false);
+              onOpenYou();
+            }}
+            className="block w-full rounded-lg px-3 py-2 text-left hover:bg-[var(--sunk)]"
+          >
+            You
+          </button>
           <form action="/api/auth/logout" method="POST">
             <button type="submit" className="block w-full rounded-lg px-3 py-2 text-left text-[var(--ink-soft)] hover:bg-[var(--sunk)]">
               Sign out

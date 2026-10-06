@@ -342,8 +342,10 @@ export function ActionButton({
         </button>
       );
     }
+    // No onMessage handler means this card isn't inside the map world; the
+    // hash opens the Chats section once it loads.
     return (
-      <Link href={conn.connectionId ? `/messages/${conn.connectionId}` : "/connections"} className="btn btn-primary btn-sm w-full">
+      <Link href="/#/chats" className="btn btn-primary btn-sm w-full">
         Message
       </Link>
     );

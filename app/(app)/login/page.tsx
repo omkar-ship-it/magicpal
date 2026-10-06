@@ -45,7 +45,9 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "That code didn't work.");
-      router.push(data.onboarded ? "/" : "/profile");
+      // Both land on the map. A new account opens the You page over it, so
+      // setting up a profile never takes you out of the world.
+      router.push(data.onboarded ? "/" : "/#/you");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
