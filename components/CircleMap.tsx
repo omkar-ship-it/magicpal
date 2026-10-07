@@ -8,7 +8,8 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { avatarUrl } from "@/lib/avatar";
 import { entityById } from "@/lib/networks";
 import {
-  CIRCLE_EVENTS,
+  ALL_CIRCLE_EVENTS,
+  activePings,
   attendeesOf,
   beaconPoint,
   beaconsAt,
@@ -18,8 +19,10 @@ import {
   membersOf,
   pointOf,
   qualifiedName,
+  CIRCLE_POSTS,
   rnd,
   type CircleEvent,
+  type TravelPing,
   type CircleMember,
   type LocationMode,
 } from "@/lib/circleData";
@@ -29,6 +32,9 @@ import FloatingPage, { type PageSize } from "./FloatingPage";
 import ChatWindow from "./ChatWindow";
 import CircleEventPanel from "./CircleEventPanel";
 import CircleYouPanel from "./CircleYouPanel";
+import CircleFeed, { EVERYTHING } from "./CircleFeed";
+import CircleMeetupForm from "./CircleMeetupForm";
+import CircleDigest from "./CircleDigest";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 const MAP_STYLE = "mapbox://styles/mapbox/light-v11";
@@ -94,6 +100,15 @@ export default function CircleMap() {
   const [switcherOpen, setSwitcherOpen] = useState(false);
   /** Drives the two map layers below — see PRECISE_ZOOM. */
   const [zoom, setZoom] = useState(1.6);
+  /** Which level of the hierarchy the feed is pointed at. */
+  const [feedLevel, setFeedLevel] = useState<string>(EVERYTHING);
+  /** Meetups you call this session, on top of the seeded ones. */
+  const [myEvents, setMyEvents] = useState<CircleEvent[]>([]);
+  /** A travel ping opened from the feed or the digest — flies the map to its city. */
+  const [openPing, setOpenPing] = useState<TravelPing | null>(null);
+  const [digestOff, setDigestOff] = useState(false);
+  /** Events you've said you're coming to, this session. */
+  const [going, setGoing] = useState<Set<string>>(new Set());
 
   const view = stack[stack.length - 1] ?? null;
   const entity = entityById(activeEntityId);
@@ -114,6 +129,10 @@ export default function CircleMap() {
   // ── who's on this map ────────────────────────────────────────────────
   const members = useMemo(() => membersOf(activeEntityId), [activeEntityId]);
 
+  // Declared before the member layers because they depend on it; the full
+  // event object is resolved further down once `events` exists.
+  const openEventId = view?.startsWith("event:") ? view.slice(6) : null;
+
   const q = query.trim().toLowerCase();
   const matching = useMemo(
     () =>
@@ -125,8 +144,14 @@ export default function CircleMap() {
     [members, q, cityFilter]
   );
 
-  const onMap = matching.filter((m) => m.mode !== "off");
-  const offMapCount = matching.length - onMap.length;
+  // An online event has no venue, so the map does the thing only it can:
+  // it shows where everyone joining from actually is. Same bubbles, different
+  // population — which is the picture the panel's copy promises.
+  const openEventEarly = openEventId ? ([...myEvents, ...ALL_CIRCLE_EVENTS].find((e) => e.id === openEventId) ?? null) : null;
+  const onlineEvent = openEventEarly?.kind === "online" ? openEventEarly : null;
+  const base = onlineEvent ? attendeesOf(onlineEvent) : matching;
+  const onMap = base.filter((m) => m.mode !== "off");
+  const offMapCount = base.length - onMap.length;
   const liveMembers = onMap.filter((m) => m.mode === "live");
   /**
    * Below this, a city is one bubble; above it, the people sharing live
@@ -140,18 +165,32 @@ export default function CircleMap() {
 
   // ── events and beacons ───────────────────────────────────────────────
   /** Events hosted by any community you're in — live ones first. */
-  const myEvents = useMemo(() => {
+  const events = useMemo(() => {
     const mine = new Set([...(me?.entityIds ?? []), activeEntityId]);
-    return CIRCLE_EVENTS.filter((e) => mine.has(e.hostEntityId)).sort((a, b) => Number(b.liveNow) - Number(a.liveNow));
-  }, [me, activeEntityId]);
-  const openEvent: CircleEvent | null = view?.startsWith("event:") ? (eventById(view.slice(6)) ?? null) : null;
-  const beaconEvent = me?.beaconEventId ? eventById(me.beaconEventId) : null;
+    return [...myEvents, ...ALL_CIRCLE_EVENTS]
+      .filter((e) => mine.has(e.hostEntityId))
+      .sort((a, b) => Number(b.liveNow) - Number(a.liveNow) || a.daysAway - b.daysAway);
+  }, [me, activeEntityId, myEvents]);
+
+  /** Live travel pings in this community — the map's only time-boxed layer. */
+  const pings = useMemo(() => activePings(activeEntityId), [activeEntityId]);
+  // Resolve against the live list, not just the seeded one — a meetup you
+  // called this session exists only in state, and opening it must still work.
+  const findEvent = (id: string) => events.find((e) => e.id === id) ?? eventById(id) ?? null;
+  const openEvent: CircleEvent | null = openEventId ? findEvent(openEventId) : null;
+  const beaconEvent = me?.beaconEventId ? findEvent(me.beaconEventId) : null;
   /** The venue view is on when you're looking at a live event or beaconing at one. */
-  const venueEvent = openEvent?.liveNow ? openEvent : beaconEvent;
-  const venueBeacons = venueEvent ? beaconsAt(venueEvent.id) : [];
+  const venueEvent = (openEvent?.liveNow && openEvent.lat != null ? openEvent : beaconEvent?.lat != null ? beaconEvent : null) ?? null;
+  const venueBeacons = beaconsAt(venueEvent);
 
   const flyToVenue = useCallback((e: CircleEvent) => {
+    if (e.lat == null || e.lng == null) return;
     mapRef.current?.flyTo({ center: [e.lng, e.lat], zoom: 16.5, duration: 1600 });
+  }, []);
+
+  const flyToCity = useCallback((cityId: string) => {
+    const c = cityById(cityId);
+    if (c) mapRef.current?.flyTo({ center: [c.lng, c.lat], zoom: 10.5, duration: 1400 });
   }, []);
 
   function toggleBeacon(on: boolean) {
@@ -190,25 +229,36 @@ export default function CircleMap() {
     if (venueEvent) flyToVenue(venueEvent);
   }, [venueEvent, flyToVenue]);
 
+  // Opening an event moves the map to it: a located one to its city, an
+  // online one out to the whole spread of people joining.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !openEvent || openEvent.liveNow) return;
+    if (openEvent.kind === "online") {
+      map.flyTo({ center: [30, 25], zoom: 1.5, duration: 1400 });
+    } else if (openEvent.cityId) {
+      flyToCity(openEvent.cityId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openEvent?.id]);
+
   // ── no invite yet ────────────────────────────────────────────────────
   if (!me) return <NeedsInvite />;
 
-  const title =
-    view === "people"
-      ? qualifiedName(activeEntityId) || "Members"
-      : view === "events"
-        ? "Events"
-        : view === "you"
-          ? "You"
-          : view?.startsWith("event:")
-            ? (openEvent?.name ?? "Event")
-            : view?.startsWith("member:")
-              ? (memberById(view.slice(7))?.name ?? "Member")
-              : view?.startsWith("chat:")
-                ? (memberById(view.slice(5))?.name ?? "Chat")
-                : view === "chats"
-                  ? "Chats"
-                  : "";
+  /** What the one open window is called. */
+  function titleFor(v: string): string {
+    if (v === "feed") return "Feed";
+    if (v === "meetup") return "Call a meetup";
+    if (v === "people") return qualifiedName(activeEntityId) || "Members";
+    if (v === "events") return "Events";
+    if (v === "chats") return "Chats";
+    if (v === "you") return "You";
+    if (v.startsWith("event:")) return openEvent?.name ?? "Event";
+    if (v.startsWith("member:")) return memberById(v.slice(7))?.name ?? "Member";
+    if (v.startsWith("chat:")) return memberById(v.slice(5))?.name ?? "Chat";
+    return "";
+  }
+  const title = view ? titleFor(view) : "";
 
   return (
     <div className="fixed inset-0">
@@ -291,6 +341,7 @@ export default function CircleMap() {
         {venueEvent &&
           venueBeacons.map((m) => {
             const pt = beaconPoint(venueEvent, m);
+            if (!pt) return null;
             return (
               <Marker key={m.id} longitude={pt[0]} latitude={pt[1]} anchor="center">
                 <button
@@ -309,8 +360,59 @@ export default function CircleMap() {
             );
           })}
 
+        {/* Meetups and events with a place. A member-called meetup in a city
+            is a different object from an institution's event, and reads as one. */}
+        {!venueEvent &&
+          events
+            .filter((e) => e.lat != null && e.lng != null)
+            .map((e) => (
+              <Marker key={e.id} longitude={e.lng!} latitude={e.lat!} anchor="center">
+                <button
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    push(`event:${e.id}`);
+                  }}
+                  className={`grid h-7 w-7 place-items-center rounded-xl text-[13px]${e.liveNow ? " beacon-ring" : ""}`}
+                  style={{
+                    background: "var(--card)",
+                    border: `2px solid ${e.kind === "meetup" ? "var(--ink-soft)" : "var(--brand)"}`,
+                    boxShadow: "var(--shadow)",
+                  }}
+                  title={`${e.name} — ${e.dateLabel}`}
+                >
+                  {e.kind === "meetup" ? "📍" : "📅"}
+                </button>
+              </Marker>
+            ))}
+
+        {/* Travel pings: someone who will be somewhere, soon. Time-boxed, and
+            pinned to where they're going rather than where they live. */}
+        {!venueEvent &&
+          pings.slice(0, 40).map((p) => {
+            const c = cityById(p.cityId);
+            const m = memberById(p.memberId);
+            if (!c || !m) return null;
+            // Offset so a ping never sits exactly under its city's bubble.
+            const off = (rnd(`pingoff-${p.id}`) % 60) / 1000 + 0.06;
+            return (
+              <Marker key={p.id} longitude={c.lng + off} latitude={c.lat + off * 0.6} anchor="center">
+                <button
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    setOpenPing(p);
+                  }}
+                  className="grid h-7 w-7 place-items-center rounded-full text-[12px]"
+                  style={{ background: "var(--card)", border: "2px dashed var(--brand)", boxShadow: "var(--shadow)" }}
+                  title={`${m.name} in ${c.name} · ${p.datesLabel}`}
+                >
+                  ✈️
+                </button>
+              </Marker>
+            );
+          })}
+
         {/* You. */}
-        {me.beaconEventId && beaconEvent && venueEvent?.id === beaconEvent.id ? (
+        {me.beaconEventId && beaconEvent?.lat != null && beaconEvent?.lng != null && venueEvent?.id === beaconEvent.id ? (
           <Marker longitude={beaconEvent.lng} latitude={beaconEvent.lat} anchor="center">
             <span className="beacon-ring grid h-9 w-9 place-items-center rounded-full text-[12px] font-bold text-white" style={{ background: "var(--ink)", border: "2px solid var(--card)" }}>
               You
@@ -330,6 +432,47 @@ export default function CircleMap() {
             </Marker>
           )
         )}
+
+        {openPing &&
+          (() => {
+            const c = cityById(openPing.cityId);
+            const m = memberById(openPing.memberId);
+            if (!c || !m) return null;
+            const off = (rnd(`pingoff-${openPing.id}`) % 60) / 1000 + 0.06;
+            return (
+              <Popup
+                longitude={c.lng + off}
+                latitude={c.lat + off * 0.6}
+                anchor="top"
+                offset={18}
+                closeButton={false}
+                closeOnClick={false}
+                maxWidth="300px"
+                onClose={() => setOpenPing(null)}
+              >
+                <div className="w-[256px]">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--brand)" }}>
+                    Passing through
+                  </p>
+                  <p className="mt-1 text-[13px] font-semibold leading-tight">
+                    {m.name} in {c.name}
+                  </p>
+                  <p className="text-[11.5px] text-[var(--ink-soft)]">
+                    {openPing.datesLabel} · {openPing.daysAway <= 0 ? "here now" : `in ${openPing.daysAway} days`}
+                  </p>
+                  <p className="mt-1.5 text-[12.5px] leading-4">&ldquo;{openPing.note}&rdquo;</p>
+                  <div className="mt-2 flex gap-1.5">
+                    <button onClick={() => push(`chat:${m.id}`)} className="btn btn-primary btn-sm flex-1">
+                      Message
+                    </button>
+                    <button onClick={() => push("meetup")} className="btn btn-ghost btn-sm flex-1" title="Turn this into a meetup">
+                      Meet up
+                    </button>
+                  </div>
+                </div>
+              </Popup>
+            );
+          })()}
 
         {pinned &&
           (() => {
@@ -387,6 +530,20 @@ export default function CircleMap() {
         </div>
       </div>
 
+      {/* The map is showing someone else's population — say so, or the count
+          in the bar above reads as the community's when it isn't. */}
+      {onlineEvent && (
+        <div className="pointer-events-none fixed inset-x-0 top-[68px] z-[1200] flex justify-center px-3 sm:top-[76px]">
+          <div
+            className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-[var(--line)] px-3 py-1.5"
+            style={{ background: "color-mix(in srgb, var(--card) 95%, transparent)", backdropFilter: "blur(12px)", boxShadow: "var(--shadow)" }}
+          >
+            <span className="text-[12px]">🌐</span>
+            <span className="text-[12px] font-semibold">Showing who&rsquo;s joining {onlineEvent.name}</span>
+          </div>
+        </div>
+      )}
+
       {/* ── the beacon banner: impossible to leave on by accident ── */}
       {beaconEvent && (
         <div className="pointer-events-none fixed inset-x-0 top-[68px] z-[1200] flex justify-center px-3 sm:top-[76px]">
@@ -409,8 +566,9 @@ export default function CircleMap() {
           className="pointer-events-auto flex items-center gap-1 rounded-3xl border border-[var(--line)] p-1.5"
           style={{ background: "color-mix(in srgb, var(--card) 94%, transparent)", backdropFilter: "blur(14px)", boxShadow: "var(--shadow-lift)" }}
         >
+          <BarButton emoji="📣" label="Feed" on={view === "feed"} onClick={() => open("feed")} />
           <BarButton emoji="👥" label="People" count={members.length} on={view === "people"} onClick={() => open("people")} />
-          <BarButton emoji="📅" label="Events" count={myEvents.length} on={view === "events"} onClick={() => open("events")} />
+          <BarButton emoji="📅" label="Events" count={events.length} on={view === "events"} onClick={() => open("events")} />
           <BarButton emoji="💬" label="Chats" on={view === "chats" || Boolean(view?.startsWith("chat:"))} onClick={() => open("chats")} />
           <span className="mx-0.5 h-8 w-px flex-none" style={{ background: "var(--line)" }} />
           <button
@@ -430,20 +588,41 @@ export default function CircleMap() {
         </div>
       </div>
 
+      {!view && !digestOff && !venueEvent && (
+        <CircleDigest
+          me={me}
+          pings={pings}
+          events={events}
+          newPostCount={CIRCLE_POSTS.filter((p) => p.minutesAgo < 2880).length}
+          onCity={flyToCity}
+          onPing={(p) => {
+            setOpenPing(p);
+            flyToCity(p.cityId);
+          }}
+          onEvent={(id) => push(`event:${id}`)}
+          onFeed={() => open("feed")}
+          onDismiss={() => setDigestOff(true)}
+        />
+      )}
+
       {/* ── one window, whatever's open ── */}
       {view && (
         <FloatingPage
           title={title}
           emoji={
-            view === "people"
-              ? (entity?.emoji ?? "👥")
-              : view === "events" || view.startsWith("event:")
-                ? "📅"
-                : view === "you"
-                  ? "🙋"
-                  : view === "chats" || view.startsWith("chat:")
-                    ? "💬"
-                    : "👤"
+            view === "feed"
+              ? "📣"
+              : view === "meetup"
+                ? "📍"
+                : view === "people"
+                  ? (entity?.emoji ?? "👥")
+                  : view === "events" || view.startsWith("event:")
+                    ? "📅"
+                    : view === "you"
+                      ? "🙋"
+                      : view === "chats" || view.startsWith("chat:")
+                        ? "💬"
+                        : "👤"
           }
           canGoBack={stack.length > 1}
           size={panelSize}
@@ -469,7 +648,39 @@ export default function CircleMap() {
             />
           )}
 
-          {view === "events" && <EventsList events={myEvents} onOpen={(id) => push(`event:${id}`)} />}
+          {view === "feed" && (
+            <CircleFeed
+              me={me}
+              level={feedLevel}
+              pings={pings}
+              onLevel={setFeedLevel}
+              onOpenMember={(id) => push(`member:${id}`)}
+              onOpenCity={(id) => {
+                setCityFilter(null);
+                flyToCity(id);
+              }}
+              onOpenPing={(p) => {
+                setOpenPing(p);
+                flyToCity(p.cityId);
+              }}
+              onCompose={() => {}}
+              onStartMeetup={() => push("meetup")}
+            />
+          )}
+
+          {view === "meetup" && (
+            <CircleMeetupForm
+              me={me}
+              onCancel={pop}
+              onCreate={(e) => {
+                setMyEvents((cur) => [e, ...cur]);
+                setStack(["events", `event:${e.id}`]);
+                if (e.cityId) flyToCity(e.cityId);
+              }}
+            />
+          )}
+
+          {view === "events" && <EventsList events={events} myCityId={me.cityId} onOpen={(id) => push(`event:${id}`)} onStart={() => push("meetup")} />}
 
           {view === "chats" && <ChatsList members={members} onOpen={(id) => push(`chat:${id}`)} />}
 
@@ -496,7 +707,17 @@ export default function CircleMap() {
             <CircleEventPanel
               event={openEvent}
               beaconing={me.beaconEventId === openEvent.id}
+              going={going.has(openEvent.id)}
+              meName={me.name}
               onBeacon={toggleBeacon}
+              onGoing={(v) =>
+                setGoing((cur) => {
+                  const next = new Set(cur);
+                  if (v) next.add(openEvent.id);
+                  else next.delete(openEvent.id);
+                  return next;
+                })
+              }
               onOpenMember={(id) => push(`member:${id}`)}
             />
           )}
@@ -691,29 +912,72 @@ function PeopleList({
   );
 }
 
-function EventsList({ events, onOpen }: { events: CircleEvent[]; onOpen: (id: string) => void }) {
+function EventsList({
+  events,
+  myCityId,
+  onOpen,
+  onStart,
+}: {
+  events: CircleEvent[];
+  myCityId: string;
+  onOpen: (id: string) => void;
+  onStart: () => void;
+}) {
+  // Your own city first. In a community spread across fifty cities, a
+  // chronological list is mostly events you will never attend.
+  const here = events.filter((e) => e.cityId === myCityId);
+  const online = events.filter((e) => e.kind === "online");
+  const elsewhere = events.filter((e) => e.cityId !== myCityId && e.kind !== "online");
+
   return (
-    <div className="flex flex-col gap-2">
-      {events.map((e) => {
-        const here = beaconsAt(e.id).length;
-        return (
-          <button key={e.id} onClick={() => onOpen(e.id)} className="card p-3 text-left transition-colors hover:border-[var(--brand)]">
-            {e.liveNow && (
-              <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: "var(--brand)" }}>
-                <span className="beacon-dot" /> Happening now · {here} here
-              </span>
-            )}
-            <p className="mt-0.5 text-[13.5px] font-semibold leading-tight">{e.name}</p>
-            <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">
-              {e.dateLabel} · {e.timeLabel}
-            </p>
-            <p className="text-[12px] text-[var(--ink-soft)]">
-              {e.venue}, {cityById(e.cityId)?.name}
-            </p>
-            <p className="mt-1 text-[11px] text-[var(--ink-soft)]">{attendeesOf(e.id).length} going →</p>
-          </button>
-        );
-      })}
+    <div>
+      <button onClick={onStart} className="btn btn-primary btn-sm w-full">
+        📍 Call a meetup in your city
+      </button>
+      <p className="mt-1.5 text-[11.5px] text-[var(--ink-soft)]">
+        Any member can. It only reaches the people in that city, so there&rsquo;s nothing to approve.
+      </p>
+
+      {[
+        { label: `In ${cityById(myCityId)?.name ?? "your city"}`, list: here },
+        { label: "Online", list: online },
+        { label: "Everywhere else", list: elsewhere },
+      ].map((group) =>
+        group.list.length === 0 ? null : (
+          <div key={group.label} className="mt-4">
+            <p className="label">{group.label}</p>
+            <div className="mt-1.5 flex flex-col gap-2">
+              {group.list.map((e) => {
+                const beacons = beaconsAt(e).length;
+                return (
+                  <button key={e.id} onClick={() => onOpen(e.id)} className="card p-3 text-left transition-colors hover:border-[var(--brand)]">
+                    {e.liveNow && (
+                      <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: "var(--brand)" }}>
+                        <span className="beacon-dot" /> Happening now · {beacons} here
+                      </span>
+                    )}
+                    <p className="mt-0.5 text-[13.5px] font-semibold leading-tight">{e.name}</p>
+                    <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">
+                      {e.dateLabel} · {e.timeLabel}
+                    </p>
+                    <p className="text-[12px] text-[var(--ink-soft)]">
+                      {e.kind === "online" ? "🌐 Online" : `${e.venue}, ${cityById(e.cityId ?? "")?.name}`}
+                    </p>
+                    <p className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--ink-soft)]">
+                      {e.kind === "meetup" && (
+                        <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
+                          member meetup
+                        </span>
+                      )}
+                      {attendeesOf(e).length} going →
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )
+      )}
     </div>
   );
 }

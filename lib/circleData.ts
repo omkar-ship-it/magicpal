@@ -309,20 +309,41 @@ export function pointOf(m: CircleMember): [number, number] | null {
 
 // ─────────────────────────────────────────────────────────── events
 
+/**
+ * Three shapes, and the difference is who can make one.
+ *
+ *  official — the institution's own event. Admins only: it reaches the whole
+ *             community, so the gate matches the reach.
+ *  meetup   — any member, in their own city. Reaches only the handful of
+ *             members in that city, which is why it needs no gate at all:
+ *             a dinner for the eleven alumni in Berlin is nobody's broadcast.
+ *  online   — no venue and no city; the audience is the whole community, so
+ *             it's gated like an official one.
+ */
+export type EventKind = "official" | "meetup" | "online";
+
 export type CircleEvent = {
   id: string;
   name: string;
   hostEntityId: string;
-  venue: string;
-  cityId: string;
+  kind: EventKind;
+  /** Set for official and member meetups; null for online. */
+  venue: string | null;
+  cityId: string | null;
   /** The venue itself, not the city — the beacon view zooms to this. */
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
   dateLabel: string;
   timeLabel: string;
+  /** Days from today; drives "this week" and ordering. */
+  daysAway: number;
   /** Happening right now, so beacons are live and the map has something to show. */
   liveNow: boolean;
   about: string;
+  /** The member who called it. null = the community itself. */
+  hostMemberId: string | null;
+  /** Online events only. */
+  joinUrl?: string;
 };
 
 export const CIRCLE_EVENTS: CircleEvent[] = [
@@ -330,76 +351,248 @@ export const CIRCLE_EVENTS: CircleEvent[] = [
     id: "ce-reunion",
     name: "PGP '19 Five-Year Reunion",
     hostEntityId: "isb-pgp-2019",
+    kind: "official",
     venue: "ISB Campus, Gachibowli",
     cityId: "hyd",
     lat: 17.4239,
     lng: 78.3413,
     dateLabel: "Today",
-    timeLabel: "6:00pm – late",
+    timeLabel: "6:00pm - late",
+    daysAway: 0,
     liveNow: true,
     about: "Five years out. Dinner on the lawn, the class photo nobody will agree to, and the bar until it closes.",
+    hostMemberId: null,
+  },
+  {
+    id: "ce-online-ama",
+    name: "Fundraising AMA with the '19 founders",
+    hostEntityId: "isb-pgp-2019",
+    kind: "online",
+    venue: null,
+    cityId: null,
+    lat: null,
+    lng: null,
+    dateLabel: "Tue, Oct 13",
+    timeLabel: "8:00pm IST",
+    daysAway: 6,
+    liveNow: false,
+    about: "Four classmates who raised this year, one hour, no slides. Ask anything about terms, timing and what they'd do differently.",
+    hostMemberId: null,
+    joinUrl: "https://meet.example.com/pgp19-ama",
   },
   {
     id: "ce-london",
     name: "London Alumni Supper",
     hostEntityId: "isb-pgp-2019",
+    kind: "official",
     venue: "Dishoom, Shoreditch",
     cityId: "lon",
     lat: 51.5255,
     lng: -0.0776,
     dateLabel: "Thu, Oct 15",
     timeLabel: "7:30pm",
+    daysAway: 8,
     liveNow: false,
     about: "Long table, one bill, no agenda. Whoever's in town.",
+    hostMemberId: null,
   },
   {
     id: "ce-sf",
     name: "Bay Area Founders Breakfast",
     hostEntityId: "iitb-bay",
+    kind: "official",
     venue: "Blue Bottle, Mint Plaza",
     cityId: "sfo",
     lat: 37.7825,
     lng: -122.4089,
     dateLabel: "Sat, Oct 10",
     timeLabel: "9:00am",
+    daysAway: 3,
     liveNow: false,
     about: "Six founders, ninety minutes, one problem each.",
+    hostMemberId: null,
   },
   {
     id: "ce-climate",
     name: "Climate Hardware Teardown",
     hostEntityId: "climate",
+    kind: "official",
     venue: "Factory Berlin, Mitte",
     cityId: "ber",
     lat: 52.5323,
     lng: 13.3989,
     dateLabel: "Fri, Oct 23",
     timeLabel: "5:00pm",
+    daysAway: 16,
     liveNow: false,
     about: "Three teams open up their hardware and take questions on what broke.",
+    hostMemberId: null,
   },
   {
     id: "ce-blr",
     name: "Bengaluru Founders Mixer",
     hostEntityId: "blr-founders",
+    kind: "official",
     venue: "Toit, Indiranagar",
     cityId: "blr",
     lat: 12.9784,
     lng: 77.6408,
     dateLabel: "Wed, Oct 14",
     timeLabel: "7:00pm",
+    daysAway: 7,
     liveNow: false,
     about: "No talks, no badges. Beer and whoever shows up.",
+    hostMemberId: null,
   },
 ];
 
-export const eventById = (id: string): CircleEvent | undefined => CIRCLE_EVENTS.find((e) => e.id === id);
+/**
+ * Member-called meetups, seeded so the city layer isn't empty before you
+ * make your own. Each one is hosted by a real member who actually lives in
+ * that city — `buildMeetups` resolves the host from the roster rather than
+ * naming someone who isn't on the map.
+ */
+const MEETUP_SEEDS: Array<{ id: string; cityId: string; entityId: string; name: string; venue: string; dateLabel: string; timeLabel: string; daysAway: number; about: string }> = [
+  {
+    id: "mu-blr-coffee",
+    cityId: "blr",
+    entityId: "isb-pgp-2019",
+    name: "Indiranagar coffee, Saturday",
+    venue: "Third Wave, 12th Main",
+    dateLabel: "Sat, Oct 11",
+    timeLabel: "10:00am",
+    daysAway: 4,
+    about: "Nothing formal. I'm there most Saturdays anyway - come if you're free.",
+  },
+  {
+    id: "mu-sfo-walk",
+    cityId: "sfo",
+    entityId: "isb-pgp-2019",
+    name: "Presidio walk + brunch",
+    venue: "Lover's Lane trailhead",
+    dateLabel: "Sun, Oct 12",
+    timeLabel: "9:30am",
+    daysAway: 5,
+    about: "Ninety minutes of walking, then brunch for whoever's still hungry.",
+  },
+  {
+    id: "mu-lon-pub",
+    cityId: "lon",
+    entityId: "isb-pgp-2019",
+    name: "Thursday pub, Soho",
+    venue: "The French House",
+    dateLabel: "Thu, Oct 9",
+    timeLabel: "6:30pm",
+    daysAway: 2,
+    about: "Standing invitation. Back room, under my name.",
+  },
+  {
+    id: "mu-sin-dinner",
+    cityId: "sin",
+    entityId: "isb-pgp-2019",
+    name: "Dinner in Tiong Bahru",
+    venue: "Por Kee Eating House",
+    dateLabel: "Fri, Oct 17",
+    timeLabel: "7:30pm",
+    daysAway: 10,
+    about: "Booked a table for eight. Reply and I'll make it bigger.",
+  },
+  {
+    id: "mu-dxb-padel",
+    cityId: "dxb",
+    entityId: "isb-pgp-2019",
+    name: "Padel, then shawarma",
+    venue: "Padel Pro, Al Quoz",
+    dateLabel: "Sat, Oct 18",
+    timeLabel: "6:00pm",
+    daysAway: 11,
+    about: "Two courts booked. Beginners genuinely welcome, I am one.",
+  },
+  {
+    id: "mu-bom-sundowner",
+    cityId: "bom",
+    entityId: "isb-pgp-2019",
+    name: "Sundowner at Bandra Fort",
+    venue: "Bandstand promenade",
+    dateLabel: "Fri, Oct 10",
+    timeLabel: "6:30pm",
+    daysAway: 3,
+    about: "Walk, sit on the rocks, watch the sun go down. Bring whoever.",
+  },
+  {
+    id: "mu-nyc-breakfast",
+    cityId: "nyc",
+    entityId: "iitb-2018",
+    name: "Breakfast before work",
+    venue: "Bluestone Lane, Flatiron",
+    dateLabel: "Wed, Oct 15",
+    timeLabel: "8:00am",
+    daysAway: 8,
+    about: "Early, short, and you'll still make your 9:30.",
+  },
+  {
+    id: "mu-ber-climate",
+    cityId: "ber",
+    entityId: "climate",
+    name: "Hardware folks, Kreuzberg",
+    venue: "Oberholz, Rosenthaler",
+    dateLabel: "Tue, Oct 14",
+    timeLabel: "6:00pm",
+    daysAway: 7,
+    about: "Anyone building physical things. Bring the thing if it fits.",
+  },
+];
 
-/** Who's coming — the host community's members, deterministically thinned out. */
-export function attendeesOf(eventId: string): CircleMember[] {
-  const ev = eventById(eventId);
-  if (!ev) return [];
-  return membersOf(ev.hostEntityId).filter((m) => rnd(`going-${eventId}-${m.id}`) % 100 < 42);
+function buildMeetups(): CircleEvent[] {
+  return MEETUP_SEEDS.map((s) => {
+    const city = cityById(s.cityId)!;
+    // The host has to be someone who actually lives there, or the meetup is
+    // a claim the map contradicts.
+    const locals = membersOf(s.entityId).filter((m) => m.cityId === s.cityId);
+    const host = locals[rnd(`host-${s.id}`) % Math.max(1, locals.length)] ?? null;
+    return {
+      id: s.id,
+      name: s.name,
+      hostEntityId: s.entityId,
+      kind: "meetup" as const,
+      venue: s.venue,
+      cityId: s.cityId,
+      // A meetup pins to its city with a small offset, not to a surveyed
+      // address — the venue name is the precise part, not the coordinate.
+      lat: city.lat + ((rnd(`mly-${s.id}`) % 160) - 80) / 10000,
+      lng: city.lng + ((rnd(`mlx-${s.id}`) % 160) - 80) / 10000,
+      dateLabel: s.dateLabel,
+      timeLabel: s.timeLabel,
+      daysAway: s.daysAway,
+      liveNow: false,
+      about: s.about,
+      hostMemberId: host?.id ?? null,
+    };
+  });
+}
+
+/** Everything on the calendar: official events, online sessions and member meetups. */
+export const ALL_CIRCLE_EVENTS: CircleEvent[] = [...CIRCLE_EVENTS, ...buildMeetups()];
+
+
+export const eventById = (id: string): CircleEvent | undefined => ALL_CIRCLE_EVENTS.find((e) => e.id === id);
+
+/**
+ * Who's coming. Takes the event rather than its id, because a meetup you
+ * called this session exists only in component state — an id lookup would
+ * find nothing and report nobody going to your own event.
+ *
+ * A city meetup draws from the members who are actually in that city; an
+ * official or online event draws from the whole community. That's the same
+ * reach distinction the permission model uses, applied to the guest list.
+ */
+export function attendeesOf(ev: CircleEvent): CircleMember[] {
+  const pool =
+    ev.kind === "meetup" && ev.cityId
+      ? membersOf(ev.hostEntityId).filter((m) => m.cityId === ev.cityId)
+      : membersOf(ev.hostEntityId);
+  const rate = ev.kind === "meetup" ? 55 : 42;
+  return pool.filter((m) => rnd(`going-${ev.id}-${m.id}`) % 100 < rate);
 }
 
 /**
@@ -410,14 +603,16 @@ export function attendeesOf(eventId: string): CircleMember[] {
  * it runs — which is why someone normally "off the map" can still turn one
  * on without changing what the rest of the network sees.
  */
-export function beaconsAt(eventId: string): CircleMember[] {
-  const ev = eventById(eventId);
-  if (!ev?.liveNow) return [];
-  return attendeesOf(eventId).filter((m) => rnd(`beacon-${eventId}-${m.id}`) % 100 < 38);
+export function beaconsAt(ev: CircleEvent | null | undefined): CircleMember[] {
+  if (!ev?.liveNow || ev.lat == null) return [];
+  return attendeesOf(ev).filter((m) => rnd(`beacon-${ev.id}-${m.id}`) % 100 < 38);
 }
 
 /** A beaconing member's spot inside the venue — metres apart, not kilometres. */
-export function beaconPoint(ev: CircleEvent, m: CircleMember): [number, number] {
+export function beaconPoint(ev: CircleEvent, m: CircleMember): [number, number] | null {
+  // An online event has no venue to stand in — presence there is a badge,
+  // not a position, so there's deliberately no point to return.
+  if (ev.lat == null || ev.lng == null) return null;
   // ±0.001° ≈ ±110m: a crowd spread across one venue, not across a district.
   return [
     ev.lng + ((rnd(`bpx-${ev.id}-${m.id}`) % 200) - 100) / 100000,
@@ -482,4 +677,259 @@ export const inviteByCode = (code: string): CircleInvite | undefined =>
 /** The invite an admin would copy out of their own community page. */
 export function inviteFor(entityId: string): CircleInvite | undefined {
   return CIRCLE_INVITES.find((i) => i.entityId === entityId);
+}
+
+// ─────────────────────────────────────────────────────── travel pings
+
+/**
+ * "I'm in Tokyo Nov 11-14, who's around?"
+ *
+ * The post type that only works here. It's a message, a place and a time
+ * window at once — in an open network it would be unsafe and useless, but
+ * inside a vetted class with a world map it's the highest-value thing anyone
+ * writes. It pins to the city you're *going to*, not where you are, and it
+ * expires on its own.
+ */
+export type TravelPing = {
+  id: string;
+  memberId: string;
+  cityId: string;
+  entityId: string;
+  datesLabel: string;
+  /** Days until arrival; negative means already there. */
+  daysAway: number;
+  /** Days until it expires and leaves the map. */
+  endsInDays: number;
+  note: string;
+};
+
+const PING_NOTES = [
+  "In town for work. Free either evening — coffee, dinner, whatever's easy.",
+  "Over for a conference. Would rather spend the gaps with people I know.",
+  "Looking at offices. Any excuse not to eat alone.",
+  "Family visit, but my afternoons are open.",
+  "First time here in years. Tell me what's changed.",
+  "Two nights only. Drinks with whoever's about?",
+];
+
+function buildPings(): TravelPing[] {
+  const out: TravelPing[] = [];
+  // Travellers are drawn from across the roster; destinations are weighted
+  // the same way homes are, so people visit hubs rather than scattering.
+  for (let i = 0; i < 54; i++) {
+    const m = CIRCLE_MEMBERS[rnd(`ping-who-${i}`) % CIRCLE_MEMBERS.length];
+    const dest = pickCity(rnd(`ping-where-${i}`));
+    if (dest.id === m.cityId) continue; // nobody travels to their own city
+    const daysAway = (rnd(`ping-when-${i}`) % 24) - 2;
+    const stay = 2 + (rnd(`ping-stay-${i}`) % 6);
+    out.push({
+      id: `tp-${i}`,
+      memberId: m.id,
+      cityId: dest.id,
+      entityId: m.entityIds[0],
+      datesLabel: datesFor(daysAway, stay),
+      daysAway,
+      endsInDays: daysAway + stay,
+      note: PING_NOTES[rnd(`ping-note-${i}`) % PING_NOTES.length],
+    });
+  }
+  return out;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** A human date range from an offset, so labels stay true whenever this is opened. */
+function datesFor(daysAway: number, stay: number): string {
+  const start = new Date();
+  start.setDate(start.getDate() + daysAway);
+  const end = new Date(start);
+  end.setDate(end.getDate() + stay);
+  const s = `${MONTHS[start.getMonth()]} ${start.getDate()}`;
+  const e = start.getMonth() === end.getMonth() ? `${end.getDate()}` : `${MONTHS[end.getMonth()]} ${end.getDate()}`;
+  return `${s}-${e}`;
+}
+
+export const TRAVEL_PINGS: TravelPing[] = buildPings();
+
+/** Pings still running, for a community — expired ones leave the map by themselves. */
+export function activePings(entityId: string): TravelPing[] {
+  const scope = new Set(membersOf(entityId).map((m) => m.id));
+  return TRAVEL_PINGS.filter((p) => p.endsInDays >= 0 && scope.has(p.memberId)).sort((a, b) => a.daysAway - b.daysAway);
+}
+
+/** Who's coming to a given city — the question the whole post type exists to answer. */
+export function pingsToCity(entityId: string, cityId: string): TravelPing[] {
+  return activePings(entityId).filter((p) => p.cityId === cityId);
+}
+
+// ───────────────────────────────────────────────────────────── feed
+
+export type CirclePostKind = "update" | "career" | "job" | "ask" | "milestone";
+
+/**
+ * A post, authored by someone who is actually on the map.
+ *
+ * That link is the point: tapping an author takes you to their pin, and a
+ * post about a city flies you there. A feed whose people exist somewhere is
+ * a different object from a feed of names.
+ */
+export type CirclePost = {
+  id: string;
+  /** The node it was posted at — ISB, PGP, or Class of 2019. */
+  entityId: string;
+  /** null = posted by the community itself, by an admin. */
+  authorId: string | null;
+  kind: CirclePostKind;
+  body: string;
+  minutesAgo: number;
+  likes: number;
+  comments: Array<{ id: string; authorId: string; body: string; minutesAgo: number }>;
+  /** The place the post is about — a job's city, a move's destination. */
+  cityId?: string;
+};
+
+const BODIES: Record<CirclePostKind, string[]> = {
+  career: [
+    "Wrapped up four years at {company}. Taking a few weeks off before the next thing.",
+    "Started as {role} at {company} this week. Ask me in a month how it's going.",
+    "Moved to {city} for the new role. Know anyone here worth meeting?",
+    "Back in {city} after six years away and rebuilding my circle from scratch.",
+    "Left to start something. Too early to name it, happy to talk about the problem.",
+    "Switched from consulting to operating. Hardest and best decision in a while.",
+    "Took the {role} job in the end. The commute is worse and the work is better.",
+  ],
+  job: [
+    "Hiring a {role} at {company}, based in {city}. Referrals from here skip the queue.",
+    "Two engineering roles open in {city}. Happy to walk anyone from this group straight in.",
+    "Looking for a founding designer — {city} or remote, equity-heavy, and I'll be honest about the risk.",
+    "Backfilling my old role at {company}. It's a good job and I would know.",
+    "We need someone who's run support at scale. {city}, hybrid, start whenever.",
+  ],
+  ask: [
+    "Anyone sold into Indian banks? Trying to work out whether our pricing is insane.",
+    "Looking for an intro to someone who's run a marketplace at real scale.",
+    "Has anyone moved a team between offices and lived to tell it? Want to know what broke.",
+    "Need a second opinion on a term sheet. Twenty minutes this week, anyone?",
+    "Who here has hired in {city}? Our offer acceptance rate is embarrassing.",
+    "Anyone used a PEO to hire into the US from India — worth the overhead?",
+  ],
+  milestone: [
+    "We closed our seed. {company} is hiring across the board.",
+    "Shipped the thing we've been quiet about for a year. It's finally out.",
+    "Crossed a million users this week and it still feels made up.",
+    "First profitable quarter, four years in. Nobody tells you how boring that feels.",
+    "Our first hire out of this group started Monday. The thing works.",
+  ],
+  update: [
+    "Reading group forming for anyone who misses having one. Genuinely low commitment.",
+    "Can confirm the {city} WhatsApp group remains unusable. This is better.",
+    "Six of us got dinner in {city} last night off a post here. Recommend it.",
+    "Spent the weekend going through the map city by city. We are everywhere.",
+    "If you're lurking: say something. Half this group is people you already know.",
+  ],
+};
+
+/** Posted as the institution, not a person — rare by design, which is what makes it land. */
+const OFFICIAL_BODIES = [
+  "Applications for the mentorship cohort close Friday. Thirty mentors, eighty seats.",
+  "The directory now runs on this map. Your location setting controls all of it — nothing is shared by default.",
+  "Reunion logistics are up, and the room block is going faster than last year.",
+  "Campus library access is open to alumni again. Bring photo ID and your year.",
+  "We're funding five chapter meetups a quarter. If you want to run one in your city, say so.",
+];
+
+const COMMENT_BODIES = [
+  "Sent you a note.",
+  "I did this two years ago — happy to save you the mistakes.",
+  "Count me in.",
+  "Can intro you to someone who's done exactly this.",
+  "Congratulations, genuinely.",
+  "Which part of the city?",
+  "This is the first useful thing I've read all week.",
+];
+
+function fill(template: string, m: CircleMember, cityName: string): string {
+  return template
+    .replace(/\{company\}/g, m.company)
+    .replace(/\{role\}/g, m.headline)
+    .replace(/\{city\}/g, cityName);
+}
+
+function buildPosts(): CirclePost[] {
+  const out: CirclePost[] = [];
+  const kinds: CirclePostKind[] = ["update", "career", "job", "ask", "milestone"];
+
+  // Member posts sit at the node the author is a direct member of — which is
+  // exactly where they'd be allowed to write them.
+  CIRCLE_MEMBERS.forEach((m, i) => {
+    if (rnd(`posts-${m.id}`) % 100 >= 22) return; // most alumni never post, and the map works anyway
+    const entityId = m.entityIds[rnd(`post-where-${m.id}`) % m.entityIds.length];
+    const kind = kinds[rnd(`post-kind-${m.id}`) % kinds.length];
+    const pool = BODIES[kind];
+    const city = cityById(m.cityId)!;
+    const commentCount = rnd(`post-cc-${m.id}`) % 3;
+    out.push({
+      id: `cp-${i}`,
+      entityId,
+      authorId: m.id,
+      kind,
+      body: fill(pool[rnd(`post-body-${m.id}`) % pool.length], m, city.name),
+      minutesAgo: 30 + (rnd(`post-age-${m.id}`) % 20000),
+      likes: rnd(`post-likes-${m.id}`) % 90,
+      comments: Array.from({ length: commentCount }, (_, c) => {
+        const other = CIRCLE_MEMBERS[rnd(`post-c-${m.id}-${c}`) % CIRCLE_MEMBERS.length];
+        return {
+          id: `cc-${i}-${c}`,
+          authorId: other.id,
+          body: COMMENT_BODIES[rnd(`post-cb-${m.id}-${c}`) % COMMENT_BODIES.length],
+          minutesAgo: 10 + (rnd(`post-ca-${m.id}-${c}`) % 4000),
+        };
+      }),
+      cityId: kind === "job" || kind === "career" ? m.cityId : undefined,
+    });
+  });
+
+  // A handful of official posts, spread up the hierarchy — the institution's
+  // own voice, which is why it belongs at the levels nobody else can write to.
+  const officialNodes = ["isb", "isb-pgp", "iitb", "stanford", "climate"];
+  officialNodes.forEach((entityId, i) => {
+    out.push({
+      id: `cp-off-${i}`,
+      entityId,
+      authorId: null,
+      kind: "update",
+      body: OFFICIAL_BODIES[i % OFFICIAL_BODIES.length],
+      minutesAgo: 200 + i * 900,
+      likes: 40 + ((rnd(`off-${entityId}`) % 300) | 0),
+      comments: [],
+    });
+  });
+
+  return out.sort((a, b) => a.minutesAgo - b.minutesAgo);
+}
+
+export const CIRCLE_POSTS: CirclePost[] = buildPosts();
+
+/**
+ * A node's own feed — exactly what was posted *at* that node, never its
+ * children. ISB's feed is ISB's voice; the chatter lives one level down.
+ * Rolling children up would make this byte-identical to the merged feed.
+ */
+export function postsAt(entityId: string): CirclePost[] {
+  return CIRCLE_POSTS.filter((p) => p.entityId === entityId);
+}
+
+/**
+ * Everything you're in, merged — the ceiling of this world, since there's no
+ * public network above it. Reading rolls up even though writing doesn't, so
+ * an ISB-wide announcement reaches every class without being re-posted.
+ */
+export function everythingFeed(entityIds: string[]): CirclePost[] {
+  const scope = expandMembership(entityIds);
+  return CIRCLE_POSTS.filter((p) => scope.has(p.entityId));
+}
+
+/** Nodes you can post at: the ones you joined, never the ancestors you inherit. */
+export function postableNodes(entityIds: string[]): string[] {
+  return entityIds;
 }

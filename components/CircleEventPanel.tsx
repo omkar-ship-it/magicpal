@@ -2,7 +2,7 @@
 
 import { avatarUrl } from "@/lib/avatar";
 import { entityById } from "@/lib/networks";
-import { attendeesOf, beaconsAt, cityById, type CircleEvent, type CircleMember } from "@/lib/circleData";
+import { attendeesOf, beaconsAt, cityById, memberById, type CircleEvent, type CircleMember } from "@/lib/circleData";
 
 /**
  * An event, and the one thing an event makes possible that a map otherwise
@@ -17,18 +17,30 @@ import { attendeesOf, beaconsAt, cityById, type CircleEvent, type CircleMember }
 export default function CircleEventPanel({
   event,
   beaconing,
+  going: imGoing,
+  meName,
   onBeacon,
+  onGoing,
   onOpenMember,
 }: {
   event: CircleEvent;
   beaconing: boolean;
+  /** Whether you've said you're coming. */
+  going: boolean;
+  meName: string;
   onBeacon: (on: boolean) => void;
+  onGoing: (v: boolean) => void;
   onOpenMember: (id: string) => void;
 }) {
   const host = entityById(event.hostEntityId);
-  const city = cityById(event.cityId);
-  const going = attendeesOf(event.id);
-  const here = beaconsAt(event.id);
+  const city = event.cityId ? cityById(event.cityId) : null;
+  // Who called it: the institution, or a member. Saying which is cheap and
+  // lets member-run meetups exist without borrowing official authority.
+  const hostMember = event.hostMemberId && event.hostMemberId !== "__me" ? memberById(event.hostMemberId) : null;
+  const hostedByMe = event.hostMemberId === "__me";
+  const online = event.kind === "online";
+  const going = attendeesOf(event);
+  const here = beaconsAt(event);
   const hereCount = here.length + (beaconing ? 1 : 0);
 
   return (
@@ -37,6 +49,7 @@ export default function CircleEventPanel({
       <h2 className="mt-1.5 text-[19px] font-bold leading-tight">{event.name}</h2>
       <p className="mt-0.5 text-[12.5px] text-[var(--ink-soft)]">
         {host?.emoji} {host?.name}
+        {hostMember ? ` · called by ${hostMember.name}` : hostedByMe ? " · called by you" : " · official"}
       </p>
 
       <div className="mt-2 flex flex-wrap gap-1.5">
@@ -44,14 +57,55 @@ export default function CircleEventPanel({
           {event.dateLabel} · {event.timeLabel}
         </span>
         <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
-          {event.venue}, {city?.name}
+          {online ? "🌐 Online" : [event.venue, city?.name].filter(Boolean).join(", ")}
         </span>
+        {event.kind === "meetup" && (
+          <span className="pill" style={{ background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" }}>
+            Member meetup
+          </span>
+        )}
         <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
-          {going.length} going
+          {going.length + (imGoing || hostedByMe ? 1 : 0)} going
         </span>
       </div>
 
-      {event.liveNow ? (
+      {/* Saying you're coming is the one thing every event needs and the
+          beacon isn't — a beacon only means anything once you're in the room. */}
+      <div className="mt-3 flex items-center gap-1.5">
+        {hostedByMe ? (
+          <span className="pill" style={{ background: "color-mix(in srgb, var(--good) 14%, var(--card))", color: "var(--good)" }}>
+            You called this
+          </span>
+        ) : imGoing ? (
+          <>
+            <span className="pill" style={{ background: "color-mix(in srgb, var(--good) 14%, var(--card))", color: "var(--good)" }}>
+              You&rsquo;re going ✓
+            </span>
+            <button onClick={() => onGoing(false)} className="btn btn-ghost btn-sm">
+              Can&rsquo;t make it
+            </button>
+          </>
+        ) : (
+          <button onClick={() => onGoing(true)} className="btn btn-primary btn-sm">
+            I&rsquo;m coming
+          </button>
+        )}
+      </div>
+
+      {online && (
+        <div className="mt-4 rounded-2xl border border-[var(--line)] p-4">
+          <p className="text-[13px] font-semibold">No room to find anyone in</p>
+          <p className="mt-1 text-[12.5px] leading-5 text-[var(--ink-soft)]">
+            Online events have no venue, so there&rsquo;s nothing to beacon at. What the map can still show is where everyone joining from
+            actually is — which, for a class spread over {going.length > 0 ? "six continents" : "the world"}, is the more interesting picture.
+          </p>
+          <a href={event.joinUrl} className="btn btn-primary btn-sm mt-3 inline-block">
+            Join the room
+          </a>
+        </div>
+      )}
+
+      {!online && event.liveNow ? (
         <div
           className="mt-4 rounded-2xl border p-4"
           style={{ borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 6%, var(--card))" }}
@@ -103,16 +157,28 @@ export default function CircleEventPanel({
           )}
         </div>
       ) : (
-        <p className="mt-4 rounded-2xl p-3 text-[12.5px] leading-5 text-[var(--ink-soft)]" style={{ background: "var(--sunk)" }}>
-          Beacons switch on when the event starts — that&rsquo;s when being findable in a room is worth anything.
-        </p>
+        !online && (
+          <p className="mt-4 rounded-2xl p-3 text-[12.5px] leading-5 text-[var(--ink-soft)]" style={{ background: "var(--sunk)" }}>
+            Beacons switch on when the event starts — that&rsquo;s when being findable in a room is worth anything.
+          </p>
+        )
       )}
 
       <p className="mt-4 text-[13.5px] leading-5">{event.about}</p>
 
       <div className="mt-5">
-        <p className="label">Going ({going.length})</p>
+        <p className="label">Going ({going.length + (imGoing || hostedByMe ? 1 : 0)})</p>
         <div className="mt-2 flex flex-col gap-1">
+          {(imGoing || hostedByMe) && (
+            <div className="flex items-center gap-2.5 rounded-2xl p-2" style={{ background: "var(--sunk)" }}>
+              <span className="avatar h-9 w-9 flex-none text-[11px]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={avatarUrl(meName)} alt="" />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{meName}</span>
+              <span className="flex-none text-[11px] text-[var(--ink-soft)]">{hostedByMe ? "host" : "you"}</span>
+            </div>
+          )}
           {going.slice(0, 40).map((m) => (
             <MemberRow key={m.id} m={m} beaconing={here.some((h) => h.id === m.id)} onClick={() => onOpenMember(m.id)} />
           ))}
