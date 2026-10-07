@@ -6,6 +6,7 @@ import { CIRCLE_CITIES, cityById, inviteFor, membersOf, qualifiedName, type Loca
 import type { CircleMe } from "@/lib/circleMe";
 import LocationModePicker from "./LocationModePicker";
 import AvatarPicker from "./AvatarPicker";
+import { IconAsk, IconSparkle } from "./Icons";
 import { IconBeacon, IconCopy, IconCheck } from "./Icons";
 
 /**
@@ -22,6 +23,7 @@ export default function CircleYouPanel({
   onMode,
   onCity,
   onAvatar,
+  onField,
   onStopBeacon,
   onOpenCommunity,
   onLeave,
@@ -32,6 +34,7 @@ export default function CircleYouPanel({
   onMode: (m: LocationMode) => void;
   onCity: (id: string) => void;
   onAvatar: (next: { photoUrl: string | null; style: string }) => void;
+  onField: (patch: Partial<CircleMe>) => void;
   onStopBeacon: () => void;
   onOpenCommunity: (id: string) => void;
   onLeave: () => void;
@@ -54,6 +57,9 @@ export default function CircleYouPanel({
     <div>
       <div>
         <h2 className="truncate text-[19px] font-bold leading-tight">{me.name}</h2>
+        {(me.headline || me.company) && (
+          <p className="text-[13px] text-[var(--ink-soft)]">{[me.headline, me.company].filter(Boolean).join(" · ")}</p>
+        )}
         <p className="text-[12.5px] text-[var(--ink-soft)]">
           {me.mode === "off" ? "Off the map" : `${city?.name}, ${city?.country}`}
         </p>
@@ -61,6 +67,69 @@ export default function CircleYouPanel({
 
       <div className="mt-4 rounded-2xl border border-[var(--line)] p-3">
         <AvatarPicker name={me.name} photoUrl={me.photoUrl ?? null} style={me.avatarStyle ?? "notionists"} onChange={onAvatar} />
+      </div>
+
+      {/* The same fields every other member's profile shows, so the demo can
+          walk both sides of the thing: what you see, and what you fill in. */}
+      <div className="mt-5 flex flex-col gap-3.5">
+        <div className="flex gap-2">
+          <Field label="What you do" value={me.headline} placeholder="Head of Product" onChange={(v) => onField({ headline: v })} />
+          <Field label="Where" value={me.company ?? ""} placeholder="Northwind" onChange={(v) => onField({ company: v })} />
+        </div>
+
+        <Field
+          label="A line about you"
+          value={me.bio ?? ""}
+          placeholder="What you're working on, and what you care about."
+          onChange={(v) => onField({ bio: v })}
+          multiline
+        />
+
+        <div>
+          <p className="label label-icon">
+            <IconAsk size={13} /> Ask me about
+          </p>
+          <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">
+            Comma-separated. This is what makes you worth messaging rather than just findable.
+          </p>
+          <input
+            value={(me.helpWith ?? []).join(", ")}
+            onChange={(e) =>
+              onField({
+                helpWith: e.target.value
+                  .split(",")
+                  .map((x) => x.trim())
+                  .filter(Boolean),
+              })
+            }
+            placeholder="pricing, hiring engineers, entering India"
+            className="mt-1.5 w-full rounded-xl border border-[var(--line)] bg-transparent px-3 py-2 text-[13px] outline-none focus:border-[var(--brand)]"
+          />
+          {(me.helpWith ?? []).length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {(me.helpWith ?? []).map((h) => (
+                <span key={h} className="pill" style={{ background: "var(--sunk)", color: "var(--ink)" }}>
+                  {h}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <p className="label label-icon">
+            <IconSparkle size={13} /> Looking for
+          </p>
+          <input
+            value={me.lookingFor ?? ""}
+            onChange={(e) => onField({ lookingFor: e.target.value || null })}
+            placeholder="A senior backend hire, Bengaluru or remote"
+            className="mt-1.5 w-full rounded-xl border border-[var(--line)] bg-transparent px-3 py-2 text-[13px] outline-none focus:border-[var(--brand)]"
+          />
+          <p className="mt-1 text-[11px] text-[var(--ink-soft)]">
+            Leave it empty when you&rsquo;re not asking for anything — a roster where everyone wants something reads as a jobs board.
+          </p>
+        </div>
       </div>
 
       {beaconEventName && (
@@ -145,5 +214,32 @@ export default function CircleYouPanel({
         Leave and reset this prototype
       </button>
     </div>
+  );
+}
+
+function Field({
+  label,
+  value,
+  placeholder,
+  multiline,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  multiline?: boolean;
+  onChange: (v: string) => void;
+}) {
+  const cls =
+    "mt-1.5 w-full rounded-xl border border-[var(--line)] bg-transparent px-3 py-2 text-[13px] outline-none focus:border-[var(--brand)]";
+  return (
+    <label className="block flex-1">
+      <span className="label">{label}</span>
+      {multiline ? (
+        <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={2} className={`${cls} resize-none`} />
+      ) : (
+        <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={cls} />
+      )}
+    </label>
   );
 }

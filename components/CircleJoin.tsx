@@ -45,6 +45,8 @@ export default function CircleJoin({ invite }: { invite: CircleInvite }) {
   }, [members]);
 
   const [name, setName] = useState("");
+  const [headline, setHeadline] = useState("");
+  const [company, setCompany] = useState("");
   const [cityId, setCityId] = useState(cities[0]?.city.id ?? "blr");
   const [mode, setMode] = useState<LocationMode>("base");
   const [locating, setLocating] = useState(false);
@@ -78,7 +80,8 @@ export default function CircleJoin({ invite }: { invite: CircleInvite }) {
     setJoining(true);
     setMe({
       name: name.trim(),
-      headline: "",
+      headline: headline.trim(),
+      company: company.trim(),
       cityId,
       mode,
       entityIds: [invite.entityId],
@@ -159,6 +162,31 @@ export default function CircleJoin({ invite }: { invite: CircleInvite }) {
                 className="mt-1.5 w-full rounded-xl border border-[var(--line)] bg-transparent px-3 py-2.5 text-[14px] outline-none focus:border-[var(--brand)]"
               />
             </label>
+
+            {/* Optional, and deliberately so — the invite's whole promise is
+                that your name is enough. But a pin with a role on it is worth
+                opening, and a pin with only a name isn't. */}
+            <div className="flex gap-2">
+              <label className="block flex-1">
+                <span className="label">What you do</span>
+                <input
+                  value={headline}
+                  onChange={(e) => setHeadline(e.target.value)}
+                  placeholder="Head of Product"
+                  className="mt-1.5 w-full rounded-xl border border-[var(--line)] bg-transparent px-3 py-2.5 text-[14px] outline-none focus:border-[var(--brand)]"
+                />
+              </label>
+              <label className="block flex-1">
+                <span className="label">Where</span>
+                <input
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && join()}
+                  placeholder="Northwind"
+                  className="mt-1.5 w-full rounded-xl border border-[var(--line)] bg-transparent px-3 py-2.5 text-[14px] outline-none focus:border-[var(--brand)]"
+                />
+              </label>
+            </div>
 
             <div className="relative">
               <IconChevronDown size={15} className="pointer-events-none absolute bottom-3 right-3 text-[var(--ink-soft)]" />

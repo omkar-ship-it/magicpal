@@ -7,6 +7,7 @@ import type { MapRef } from "react-map-gl/mapbox";
 import "mapbox-gl/dist/mapbox-gl.css";
 import Avatar from "./Avatar";
 import MemberHoverCard from "./MemberHoverCard";
+import MemberProfile from "./MemberProfile";
 import { entityById } from "@/lib/networks";
 import {
   ALL_CIRCLE_EVENTS,
@@ -660,6 +661,7 @@ export default function CircleMap() {
               onMode={(m: LocationMode) => update({ mode: m })}
               onCity={(id) => update({ cityId: id })}
               onAvatar={(next) => update({ photoUrl: next.photoUrl, avatarStyle: next.style })}
+              onField={update}
               onStopBeacon={() => update({ beaconEventId: null })}
               onOpenCommunity={(id) => {
                 setActiveEntityId(id);
@@ -696,7 +698,18 @@ export default function CircleMap() {
             (() => {
               const m = memberById(view.slice(7));
               if (!m) return null;
-              return <MemberPanel m={m} onMessage={() => push(`chat:${m.id}`)} />;
+              return (
+                <MemberProfile
+                  m={m}
+                  events={events}
+                  onMessage={() => push(`chat:${m.id}`)}
+                  onOpenEvent={(id) => push(`event:${id}`)}
+                  onOpenCity={(id) => {
+                    setCityFilter(id);
+                    flyToCity(id);
+                  }}
+                />
+              );
             })()}
 
           {view.startsWith("chat:") &&
@@ -780,40 +793,6 @@ function MemberCard({ m, onMessage, onOpen }: { m: CircleMember; onMessage: () =
   );
 }
 
-function MemberPanel({ m, onMessage }: { m: CircleMember; onMessage: () => void }) {
-  const shared = m.entityIds.map((id) => entityById(id)).filter(Boolean);
-  return (
-    <div>
-      <div className="flex items-start gap-3">
-        <Avatar name={m.name} size={56} />
-        <div className="min-w-0 flex-1">
-          <h2 className="text-[18px] font-bold leading-tight">{m.name}</h2>
-          <p className="mt-0.5 text-[12.5px] text-[var(--ink-soft)]">
-            {m.headline} · {m.company}
-          </p>
-          <p className="mt-0.5 text-[11.5px] text-[var(--ink-soft)]">{modeLine(m)}</p>
-        </div>
-      </div>
-
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        {shared.map((e) => (
-          <span key={e!.id} className="pill" style={{ background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" }}>
-            {e!.emoji} {e!.name}
-          </span>
-        ))}
-      </div>
-
-      {/* No connection request: you're both vetted members of the same
-          community, which is the entire point of a closed network. */}
-      <button onClick={onMessage} className="btn btn-primary btn-sm mt-4 w-full">
-        Message {m.name.split(" ")[0]}
-      </button>
-      <p className="mt-2 text-[11.5px] text-[var(--ink-soft)]">
-        No request needed — you&rsquo;re both in {shared[0]?.name ?? "this community"}, and that&rsquo;s the introduction.
-      </p>
-    </div>
-  );
-}
 
 function PeopleList({
   members,

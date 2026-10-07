@@ -225,7 +225,71 @@ export type CircleMember = {
   jitter: [number, number];
   /** The leaf communities they belong to; parents roll up via expandMembership. */
   entityIds: string[];
+  bio: string;
+  /**
+   * The reciprocity pair, and the reason a directory becomes a network.
+   *
+   * A roster of names and job titles tells you who exists. "Ask me about
+   * pricing" and "Looking for a senior backend hire in Bengaluru" tell you
+   * what to actually say when you open the message — which is the step
+   * everybody stalls on. Most members have something to offer; far fewer
+   * are asking for something at any given moment, and that's modelled.
+   */
+  helpWith: string[];
+  lookingFor: string | null;
+  /** Where they were before, newest first. */
+  past: Array<{ role: string; company: string; years: string }>;
+  /** Year they came out of the institution. */
+  gradYear: number;
+  links: { linkedin: boolean; site: string | null };
 };
+
+const HELP_WITH = [
+  "fundraising",
+  "go-to-market",
+  "hiring engineers",
+  "pricing",
+  "entering India",
+  "entering the US",
+  "product strategy",
+  "board management",
+  "design systems",
+  "data infrastructure",
+  "B2B sales",
+  "marketplace dynamics",
+  "regulated industries",
+  "scaling support",
+  "brand and positioning",
+  "org design",
+  "climate hardware",
+  "developer relations",
+  "turning around a flat quarter",
+  "first ten hires",
+];
+
+const LOOKING_FOR = [
+  "a design partner for an early beta",
+  "intros to CTOs in fintech",
+  "a senior backend hire, Bengaluru or remote",
+  "a second opinion on a Series A term sheet",
+  "customers in US healthcare",
+  "someone who has run a marketplace at scale",
+  "a mentor who has done a turnaround",
+  "a co-founder, technical, for something new",
+  "my first enterprise logo",
+  "advice on moving a team across borders",
+];
+
+const BIOS = [
+  "Spent the last few years building {company}. Mostly interested in the unglamorous parts — pricing, support, the second hundred customers.",
+  "Operator turned investor and back again. Happiest with a spreadsheet and a problem nobody has named yet.",
+  "Building at {company}. Previously consulting, which taught me what not to do.",
+  "I care about the gap between what a team ships and what a customer actually feels. Currently at {company}.",
+  "Twelve years in, still convinced most of this is judgement rather than process. At {company} now.",
+  "Left a big company to find out whether I could do it without the brand. Early signs are mixed and it is the best job I have had.",
+  "{company} by day. Reading, running and arguing about org design the rest of the time.",
+  "Quietly good at hiring and loudly opinionated about onboarding.",
+];
 
 const MEMBER_COUNT = 1800;
 
@@ -243,6 +307,21 @@ function pickCity(h: number): CircleCity {
   const draw = h % CITY_WEIGHT_TOTAL;
   for (const entry of CITY_CUMULATIVE) if (draw < entry.upTo) return entry.city;
   return CIRCLE_CITIES[0];
+}
+
+/**
+ * The year a member actually graduated, read off the community they're in.
+ *
+ * A random year contradicted the class they belong to — a profile reading
+ * "Class of 2017" directly under an "In common: Class of 2019" chip, which
+ * is exactly the sort of thing an alumnus spots in a demo.
+ */
+function gradYearFor(...entityIds: string[]): number | null {
+  for (const id of entityIds) {
+    const year = entityById(id)?.name.match(/(\d{4})/)?.[1] ?? id.match(/(\d{4})/)?.[1];
+    if (year) return Number(year);
+  }
+  return null;
 }
 
 function buildMembers(): CircleMember[] {
@@ -267,6 +346,31 @@ function buildMembers(): CircleMember[] {
       // ±0.055° ≈ ±6km — a believable spread across a metro, never an address.
       jitter: [((rnd(`jx-${i}`) % 1100) - 550) / 10000, ((rnd(`jy-${i}`) % 1100) - 550) / 10000],
       entityIds: primary === second ? [primary] : [primary, second],
+      bio: BIOS[rnd(`bio-${i}`) % BIOS.length].replace(/\{company\}/g, COMPANIES[rnd(`co-${i}`) % COMPANIES.length]),
+      helpWith: Array.from(
+        new Set([
+          HELP_WITH[rnd(`h1-${i}`) % HELP_WITH.length],
+          HELP_WITH[rnd(`h2-${i}`) % HELP_WITH.length],
+          HELP_WITH[rnd(`h3-${i}`) % HELP_WITH.length],
+        ])
+      ),
+      // Only about a third are actively asking for something — a roster
+      // where everyone wants something reads as a jobs board.
+      lookingFor: rnd(`lf-${i}`) % 100 < 34 ? LOOKING_FOR[rnd(`lfx-${i}`) % LOOKING_FOR.length] : null,
+      past: [
+        {
+          role: ROLES[rnd(`p1r-${i}`) % ROLES.length],
+          company: COMPANIES[rnd(`p1c-${i}`) % COMPANIES.length],
+          years: `${2018 + (rnd(`p1y-${i}`) % 3)}-${2021 + (rnd(`p1y-${i}`) % 3)}`,
+        },
+        {
+          role: ROLES[rnd(`p2r-${i}`) % ROLES.length],
+          company: COMPANIES[rnd(`p2c-${i}`) % COMPANIES.length],
+          years: `${2014 + (rnd(`p2y-${i}`) % 3)}-${2017 + (rnd(`p2y-${i}`) % 3)}`,
+        },
+      ].slice(0, 1 + (rnd(`pn-${i}`) % 2)),
+      gradYear: gradYearFor(primary, second) ?? 2015 + (rnd(`gy-${i}`) % 9),
+      links: { linkedin: rnd(`li-${i}`) % 100 < 72, site: rnd(`si-${i}`) % 100 < 28 ? `${COMPANIES[rnd(`co-${i}`) % COMPANIES.length].toLowerCase().replace(/[^a-z]/g, "")}.com` : null },
     });
   }
   return out;

@@ -7,7 +7,13 @@ import type { LocationMode } from "./circleData";
  */
 export type CircleMe = {
   name: string;
+  /** What you do — the one thing besides your name that makes you findable. */
   headline: string;
+  company?: string;
+  bio?: string;
+  /** The reciprocity pair: what you'll answer, and what you need. */
+  helpWith?: string[];
+  lookingFor?: string | null;
   /** An uploaded photo, already downscaled to a data URL. Null = use the character. */
   photoUrl?: string | null;
   /** Which generated character set to draw you with when there's no photo. */

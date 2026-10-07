@@ -1,0 +1,190 @@
+"use client";
+
+import { entityById } from "@/lib/networks";
+import { attendeesOf, cityById, postsAt, qualifiedName, type CircleEvent, type CircleMember } from "@/lib/circleData";
+import Avatar from "./Avatar";
+import { IconAsk, IconBriefcase, IconCalendar, IconCity, IconChat, IconHidden, IconPin, IconSparkle } from "./Icons";
+
+function ago(minutes: number): string {
+  if (minutes < 60) return `${Math.max(1, Math.round(minutes))}m`;
+  if (minutes < 1440) return `${Math.round(minutes / 60)}h`;
+  const d = Math.round(minutes / 1440);
+  return d < 7 ? `${d}d` : `${Math.round(d / 7)}w`;
+}
+
+/**
+ * A member, in enough depth to be worth opening.
+ *
+ * The old version was an avatar, a job title and a Message button, which
+ * told you who someone was and nothing about why you'd write to them. The
+ * two blocks that earn their place here are "Ask me about" and "Looking
+ * for": between them they turn a directory entry into an opening line,
+ * which is the step everyone stalls on. Everything else — the career trail,
+ * what they've posted, where you'll both be — exists to answer "do I
+ * actually know this person's world".
+ */
+export default function MemberProfile({
+  m,
+  events,
+  onMessage,
+  onOpenEvent,
+  onOpenCity,
+}: {
+  m: CircleMember;
+  events: CircleEvent[];
+  onMessage: () => void;
+  onOpenEvent: (id: string) => void;
+  onOpenCity: (cityId: string) => void;
+}) {
+  const city = cityById(m.cityId);
+  const communities = m.entityIds.map((id) => entityById(id)).filter(Boolean);
+  const theirPosts = m.entityIds
+    .flatMap((id) => postsAt(id))
+    .filter((p) => p.authorId === m.id)
+    .sort((a, b) => a.minutesAgo - b.minutesAgo)
+    .slice(0, 3);
+  const alsoGoing = events.filter((e) => attendeesOf(e).some((a) => a.id === m.id)).slice(0, 3);
+
+  const mode =
+    m.mode === "off"
+      ? { icon: <IconHidden size={13} />, text: "Not sharing a location" }
+      : m.mode === "live"
+        ? { icon: <IconPin size={13} />, text: `${city?.name} · sharing live` }
+        : { icon: <IconCity size={13} />, text: `${city?.name} · city only` };
+
+  return (
+    <div>
+      <div className="flex items-start gap-3">
+        <Avatar name={m.name} size={64} />
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[19px] font-bold leading-tight">{m.name}</h2>
+          <p className="mt-0.5 text-[13px] leading-5 text-[var(--ink-soft)]">
+            {m.headline} · {m.company}
+          </p>
+          <button
+            onClick={() => m.mode !== "off" && onOpenCity(m.cityId)}
+            disabled={m.mode === "off"}
+            className="mt-1 flex items-center gap-1 text-[11.5px] text-[var(--ink-soft)] disabled:cursor-default"
+          >
+            {mode.icon} {mode.text}
+          </button>
+        </div>
+      </div>
+
+      {/* No connection request: you're both vetted members of the same
+          community, which is the entire point of a closed network. */}
+      <button onClick={onMessage} className="btn btn-primary btn-sm mt-3 flex w-full items-center justify-center gap-1.5">
+        <IconChat size={15} /> Message {m.name.split(" ")[0]}
+      </button>
+      <p className="mt-1.5 text-center text-[11px] text-[var(--ink-soft)]">
+        No request needed — you&rsquo;re both in {communities[0]?.name ?? "this community"}.
+      </p>
+
+      {m.lookingFor && (
+        <div
+          className="mt-4 rounded-2xl border p-3"
+          style={{ borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 6%, var(--card))" }}
+        >
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--brand)" }}>
+            <IconSparkle size={13} /> Looking for
+          </p>
+          <p className="mt-1 text-[13.5px] leading-5">{m.lookingFor}</p>
+        </div>
+      )}
+
+      {m.helpWith.length > 0 && (
+        <div className="mt-4">
+          <p className="label label-icon">
+            <IconAsk size={13} /> Ask them about
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {m.helpWith.map((h) => (
+              <span key={h} className="pill" style={{ background: "var(--sunk)", color: "var(--ink)" }}>
+                {h}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="mt-4 text-[13.5px] leading-5">{m.bio}</p>
+
+      <div className="mt-5">
+        <p className="label label-icon">
+          <IconBriefcase size={13} /> Before this
+        </p>
+        <div className="mt-1.5 flex flex-col gap-1.5">
+          {m.past.map((job, i) => (
+            <div key={i} className="flex items-baseline gap-2">
+              <span className="min-w-0 flex-1 text-[12.5px] leading-tight">
+                <span className="font-semibold">{job.role}</span>
+                <span className="text-[var(--ink-soft)]"> · {job.company}</span>
+              </span>
+              <span className="flex-none text-[11px] text-[var(--ink-soft)]" style={{ fontVariantNumeric: "tabular-nums" }}>
+                {job.years}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-5">
+        <p className="label">In common</p>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {communities.map((e) => (
+            <span
+              key={e!.id}
+              className="pill"
+              style={{ background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" }}
+              title={qualifiedName(e!.id)}
+            >
+              {e!.emoji} {e!.name}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {alsoGoing.length > 0 && (
+        <div className="mt-5">
+          <p className="label label-icon">
+            <IconCalendar size={13} /> Also going to
+          </p>
+          <div className="mt-1.5 flex flex-col gap-1.5">
+            {alsoGoing.map((e) => (
+              <button key={e.id} onClick={() => onOpenEvent(e.id)} className="tap card p-2.5 text-left hover:border-[var(--brand)]">
+                <p className="text-[12.5px] font-semibold leading-tight">{e.name}</p>
+                <p className="mt-0.5 text-[11.5px] text-[var(--ink-soft)]">
+                  {e.dateLabel} · {e.kind === "online" ? "Online" : (cityById(e.cityId ?? "")?.name ?? "")}
+                </p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {theirPosts.length > 0 && (
+        <div className="mt-5">
+          <p className="label label-icon">
+            <IconSparkle size={13} /> Recently
+          </p>
+          <div className="mt-1.5 flex flex-col gap-1.5">
+            {theirPosts.map((p) => (
+              <div key={p.id} className="rounded-2xl p-2.5" style={{ background: "var(--sunk)" }}>
+                <p className="text-[12.5px] leading-4">{p.body}</p>
+                <p className="mt-1 text-[11px] text-[var(--ink-soft)]">
+                  {entityById(p.entityId)?.name} · {ago(p.minutesAgo)}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-[var(--ink-soft)]">
+        <span>Class of {m.gradYear}</span>
+        {m.links.linkedin && <span>LinkedIn</span>}
+        {m.links.site && <span>{m.links.site}</span>}
+      </p>
+    </div>
+  );
+}

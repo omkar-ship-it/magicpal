@@ -156,6 +156,15 @@ h1, h2, h3 {
   margin-bottom: 5px;
   color: var(--ink-soft);
 }
+/* A label that leads with an icon. This file is unlayered, so .label's
+   `display: block` beats a Tailwind `flex` utility on the same element —
+   which is how section headings first shipped with the icon stacked above
+   the words instead of beside them. */
+.label-icon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 
 .pill {
   display: inline-flex;
