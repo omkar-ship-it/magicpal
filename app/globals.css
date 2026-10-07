@@ -437,3 +437,22 @@ h1, h2, h3 {
   }
   .beacon-ring { box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 45%, transparent); }
 }
+
+/* ------------------------------------------- arrival (members-only map)
+
+   Plays once, on the hop in from an invite, over a map that is pulling back
+   from your own city to the whole community. */
+@keyframes welcome-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes welcome-out {
+  from { opacity: 1; }
+  to { opacity: 0; visibility: hidden; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [style*="welcome-in"],
+  [style*="welcome-out"] {
+    animation-duration: 1ms !important;
+  }
+}

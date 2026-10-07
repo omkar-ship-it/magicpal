@@ -35,6 +35,7 @@ import CircleYouPanel from "./CircleYouPanel";
 import CircleFeed, { EVERYTHING } from "./CircleFeed";
 import CircleMeetupForm from "./CircleMeetupForm";
 import CircleDigest from "./CircleDigest";
+import CircleWelcome, { takeJustJoined } from "./CircleWelcome";
 import {
   IconCalendar,
   IconChat,
@@ -123,6 +124,8 @@ export default function CircleMap() {
   const [digestOff, setDigestOff] = useState(false);
   /** The first fit has to wait for the style to load or it silently does nothing. */
   const [mapReady, setMapReady] = useState(false);
+  /** True only on the hop in from the invite — read once so a refresh won't replay it. */
+  const [welcoming, setWelcoming] = useState(() => takeJustJoined());
   /** Events you've said you're coming to, this session. */
   const [going, setGoing] = useState<Set<string>>(new Set());
 
@@ -243,7 +246,7 @@ export default function CircleMap() {
         padding: narrow
           ? { top: 70, bottom: stack.length > 0 ? 180 : 150, left: 24, right: 24 }
           : { top: 80, bottom: 140, left: 60, right: stack.length > 0 ? 480 : 60 },
-        duration: 1400,
+        duration: welcoming ? 2400 : 1400,
         maxZoom: 5,
       }
     );
@@ -293,7 +296,13 @@ export default function CircleMap() {
         mapboxAccessToken={MAPBOX_TOKEN}
         mapStyle={MAP_STYLE}
         projection="mercator"
-        initialViewState={{ longitude: 30, latitude: 25, zoom: 1.6 }}
+        initialViewState={
+          // Arriving: start on your city so the fit below pulls back to the
+          // whole class. Returning: just show the class.
+          welcoming && cityById(me.cityId)
+            ? { longitude: cityById(me.cityId)!.lng, latitude: cityById(me.cityId)!.lat, zoom: 4.2 }
+            : { longitude: 30, latitude: 25, zoom: 1.6 }
+        }
         onClick={() => setPinned(null)}
         onMove={(e) => setZoom(e.viewState.zoom)}
         onLoad={() => setMapReady(true)}
@@ -632,7 +641,18 @@ export default function CircleMap() {
         </div>
       </div>
 
-      {!view && !digestOff && !venueEvent && (
+      {welcoming && (
+        <CircleWelcome
+          name={me.name}
+          communityName={entity?.name ?? "your community"}
+          emoji={entity?.emoji ?? "🎓"}
+          members={members}
+          cityId={me.cityId}
+          onDone={() => setWelcoming(false)}
+        />
+      )}
+
+      {!view && !digestOff && !venueEvent && !welcoming && (
         <CircleDigest
           me={me}
           pings={pings}

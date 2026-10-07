@@ -16,6 +16,7 @@ import {
 import { setMe } from "@/lib/circleMe";
 import LocationModePicker from "./LocationModePicker";
 import InviteMap from "./InviteMap";
+import { markJustJoined } from "./CircleWelcome";
 import { IconChevronDown, IconGlobe, IconLock, IconPin } from "./Icons";
 
 /**
@@ -83,6 +84,7 @@ export default function CircleJoin({ invite }: { invite: CircleInvite }) {
       entityIds: [invite.entityId],
       beaconEventId: null,
     });
+    markJustJoined();
     router.push("/circle");
   }
 
