@@ -406,3 +406,34 @@ h1, h2, h3 {
   border-color: var(--brand);
   color: var(--brand);
 }
+
+/* ------------------------------------------- beacons (members-only map)
+
+   A beacon is the one thing on the private map that's genuinely live — "I am
+   standing here, right now, at this event" — so it gets the only animation
+   on that surface. Brand-coloured rather than gold: this is a deliberate act
+   by the person, not ambient presence inferred about them. */
+@keyframes beacon-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 60%, transparent), 0 6px 16px -4px rgba(0, 0, 0, 0.35); }
+  50% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--brand) 0%, transparent), 0 6px 16px -4px rgba(0, 0, 0, 0.35); }
+}
+.beacon-ring {
+  border-color: var(--brand);
+  animation: beacon-pulse 1.8s ease-in-out infinite;
+}
+.beacon-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--brand);
+  animation: beacon-pulse 1.8s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .beacon-ring,
+  .beacon-dot {
+    animation: none;
+  }
+  .beacon-ring { box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 45%, transparent); }
+}

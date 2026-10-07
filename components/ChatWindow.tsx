@@ -15,15 +15,18 @@ export default function ChatWindow({
   photoUrl,
   headline,
   wide,
+  initialMessages,
 }: {
   name: string;
   photoUrl: string | null;
   headline: string | null;
   wide: boolean;
+  /** Supplied by callers whose people aren't in MOCK_THREADS — the members-only map seeds its own openers. */
+  initialMessages?: MockMessage[];
 }) {
   // Keyed by person in MapView, so switching chat remounts this and the
   // thread/booking state resets without an effect syncing it.
-  const [messages, setMessages] = useState<MockMessage[]>(() => MOCK_THREADS[name] ?? []);
+  const [messages, setMessages] = useState<MockMessage[]>(() => initialMessages ?? MOCK_THREADS[name] ?? []);
   const [draft, setDraft] = useState("");
   const [booking, setBooking] = useState(false);
   const [kind, setKind] = useState<MeetingKind>("Coffee");
