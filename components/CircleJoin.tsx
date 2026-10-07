@@ -8,13 +8,15 @@ import {
   CIRCLE_CITIES,
   qualifiedName,
   continentOf,
-  LOCATION_MODES,
   cityById,
   membersOf,
   type CircleInvite,
   type LocationMode,
 } from "@/lib/circleData";
 import { setMe } from "@/lib/circleMe";
+import LocationModePicker from "./LocationModePicker";
+import InviteMap from "./InviteMap";
+import { IconChevronDown, IconGlobe, IconLock, IconPin } from "./Icons";
 
 /**
  * The whole of onboarding, on one screen.
@@ -90,16 +92,28 @@ export default function CircleJoin({ invite }: { invite: CircleInvite }) {
     <div className="min-h-screen px-4 py-8" style={{ background: "var(--sunk)" }}>
       <div className="mx-auto w-full max-w-[560px]">
         <div className="card overflow-hidden p-0">
-          {/* Who's inviting you, and to what. */}
-          <div className="px-6 pb-5 pt-6" style={{ background: "linear-gradient(160deg, color-mix(in srgb, var(--brand) 12%, var(--card)), var(--card))" }}>
-            <span className="text-[34px] leading-none">{entity?.emoji ?? "🎓"}</span>
-            <h1 className="mt-2 text-[22px] font-bold leading-tight">{entity?.name ?? "A private community"}</h1>
-            {parentTrail && <p className="text-[12.5px] font-semibold text-[var(--ink-soft)]">{parentTrail}</p>}
-            <p className="mt-1 text-[13px] text-[var(--ink-soft)]">
-              {entity?.label} · members only · {members.length} on the map
+          {/* The promise, shown rather than described. */}
+          <InviteMap members={members} />
+
+          <div className="-mt-10 px-6 pb-5">
+            <span
+              className="relative z-10 grid h-14 w-14 place-items-center rounded-2xl text-[26px]"
+              style={{ background: "var(--card)", border: "1px solid var(--line)", boxShadow: "var(--shadow-lift)" }}
+            >
+              {entity?.emoji ?? "🎓"}
+            </span>
+            {parentTrail && <p className="mt-3 text-[12px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">{parentTrail}</p>}
+            <h1 className="mt-0.5 text-[24px] font-bold leading-tight">{entity?.name ?? "A private community"}</h1>
+            <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-[var(--ink-soft)]">
+              <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                <IconLock size={13} /> Members only
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <IconGlobe size={13} /> {members.length} across {cities.length} cities
+              </span>
             </p>
 
-            <div className="mt-4 flex items-start gap-2.5 rounded-2xl p-3" style={{ background: "var(--card)" }}>
+            <div className="mt-4 flex items-start gap-2.5 rounded-2xl p-3" style={{ background: "var(--sunk)" }}>
               <span className="avatar h-9 w-9 flex-none text-[11px]">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={avatarUrl(invite.adminName)} alt="" />
@@ -113,19 +127,24 @@ export default function CircleJoin({ invite }: { invite: CircleInvite }) {
               </div>
             </div>
 
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              <span className="pill" style={{ background: "var(--card)", color: "var(--ink-soft)" }}>
-                {cities.length} cities
-              </span>
-              <span className="pill" style={{ background: "var(--card)", color: "var(--ink-soft)" }}>
-                {continents} continents
-              </span>
-              {cities.slice(0, 3).map((c) => (
-                <span key={c.city.id} className="pill" style={{ background: "var(--card)", color: "var(--ink-soft)" }}>
-                  {c.city.name} {c.count}
-                </span>
+            <div className="mt-3 grid grid-cols-3 gap-px overflow-hidden rounded-2xl" style={{ background: "var(--line)" }}>
+              {[
+                { n: members.length, l: "members" },
+                { n: cities.length, l: "cities" },
+                { n: continents, l: "continents" },
+              ].map((stat) => (
+                <div key={stat.l} className="px-3 py-2.5 text-center" style={{ background: "var(--card)" }}>
+                  <p className="text-[18px] font-bold leading-none" style={{ fontVariantNumeric: "tabular-nums" }}>
+                    {stat.n}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">{stat.l}</p>
+                </div>
               ))}
             </div>
+            <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[11.5px] text-[var(--ink-soft)]">
+              <IconPin size={12} />
+              Biggest: {cities.slice(0, 3).map((c) => `${c.city.name} ${c.count}`).join(" · ")}
+            </p>
           </div>
 
           {/* Everything it takes to be in. */}
@@ -142,7 +161,8 @@ export default function CircleJoin({ invite }: { invite: CircleInvite }) {
               />
             </label>
 
-            <div>
+            <div className="relative">
+              <IconChevronDown size={15} className="pointer-events-none absolute bottom-3 right-3 text-[var(--ink-soft)]" />
               <div className="flex items-center justify-between">
                 <span className="label">Where you&rsquo;re based</span>
                 <button onClick={useMyLocation} className="text-[11.5px] font-semibold" style={{ color: "var(--brand)" }}>
@@ -152,7 +172,8 @@ export default function CircleJoin({ invite }: { invite: CircleInvite }) {
               <select
                 value={cityId}
                 onChange={(e) => setCityId(e.target.value)}
-                className="mt-1.5 w-full rounded-xl border border-[var(--line)] bg-transparent px-3 py-2.5 text-[14px] outline-none focus:border-[var(--brand)]"
+                className="mt-1.5 w-full appearance-none rounded-xl border border-[var(--line)] bg-transparent px-3 py-2.5 text-[14px] outline-none focus:border-[var(--brand)]"
+                style={{ backgroundImage: "none" }}
               >
                 {CIRCLE_CITIES.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -165,25 +186,8 @@ export default function CircleJoin({ invite }: { invite: CircleInvite }) {
             <div>
               <span className="label">Who can see where you are</span>
               <p className="mt-0.5 text-[11.5px] text-[var(--ink-soft)]">Only members of this community, whichever you pick. Change it any time.</p>
-              <div className="mt-2 flex flex-col gap-1.5">
-                {LOCATION_MODES.map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={() => setMode(m.id)}
-                    className="flex items-start gap-2.5 rounded-2xl border p-3 text-left transition-colors"
-                    style={
-                      mode === m.id
-                        ? { borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 7%, var(--card))" }
-                        : { borderColor: "var(--line)" }
-                    }
-                  >
-                    <span className="text-[17px] leading-none">{m.emoji}</span>
-                    <span className="min-w-0">
-                      <span className="block text-[13px] font-semibold leading-tight">{m.label}</span>
-                      <span className="block text-[11.5px] leading-4 text-[var(--ink-soft)]">{m.detail}</span>
-                    </span>
-                  </button>
-                ))}
+              <div className="mt-2">
+                <LocationModePicker value={mode} onChange={setMode} />
               </div>
             </div>
 

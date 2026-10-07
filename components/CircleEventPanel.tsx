@@ -3,6 +3,7 @@
 import { avatarUrl } from "@/lib/avatar";
 import { entityById } from "@/lib/networks";
 import { attendeesOf, beaconsAt, cityById, memberById, type CircleEvent, type CircleMember } from "@/lib/circleData";
+import { IconBeacon, IconCalendar, IconCheck, IconGlobe, IconPin } from "./Icons";
 
 /**
  * An event, and the one thing an event makes possible that a map otherwise
@@ -45,8 +46,10 @@ export default function CircleEventPanel({
 
   return (
     <div>
-      <span className="text-[26px] leading-none">📅</span>
-      <h2 className="mt-1.5 text-[19px] font-bold leading-tight">{event.name}</h2>
+      <span className="grid h-11 w-11 place-items-center rounded-2xl" style={{ background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" }}>
+        {online ? <IconGlobe size={21} /> : event.kind === "meetup" ? <IconPin size={21} /> : <IconCalendar size={21} />}
+      </span>
+      <h2 className="mt-2.5 text-[19px] font-bold leading-tight">{event.name}</h2>
       <p className="mt-0.5 text-[12.5px] text-[var(--ink-soft)]">
         {host?.emoji} {host?.name}
         {hostMember ? ` · called by ${hostMember.name}` : hostedByMe ? " · called by you" : " · official"}
@@ -57,7 +60,7 @@ export default function CircleEventPanel({
           {event.dateLabel} · {event.timeLabel}
         </span>
         <span className="pill" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
-          {online ? "🌐 Online" : [event.venue, city?.name].filter(Boolean).join(", ")}
+          {online ? "Online" : [event.venue, city?.name].filter(Boolean).join(", ")}
         </span>
         {event.kind === "meetup" && (
           <span className="pill" style={{ background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" }}>
@@ -78,8 +81,8 @@ export default function CircleEventPanel({
           </span>
         ) : imGoing ? (
           <>
-            <span className="pill" style={{ background: "color-mix(in srgb, var(--good) 14%, var(--card))", color: "var(--good)" }}>
-              You&rsquo;re going ✓
+            <span className="pill inline-flex items-center gap-1" style={{ background: "color-mix(in srgb, var(--good) 14%, var(--card))", color: "var(--good)" }}>
+              <IconCheck size={13} /> You&rsquo;re going
             </span>
             <button onClick={() => onGoing(false)} className="btn btn-ghost btn-sm">
               Can&rsquo;t make it
@@ -111,7 +114,7 @@ export default function CircleEventPanel({
           style={{ borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 6%, var(--card))" }}
         >
           <p className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide" style={{ color: "var(--brand)" }}>
-            <span className="beacon-dot" /> Happening now
+            <IconBeacon size={15} /> Happening now
           </p>
           <p className="mt-1.5 text-[14px] font-semibold">
             {hereCount} {hereCount === 1 ? "member is" : "members are"} beaconing at the venue
@@ -133,8 +136,8 @@ export default function CircleEventPanel({
                 Turn on a beacon and the {here.length} people here can find you in the room. Precise, this event only, until it ends — your
                 location setting for the rest of the community doesn&rsquo;t change.
               </p>
-              <button onClick={() => onBeacon(true)} className="btn btn-primary btn-sm mt-3">
-                📍 Beacon my location
+              <button onClick={() => onBeacon(true)} className="btn btn-primary btn-sm mt-3 flex items-center gap-1.5">
+                <IconBeacon size={15} /> Beacon my location
               </button>
             </>
           )}

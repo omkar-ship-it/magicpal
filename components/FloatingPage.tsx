@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
+import { IconChevronDown, IconChevronLeft, IconChevronRight, IconX } from "./Icons";
 
 export type PageSize = "side" | "wide" | "full";
 
@@ -39,46 +40,81 @@ export default function FloatingPage({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  /**
+   * On a phone this is a bottom sheet, not a floating card: it rises from the
+   * bottom edge, leaves the top third of the map visible so you never lose
+   * your place in the world, and keeps the dock reachable under your thumb.
+   * The desktop behaviour — a card floating to one side — is unchanged.
+   */
   const frame =
     size === "full"
-      ? "inset-3 sm:inset-5"
+      ? "inset-x-0 bottom-0 top-0 rounded-none sm:inset-5 sm:rounded-3xl"
       : size === "wide"
-        ? "right-3 top-3 bottom-[104px] w-[min(760px,calc(100vw-24px))] sm:right-5 sm:top-5"
-        : "right-3 top-3 bottom-[104px] w-[min(430px,calc(100vw-24px))] sm:right-5 sm:top-5";
+        ? "inset-x-0 bottom-0 top-[34vh] rounded-b-none sm:inset-y-auto sm:bottom-[104px] sm:left-auto sm:right-5 sm:top-5 sm:w-[min(760px,calc(100vw-40px))] sm:rounded-3xl"
+        : "inset-x-0 bottom-0 top-[34vh] rounded-b-none sm:inset-y-auto sm:bottom-[104px] sm:left-auto sm:right-5 sm:top-5 sm:w-[min(430px,calc(100vw-40px))] sm:rounded-3xl";
 
   return (
     <div
       className={`fixed z-[1300] flex flex-col overflow-hidden rounded-3xl border border-[var(--line)] ${frame}`}
-      style={{ background: "color-mix(in srgb, var(--card) 95%, transparent)", backdropFilter: "blur(14px)", boxShadow: "var(--shadow-lift)" }}
+      style={{ background: "color-mix(in srgb, var(--card) 97%, transparent)", backdropFilter: "blur(16px)", boxShadow: "var(--shadow-lift)" }}
     >
-      <div className="flex flex-none items-center gap-2 border-b border-[var(--line)] px-4 py-2.5">
+      {/* Grab handle — the affordance that tells a thumb this is a sheet. */}
+      <div className="flex-none pt-2 sm:hidden">
+        <span className="mx-auto block h-1 w-9 rounded-full" style={{ background: "var(--line)" }} />
+      </div>
+
+      <div className="flex flex-none items-center gap-1.5 border-b border-[var(--line)] px-3 py-2.5 sm:px-4">
         {canGoBack && (
-          <button onClick={onBack} className="text-[12.5px] font-semibold text-[var(--ink-soft)] hover:text-[var(--ink)]">
-            ←
+          <button onClick={onBack} className="win-btn flex-none" title="Back" aria-label="Back">
+            <IconChevronLeft size={15} />
           </button>
         )}
-        <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">
-          {emoji} {title}
+        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
+          {emoji ? <span className="mr-1">{emoji}</span> : null}
+          {title}
         </span>
         <div className="flex flex-none items-center gap-0.5">
           {onMinimise && (
-            <button onClick={onMinimise} className="win-btn" title="Minimise — keep these people on the map">
-              ▾
+            <button onClick={onMinimise} className="win-btn" title="Minimise — keep these people on the map" aria-label="Minimise">
+              <IconChevronDown size={15} />
             </button>
           )}
-          <button onClick={() => onSize(size === "wide" ? "side" : "wide")} className="win-btn" title={size === "wide" ? "Narrow" : "Expand"}>
-            {size === "wide" ? "▸" : "◂"}
+          {/* Width controls are a desktop idea; a phone sheet has one width. */}
+          <button
+            onClick={() => onSize(size === "wide" ? "side" : "wide")}
+            className="win-btn hidden sm:grid"
+            title={size === "wide" ? "Narrow" : "Widen"}
+            aria-label={size === "wide" ? "Narrow" : "Widen"}
+          >
+            {size === "wide" ? <IconChevronRight size={15} /> : <IconChevronLeft size={15} />}
           </button>
-          <button onClick={() => onSize(size === "full" ? "side" : "full")} className="win-btn" title={size === "full" ? "Restore" : "Full screen"}>
-            {size === "full" ? "⤡" : "⤢"}
+          <button
+            onClick={() => onSize(size === "full" ? "side" : "full")}
+            className="win-btn"
+            title={size === "full" ? "Restore" : "Full screen"}
+            aria-label={size === "full" ? "Restore" : "Full screen"}
+          >
+            <ExpandIcon full={size === "full"} />
           </button>
-          <button onClick={onClose} className="win-btn" title="Close — back to the map">
-            ×
+          <button onClick={onClose} className="win-btn" title="Close — back to the map" aria-label="Close">
+            <IconX size={15} />
           </button>
         </div>
       </div>
 
-      <div className={`flex-1 overflow-y-auto p-4 ${size === "full" ? "mx-auto w-full max-w-3xl" : ""}`}>{children}</div>
+      <div className={`flex-1 overflow-y-auto p-4 pb-[88px] sm:pb-4 ${size === "full" ? "mx-auto w-full max-w-3xl" : ""}`}>{children}</div>
     </div>
+  );
+}
+
+function ExpandIcon({ full }: { full: boolean }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {full ? (
+        <path d="M9 3v6H3M15 21v-6h6M3 15h6v6M21 9h-6V3" />
+      ) : (
+        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+      )}
+    </svg>
   );
 }

@@ -35,6 +35,20 @@ import CircleYouPanel from "./CircleYouPanel";
 import CircleFeed, { EVERYTHING } from "./CircleFeed";
 import CircleMeetupForm from "./CircleMeetupForm";
 import CircleDigest from "./CircleDigest";
+import {
+  IconCalendar,
+  IconChat,
+  IconChevronDown,
+  IconFeed,
+  IconGlobe,
+  IconHidden,
+  IconCity,
+  IconLock,
+  IconPeople,
+  IconPin,
+  IconPlane,
+  IconPlus,
+} from "./Icons";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 const MAP_STYLE = "mapbox://styles/mapbox/light-v11";
@@ -107,6 +121,8 @@ export default function CircleMap() {
   /** A travel ping opened from the feed or the digest — flies the map to its city. */
   const [openPing, setOpenPing] = useState<TravelPing | null>(null);
   const [digestOff, setDigestOff] = useState(false);
+  /** The first fit has to wait for the style to load or it silently does nothing. */
+  const [mapReady, setMapReady] = useState(false);
   /** Events you've said you're coming to, this session. */
   const [going, setGoing] = useState<Set<string>>(new Set());
 
@@ -159,6 +175,8 @@ export default function CircleMap() {
    * put a bubble reading "1" on top of the very pin it was counting.
    */
   const precise = zoom >= PRECISE_ZOOM;
+  /** Phone-width: the panel is a bottom sheet, so framing has to allow for it. */
+  const narrow = typeof window !== "undefined" && window.innerWidth < 640;
 
   /** One bubble per city: the coarse, city-level truth about where the community is. */
   const cityGroups = groupByCity(onMap);
@@ -203,7 +221,7 @@ export default function CircleMap() {
   // the whole world rather than wherever you last were.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || cityGroups.length === 0 || venueEvent) return;
+    if (!map || !mapReady || cityGroups.length === 0 || venueEvent) return;
     // One city is a point, and fitting a point lands on maxZoom — which is
     // the whole state. Narrowing to a city should actually arrive in it, and
     // past PRECISE_ZOOM so its people break out of the bubble.
@@ -219,11 +237,19 @@ export default function CircleMap() {
         [Math.min(...lngs), Math.min(...lats)],
         [Math.max(...lngs), Math.max(...lats)],
       ],
-      { padding: { top: 80, bottom: 140, left: 60, right: stack.length > 0 ? 480 : 60 }, duration: 1400, maxZoom: 5 }
+      // A phone has no room beside the map, so the panel's share of the
+      // screen comes off the bottom there and off the right on a desktop.
+      {
+        padding: narrow
+          ? { top: 70, bottom: stack.length > 0 ? 180 : 150, left: 24, right: 24 }
+          : { top: 80, bottom: 140, left: 60, right: stack.length > 0 ? 480 : 60 },
+        duration: 1400,
+        maxZoom: 5,
+      }
     );
     // Re-frames on community or city-filter change only — not on every pan.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeEntityId, cityFilter]);
+  }, [activeEntityId, cityFilter, mapReady]);
 
   useEffect(() => {
     if (venueEvent) flyToVenue(venueEvent);
@@ -270,6 +296,7 @@ export default function CircleMap() {
         initialViewState={{ longitude: 30, latitude: 25, zoom: 1.6 }}
         onClick={() => setPinned(null)}
         onMove={(e) => setZoom(e.viewState.zoom)}
+        onLoad={() => setMapReady(true)}
         style={{ width: "100%", height: "100%" }}
       >
         <NavigationControl position="bottom-right" showCompass={false} />
@@ -372,15 +399,16 @@ export default function CircleMap() {
                     ev.stopPropagation();
                     push(`event:${e.id}`);
                   }}
-                  className={`grid h-7 w-7 place-items-center rounded-xl text-[13px]${e.liveNow ? " beacon-ring" : ""}`}
+                  className={`grid h-7 w-7 place-items-center rounded-xl${e.liveNow ? " beacon-ring" : ""}`}
                   style={{
                     background: "var(--card)",
-                    border: `2px solid ${e.kind === "meetup" ? "var(--ink-soft)" : "var(--brand)"}`,
+                    color: e.kind === "meetup" ? "var(--ink)" : "var(--brand)",
+                    border: `2px solid ${e.kind === "meetup" ? "var(--line)" : "var(--brand)"}`,
                     boxShadow: "var(--shadow)",
                   }}
                   title={`${e.name} — ${e.dateLabel}`}
                 >
-                  {e.kind === "meetup" ? "📍" : "📅"}
+                  {e.kind === "meetup" ? <IconPin size={15} /> : <IconCalendar size={15} />}
                 </button>
               </Marker>
             ))}
@@ -401,11 +429,11 @@ export default function CircleMap() {
                     ev.stopPropagation();
                     setOpenPing(p);
                   }}
-                  className="grid h-7 w-7 place-items-center rounded-full text-[12px]"
-                  style={{ background: "var(--card)", border: "2px dashed var(--brand)", boxShadow: "var(--shadow)" }}
+                  className="grid h-7 w-7 place-items-center rounded-full"
+                  style={{ background: "var(--card)", color: "var(--brand)", border: "2px dashed var(--brand)", boxShadow: "var(--shadow)" }}
                   title={`${m.name} in ${c.name} · ${p.datesLabel}`}
                 >
-                  ✈️
+                  <IconPlane size={13} />
                 </button>
               </Marker>
             );
@@ -493,16 +521,21 @@ export default function CircleMap() {
         <div className="pointer-events-auto relative">
           <button
             onClick={() => setSwitcherOpen((v) => !v)}
-            className="flex items-center gap-2 rounded-2xl border border-[var(--line)] py-2 pl-3 pr-2.5"
+            className="flex max-w-[calc(100vw-24px)] items-center gap-2 rounded-2xl border border-[var(--line)] py-2 pl-3 pr-2.5"
             style={{ background: "color-mix(in srgb, var(--card) 95%, transparent)", backdropFilter: "blur(12px)", boxShadow: "var(--shadow-lift)" }}
           >
-            <span className="text-[16px] leading-none">{entity?.emoji}</span>
-            <span className="text-[13px] font-semibold">{qualifiedName(activeEntityId)}</span>
-            <span className="text-[11.5px] text-[var(--ink-soft)]">
+            <span className="flex-none text-[16px] leading-none">{entity?.emoji}</span>
+            <span className="min-w-0 truncate text-[13px] font-semibold">
+              {/* The full ancestry wrapped onto two lines on a phone and ate
+                  the top of the map. Short name there, full name from sm up. */}
+              <span className="sm:hidden">{entity?.name}</span>
+              <span className="hidden sm:inline">{qualifiedName(activeEntityId)}</span>
+            </span>
+            <span className="hidden flex-none text-[11.5px] text-[var(--ink-soft)] sm:inline">
               {onMap.length} on the map
               {offMapCount > 0 ? ` · ${offMapCount} off it` : ""}
             </span>
-            {me.entityIds.length > 1 && <span className="text-[var(--ink-soft)]">▾</span>}
+            {me.entityIds.length > 1 && <IconChevronDown size={14} className="flex-none text-[var(--ink-soft)]" />}
           </button>
 
           {switcherOpen && me.entityIds.length > 1 && (
@@ -538,8 +571,8 @@ export default function CircleMap() {
             className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-[var(--line)] px-3 py-1.5"
             style={{ background: "color-mix(in srgb, var(--card) 95%, transparent)", backdropFilter: "blur(12px)", boxShadow: "var(--shadow)" }}
           >
-            <span className="text-[12px]">🌐</span>
-            <span className="text-[12px] font-semibold">Showing who&rsquo;s joining {onlineEvent.name}</span>
+            <IconGlobe size={14} className="flex-none text-[var(--ink-soft)]" />
+            <span className="truncate text-[12px] font-semibold">Showing who&rsquo;s joining {onlineEvent.name}</span>
           </div>
         </div>
       )}
@@ -561,27 +594,38 @@ export default function CircleMap() {
       )}
 
       {/* ── bottom bar ── */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-[1350] flex justify-center px-3">
+      <div className="pointer-events-none fixed inset-x-0 bottom-3 z-[1350] flex justify-center px-3 sm:bottom-4">
         <div
-          className="pointer-events-auto flex items-center gap-1 rounded-3xl border border-[var(--line)] p-1.5"
+          className="pointer-events-auto flex w-full max-w-[560px] items-center gap-0.5 rounded-3xl border border-[var(--line)] p-1.5 sm:w-auto sm:gap-1"
           style={{ background: "color-mix(in srgb, var(--card) 94%, transparent)", backdropFilter: "blur(14px)", boxShadow: "var(--shadow-lift)" }}
         >
-          <BarButton emoji="📣" label="Feed" on={view === "feed"} onClick={() => open("feed")} />
-          <BarButton emoji="👥" label="People" count={members.length} on={view === "people"} onClick={() => open("people")} />
-          <BarButton emoji="📅" label="Events" count={events.length} on={view === "events"} onClick={() => open("events")} />
-          <BarButton emoji="💬" label="Chats" on={view === "chats" || Boolean(view?.startsWith("chat:"))} onClick={() => open("chats")} />
+          <BarButton icon={<IconFeed />} label="Feed" on={view === "feed"} onClick={() => open("feed")} />
+          <BarButton icon={<IconPeople />} label="People" count={members.length} on={view === "people"} onClick={() => open("people")} />
+          <BarButton icon={<IconCalendar />} label="Events" count={events.length} on={view === "events"} onClick={() => open("events")} />
+          <BarButton icon={<IconChat />} label="Chats" on={view === "chats" || Boolean(view?.startsWith("chat:"))} onClick={() => open("chats")} />
           <span className="mx-0.5 h-8 w-px flex-none" style={{ background: "var(--line)" }} />
           <button
             onClick={() => open("you")}
-            className="relative flex flex-none items-center gap-1.5 rounded-2xl py-1 pl-1 pr-2.5"
+            className="relative flex flex-none items-center gap-1.5 rounded-2xl p-1 sm:pr-2.5"
             style={view === "you" ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))" } : undefined}
             title="You — location and communities"
+            aria-label="You — location and communities"
           >
-            <span className="avatar h-8 w-8 text-[11px]">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={avatarUrl(me.name)} alt="" />
+            <span className="relative">
+              <span className="avatar h-8 w-8 text-[11px]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={avatarUrl(me.name)} alt="" />
+              </span>
+              {/* The label doesn't fit on a phone, so the state rides the
+                  avatar as a badge instead of disappearing. */}
+              <span
+                className="absolute -bottom-0.5 -right-0.5 grid h-3.5 w-3.5 place-items-center rounded-full sm:hidden"
+                style={{ background: "var(--card)", color: me.mode === "off" ? "var(--ink-soft)" : "var(--brand)", boxShadow: "0 0 0 1.5px var(--card)" }}
+              >
+                {me.mode === "off" ? <IconHidden size={10} /> : me.mode === "live" ? <IconPin size={10} /> : <IconCity size={10} />}
+              </span>
             </span>
-            <span className="text-[11px] font-semibold" style={{ color: "var(--ink-soft)" }}>
+            <span className="hidden text-[11px] font-semibold sm:inline" style={{ color: "var(--ink-soft)" }}>
               {me.mode === "off" ? "Off the map" : me.mode === "live" ? "Live" : "City"}
             </span>
           </button>
@@ -609,21 +653,9 @@ export default function CircleMap() {
       {view && (
         <FloatingPage
           title={title}
-          emoji={
-            view === "feed"
-              ? "📣"
-              : view === "meetup"
-                ? "📍"
-                : view === "people"
-                  ? (entity?.emoji ?? "👥")
-                  : view === "events" || view.startsWith("event:")
-                    ? "📅"
-                    : view === "you"
-                      ? "🙋"
-                      : view === "chats" || view.startsWith("chat:")
-                        ? "💬"
-                        : "👤"
-          }
+          // Only the community's own badge — chosen by the institution — earns
+          // a glyph here. Everything else is chrome and is already labelled.
+          emoji={view === "people" ? (entity?.emoji ?? "") : ""}
           canGoBack={stack.length > 1}
           size={panelSize}
           onBack={pop}
@@ -682,7 +714,7 @@ export default function CircleMap() {
 
           {view === "events" && <EventsList events={events} myCityId={me.cityId} onOpen={(id) => push(`event:${id}`)} onStart={() => push("meetup")} />}
 
-          {view === "chats" && <ChatsList members={members} onOpen={(id) => push(`chat:${id}`)} />}
+          {view === "chats" && <ChatsList members={members} pings={pings} communityName={entity?.name ?? "this community"} onOpen={(id) => push(`chat:${id}`)} />}
 
           {view === "you" && (
             <CircleYouPanel
@@ -750,21 +782,37 @@ export default function CircleMap() {
   );
 }
 
-function BarButton({ emoji, label, count, on, onClick }: { emoji: string; label: string; count?: number; on: boolean; onClick: () => void }) {
+function BarButton({
+  icon,
+  label,
+  count,
+  on,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  count?: number;
+  on: boolean;
+  onClick: () => void;
+}) {
   return (
     <button
       onClick={onClick}
-      className="flex w-[72px] flex-none flex-col items-center gap-0.5 rounded-2xl py-1.5"
-      style={on ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))" } : undefined}
+      // Fluid rather than fixed: five 72px blocks plus an avatar overflowed a
+      // 390px phone, which pushed the first block off the left edge entirely.
+      className="flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-2xl px-1 py-1.5 sm:w-[76px] sm:flex-none"
+      style={on ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)" } : { color: "var(--ink-soft)" }}
+      aria-label={count != null ? `${label}, ${count}` : label}
     >
-      <span className="text-[16px] leading-none">{emoji}</span>
-      <span className="text-[11px] font-semibold" style={{ color: on ? "var(--brand)" : "var(--ink-soft)" }}>
+      {icon}
+      <span className="w-full truncate text-center text-[10.5px] font-semibold leading-none sm:text-[11px]">
         {label}
         {count != null ? ` ${count}` : ""}
       </span>
     </button>
   );
 }
+
 
 /** What someone's location setting means, said plainly wherever they appear. */
 function modeLine(m: CircleMember): string {
@@ -904,7 +952,9 @@ function PeopleList({
                 {m.headline} · {m.company}
               </span>
             </span>
-            <span className="flex-none text-[10.5px] text-[var(--ink-soft)]">{m.mode === "off" ? "🚫" : m.mode === "live" ? "📍" : "🏙"}</span>
+            <span className="flex-none text-[var(--ink-soft)]" title={modeLine(m)}>
+              {m.mode === "off" ? <IconHidden size={14} /> : m.mode === "live" ? <IconPin size={14} /> : <IconCity size={14} />}
+            </span>
           </button>
         ))}
       </div>
@@ -923,22 +973,26 @@ function EventsList({
   onOpen: (id: string) => void;
   onStart: () => void;
 }) {
-  // Your own city first. In a community spread across fifty cities, a
-  // chronological list is mostly events you will never attend.
-  const here = events.filter((e) => e.cityId === myCityId);
-  const online = events.filter((e) => e.kind === "online");
-  const elsewhere = events.filter((e) => e.cityId !== myCityId && e.kind !== "online");
+  // Anything live comes first wherever it is — it's the only group with a
+  // deadline. After that, your own city: in a community spread across fifty
+  // cities a chronological list is mostly events you will never attend.
+  const live = events.filter((e) => e.liveNow);
+  const rest = events.filter((e) => !e.liveNow);
+  const here = rest.filter((e) => e.cityId === myCityId);
+  const online = rest.filter((e) => e.kind === "online");
+  const elsewhere = rest.filter((e) => e.cityId !== myCityId && e.kind !== "online");
 
   return (
     <div>
-      <button onClick={onStart} className="btn btn-primary btn-sm w-full">
-        📍 Call a meetup in your city
+      <button onClick={onStart} className="btn btn-primary btn-sm flex w-full items-center justify-center gap-1.5">
+        <IconPlus size={15} /> Call a meetup in your city
       </button>
       <p className="mt-1.5 text-[11.5px] text-[var(--ink-soft)]">
         Any member can. It only reaches the people in that city, so there&rsquo;s nothing to approve.
       </p>
 
       {[
+        { label: "Happening now", list: live },
         { label: `In ${cityById(myCityId)?.name ?? "your city"}`, list: here },
         { label: "Online", list: online },
         { label: "Everywhere else", list: elsewhere },
@@ -961,7 +1015,7 @@ function EventsList({
                       {e.dateLabel} · {e.timeLabel}
                     </p>
                     <p className="text-[12px] text-[var(--ink-soft)]">
-                      {e.kind === "online" ? "🌐 Online" : `${e.venue}, ${cityById(e.cityId ?? "")?.name}`}
+                      {e.kind === "online" ? "Online" : `${e.venue}, ${cityById(e.cityId ?? "")?.name}`}
                     </p>
                     <p className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--ink-soft)]">
                       {e.kind === "meetup" && (
@@ -982,27 +1036,70 @@ function EventsList({
   );
 }
 
-function ChatsList({ members, onOpen }: { members: CircleMember[]; onOpen: (id: string) => void }) {
-  // Everyone in the community is reachable, so "chats" is the people you've
-  // actually got a thread with — seeded here, same as the rest of the mock.
-  const threads = members.filter((m) => rnd(`thread-${m.id}`) % 3 !== 0).slice(0, 12);
+function ChatsList({
+  members,
+  pings,
+  communityName,
+  onOpen,
+}: {
+  members: CircleMember[];
+  pings: TravelPing[];
+  /** Threaded through so the preview and the opened thread say the same thing. */
+  communityName: string;
+  onOpen: (id: string) => void;
+}) {
+  // Threads you actually have, with the last thing said in them — a column of
+  // bare names reads as a directory, not an inbox.
+  const threads = members
+    .map((m) => ({ m, thread: seedThread(m, communityName) }))
+    .filter((t) => t.thread.length > 0)
+    .slice(0, 14);
+  const travellingNow = new Set(pings.filter((p) => p.daysAway <= 0).map((p) => p.memberId));
+
   return (
-    <div className="flex flex-col gap-1">
-      <p className="mb-1 text-[11.5px] text-[var(--ink-soft)]">
+    <div>
+      <p className="rounded-2xl p-3 text-[12px] leading-4 text-[var(--ink-soft)]" style={{ background: "var(--sunk)" }}>
         Anyone in the community can message anyone else. No requests, no waiting — membership already did that work.
       </p>
-      {threads.map((m) => (
-        <button key={m.id} onClick={() => onOpen(m.id)} className="flex w-full items-center gap-2.5 rounded-2xl p-2 text-left hover:bg-[var(--sunk)]">
-          <span className="avatar h-9 w-9 flex-none text-[11px]">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={avatarUrl(m.name)} alt="" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[12.5px] font-semibold leading-tight">{m.name}</span>
-            <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">{cityById(m.cityId)?.name}</span>
-          </span>
-        </button>
-      ))}
+
+      <div className="mt-3 flex flex-col gap-0.5">
+        {threads.map(({ m, thread }) => {
+          const last = thread[thread.length - 1];
+          return (
+            <button
+              key={m.id}
+              onClick={() => onOpen(m.id)}
+              className="flex w-full items-start gap-2.5 rounded-2xl p-2.5 text-left transition-colors hover:bg-[var(--sunk)]"
+            >
+              <span className="relative flex-none">
+                <span className="avatar h-10 w-10 text-[12px]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={avatarUrl(m.name)} alt="" />
+                </span>
+                {travellingNow.has(m.id) && (
+                  <span
+                    className="absolute -bottom-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full"
+                    style={{ background: "var(--brand)", color: "#fff", boxShadow: "0 0 0 2px var(--card)" }}
+                    title="Travelling right now"
+                  >
+                    <IconPlane size={9} />
+                  </span>
+                )}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-baseline gap-2">
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-tight">{m.name}</span>
+                  <span className="flex-none text-[11px] text-[var(--ink-soft)]">{last.timeLabel}</span>
+                </span>
+                <span className="mt-0.5 block truncate text-[12px] leading-4 text-[var(--ink-soft)]">{last.body}</span>
+                <span className="mt-0.5 block truncate text-[11px] text-[var(--ink-soft)]">
+                  {m.headline} · {cityById(m.cityId)?.name}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1012,8 +1109,10 @@ function NeedsInvite() {
   return (
     <div className="grid min-h-screen place-items-center px-4" style={{ background: "var(--sunk)" }}>
       <div className="card w-full max-w-[460px] p-6 text-center">
-        <span className="text-[30px] leading-none">🔒</span>
-        <h1 className="mt-2 text-[20px] font-bold leading-tight">Members only</h1>
+        <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
+          <IconLock size={22} />
+        </span>
+        <h1 className="mt-3 text-[20px] font-bold leading-tight">Members only</h1>
         <p className="mt-1.5 text-[13px] leading-5 text-[var(--ink-soft)]">
           There&rsquo;s no public side to this map and no way to browse in. You get here through a link an admin shares with their own
           community.

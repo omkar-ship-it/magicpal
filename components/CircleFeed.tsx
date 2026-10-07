@@ -14,22 +14,23 @@ import {
   type TravelPing,
 } from "@/lib/circleData";
 import type { CircleMe } from "@/lib/circleMe";
+import { IconAsk, IconBriefcase, IconChat, IconHeart, IconMegaphone, IconPin, IconPlane, IconSparkle } from "./Icons";
 
 export const EVERYTHING = "__everything";
 
-const KIND_BADGE: Record<CirclePostKind, { label: string; emoji: string }> = {
-  update: { label: "Update", emoji: "✍️" },
-  career: { label: "Career", emoji: "💼" },
-  job: { label: "Hiring", emoji: "📣" },
-  ask: { label: "Ask", emoji: "🙋" },
-  milestone: { label: "Milestone", emoji: "🎉" },
-};
+function KindIcon({ kind, size = 14 }: { kind: CirclePostKind; size?: number }) {
+  if (kind === "career") return <IconBriefcase size={size} />;
+  if (kind === "job") return <IconMegaphone size={size} />;
+  if (kind === "ask") return <IconAsk size={size} />;
+  if (kind === "milestone") return <IconSparkle size={size} />;
+  return <IconChat size={size} />;
+}
 
 const COMPOSE_KINDS: Array<{ kind: CirclePostKind; label: string; placeholder: string }> = [
-  { kind: "update", label: "✍️ Update", placeholder: "Share something with the group…" },
-  { kind: "career", label: "💼 Career", placeholder: "New role, a move, something that changed…" },
-  { kind: "job", label: "📣 Hiring", placeholder: "What's the role, where, and who should apply?" },
-  { kind: "ask", label: "🙋 Ask", placeholder: "What do you need — an intro, advice, a second opinion?" },
+  { kind: "update", label: "Update", placeholder: "Share something with the group…" },
+  { kind: "career", label: "Career", placeholder: "New role, a move, something that changed…" },
+  { kind: "job", label: "Hiring", placeholder: "What's the role, where, and who should apply?" },
+  { kind: "ask", label: "Ask", placeholder: "What do you need — an intro, advice, a second opinion?" },
 ];
 
 function ago(minutes: number): string {
@@ -148,18 +149,22 @@ export default function CircleFeed({
                 <button
                   key={k.kind}
                   onClick={() => setKind(k.kind)}
-                  className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold transition-colors"
+                  className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[11.5px] font-semibold transition-colors"
                   style={
                     kind === k.kind
                       ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)" }
                       : { background: "var(--sunk)", color: "var(--ink-soft)" }
                   }
                 >
-                  {k.label}
+                  <KindIcon kind={k.kind} size={13} /> {k.label}
                 </button>
               ))}
-              <button onClick={onStartMeetup} className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold" style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}>
-                📍 Meetup
+              <button
+                onClick={onStartMeetup}
+                className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
+                style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}
+              >
+                <IconPin size={13} /> Meetup
               </button>
             </div>
             <textarea
@@ -227,7 +232,9 @@ export default function CircleFeed({
                       {p.datesLabel} · {p.daysAway <= 0 ? "here now" : `in ${p.daysAway}d`}
                     </span>
                   </span>
-                  <span className="flex-none text-[15px]">✈️</span>
+                  <span className="grid h-7 w-7 flex-none place-items-center rounded-lg" style={{ background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" }}>
+                    <IconPlane size={14} />
+                  </span>
                 </button>
               );
             })}
@@ -272,7 +279,9 @@ export default function CircleFeed({
                     {level === EVERYTHING && source ? ` · ${source.name}` : ""}
                   </p>
                 </div>
-                <span className="flex-none text-[11px] text-[var(--ink-soft)]">{KIND_BADGE[post.kind].emoji}</span>
+                <span className="flex-none text-[var(--ink-soft)]" title={post.kind}>
+                  <KindIcon kind={post.kind} size={15} />
+                </span>
               </div>
 
               <p className="mt-2 text-[13.5px] leading-5">{post.body}</p>
@@ -282,10 +291,10 @@ export default function CircleFeed({
                 // reason the feed lives on a map instead of beside one.
                 <button
                   onClick={() => onOpenCity(city.id)}
-                  className="mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                  className="mt-2 inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold transition-colors hover:text-[var(--brand)]"
                   style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}
                 >
-                  📍 {city.name} — show on the map
+                  <IconPin size={12} /> {city.name} — show on the map
                 </button>
               )}
 
@@ -299,12 +308,15 @@ export default function CircleFeed({
                       return next;
                     })
                   }
+                  className="flex items-center gap-1"
                   style={liked.has(post.id) ? { color: "var(--brand)", fontWeight: 600 } : undefined}
                 >
-                  ♡ {post.likes + (liked.has(post.id) ? 1 : 0)}
+                  <IconHeart size={14} /> {post.likes + (liked.has(post.id) ? 1 : 0)}
                 </button>
                 {post.comments.length > 0 && (
-                  <button onClick={() => setOpen((cur) => (cur === post.id ? null : post.id))}>💬 {post.comments.length}</button>
+                  <button onClick={() => setOpen((cur) => (cur === post.id ? null : post.id))} className="flex items-center gap-1">
+                    <IconChat size={14} /> {post.comments.length}
+                  </button>
                 )}
               </div>
 

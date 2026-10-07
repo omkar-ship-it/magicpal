@@ -1,12 +1,16 @@
 "use client";
 
 import { avatarUrl } from "@/lib/avatar";
+import { useState } from "react";
 import { cityById, memberById, type CircleEvent, type TravelPing } from "@/lib/circleData";
+import { IconBeacon, IconCalendar, IconChat, IconChevronDown, IconGlobe, IconPlane, IconX } from "./Icons";
 import type { CircleMe } from "@/lib/circleMe";
 
 export type DigestLine = {
   id: string;
-  emoji: string;
+  icon: React.ReactNode;
+  /** Brand-coloured for the one thing that's live right now. */
+  hot?: boolean;
   headline: string;
   detail: string;
   faces?: string[];
@@ -45,24 +49,52 @@ export default function CircleDigest({
   onDismiss: () => void;
 }) {
   const lines = buildDigest(me, pings, events, newPostCount, { city: onCity, ping: onPing, event: onEvent, feed: onFeed });
+  // A phone screen is mostly map; four stacked rows covered all of it. There
+  // it opens as one line you can tap to expand, and only the top item shows.
+  const [open, setOpen] = useState(false);
   if (lines.length === 0) return null;
+  const top = lines[0];
 
   return (
-    <div className="pointer-events-none fixed bottom-[88px] left-3 z-[1200] w-[min(330px,calc(100vw-24px))] sm:bottom-24 sm:left-5">
+    <div className="pointer-events-none fixed bottom-[82px] left-3 right-3 z-[1200] sm:bottom-24 sm:right-auto sm:w-[330px] sm:left-5">
       <div
-        className="pointer-events-auto rounded-3xl border border-[var(--line)] p-3"
-        style={{ background: "color-mix(in srgb, var(--card) 95%, transparent)", backdropFilter: "blur(14px)", boxShadow: "var(--shadow-lift)" }}
+        className="pointer-events-auto rounded-3xl border border-[var(--line)] p-2 sm:p-3"
+        style={{ background: "color-mix(in srgb, var(--card) 96%, transparent)", backdropFilter: "blur(14px)", boxShadow: "var(--shadow-lift)" }}
       >
-        <div className="flex items-center gap-2 px-1 pb-1.5">
+        <div className="hidden items-center gap-2 px-1 pb-1.5 sm:flex">
           <span className="text-[12px] font-semibold">This week in your world</span>
-          <button onClick={onDismiss} className="win-btn ml-auto flex-none" title="Dismiss">
-            ×
+          <button onClick={onDismiss} className="win-btn ml-auto flex-none" title="Dismiss" aria-label="Dismiss">
+            <IconX size={14} />
           </button>
         </div>
-        <div className="flex flex-col gap-0.5">
-          {lines.map((l) => (
-            <button key={l.id} onClick={l.onClick} className="flex w-full items-start gap-2.5 rounded-2xl p-2 text-left transition-colors hover:bg-[var(--sunk)]">
-              <span className="mt-0.5 flex-none text-[15px] leading-none">{l.emoji}</span>
+
+        {/* Phone: collapsed to the single most actionable line. */}
+        <div className="flex items-center gap-1 sm:hidden">
+          <button onClick={() => setOpen((v) => !v)} className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl p-1.5 text-left">
+            <Glyph line={top} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[12.5px] font-semibold leading-tight">{top.headline}</span>
+              <span className="block truncate text-[11px] text-[var(--ink-soft)]">
+                {open ? "Tap to collapse" : `${top.detail}${lines.length > 1 ? ` · +${lines.length - 1} more` : ""}`}
+              </span>
+            </span>
+            {lines.length > 1 && (
+              <IconChevronDown size={15} className="flex-none text-[var(--ink-soft)]" style={{ transform: open ? "rotate(180deg)" : undefined }} />
+            )}
+          </button>
+          <button onClick={onDismiss} className="win-btn flex-none" title="Dismiss" aria-label="Dismiss">
+            <IconX size={14} />
+          </button>
+        </div>
+
+        <div className={`${open ? "flex" : "hidden"} flex-col gap-0.5 sm:flex`}>
+          {(open ? lines : lines).map((l, i) => (
+            <button
+              key={l.id}
+              onClick={l.onClick}
+              className={`flex w-full items-center gap-2.5 rounded-2xl p-2 text-left transition-colors hover:bg-[var(--sunk)] ${i === 0 ? "hidden sm:flex" : "flex"} sm:flex`}
+            >
+              <Glyph line={l} />
               <span className="min-w-0 flex-1">
                 <span className="block text-[12.5px] font-semibold leading-tight">{l.headline}</span>
                 <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">{l.detail}</span>
@@ -85,6 +117,22 @@ export default function CircleDigest({
   );
 }
 
+/** The leading mark: tinted for the one line that's live, quiet for the rest. */
+function Glyph({ line }: { line: DigestLine }) {
+  return (
+    <span
+      className={`grid h-8 w-8 flex-none place-items-center rounded-xl${line.hot ? " beacon-ring" : ""}`}
+      style={
+        line.hot
+          ? { background: "var(--brand)", color: "#fff" }
+          : { background: "var(--sunk)", color: "var(--ink-soft)" }
+      }
+    >
+      {line.icon}
+    </span>
+  );
+}
+
 /**
  * The lines themselves, ranked by how much they'd actually make someone act.
  * Somebody landing in your city this week beats a milestone post, every time.
@@ -103,7 +151,7 @@ function buildDigest(
     const names = toMyCity.map((p) => memberById(p.memberId)?.name ?? "").filter(Boolean);
     out.push({
       id: "incoming",
-      emoji: "✈️",
+      icon: <IconPlane size={16} />,
       headline: `${toMyCity.length} ${toMyCity.length === 1 ? "person is" : "people are"} in ${cityById(me.cityId)?.name} this week`,
       detail: names.slice(0, 2).join(", ") + (names.length > 2 ? ` and ${names.length - 2} more` : ""),
       faces: names,
@@ -115,7 +163,8 @@ function buildDigest(
   if (live) {
     out.push({
       id: "live",
-      emoji: "🔴",
+      icon: <IconBeacon size={16} />,
+      hot: true,
       headline: `${live.name} is happening now`,
       detail: live.venue ? `${live.venue} — beacon on to be found` : "Online — join from anywhere",
       onClick: () => go.event(live.id),
@@ -126,7 +175,7 @@ function buildDigest(
   if (nearby.length > 0) {
     out.push({
       id: "nearby",
-      emoji: "📍",
+      icon: <IconCalendar size={16} />,
       headline: `${nearby.length} meetup${nearby.length === 1 ? "" : "s"} in your city`,
       detail: `${nearby[0].name} · ${nearby[0].dateLabel}`,
       onClick: () => go.event(nearby[0].id),
@@ -138,7 +187,7 @@ function buildDigest(
     const cities = new Set(soon.map((p) => p.cityId));
     out.push({
       id: "moving",
-      emoji: "🌍",
+      icon: <IconGlobe size={16} />,
       headline: `${soon.length} travelling across ${cities.size} ${cities.size === 1 ? "city" : "cities"}`,
       detail: "Worth a look before you book your own trip",
       onClick: go.feed,
@@ -148,7 +197,7 @@ function buildDigest(
   if (newPostCount > 0) {
     out.push({
       id: "posts",
-      emoji: "💬",
+      icon: <IconChat size={16} />,
       headline: `${newPostCount} new in the feed`,
       detail: "Asks, hiring and a few milestones",
       onClick: go.feed,

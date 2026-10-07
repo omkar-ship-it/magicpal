@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { avatarUrl } from "@/lib/avatar";
 import { entityById } from "@/lib/networks";
-import { CIRCLE_CITIES, LOCATION_MODES, cityById, inviteFor, membersOf, qualifiedName, type LocationMode } from "@/lib/circleData";
+import { CIRCLE_CITIES, cityById, inviteFor, membersOf, qualifiedName, type LocationMode } from "@/lib/circleData";
 import type { CircleMe } from "@/lib/circleMe";
+import LocationModePicker from "./LocationModePicker";
+import { IconBeacon, IconCopy, IconCheck } from "./Icons";
 
 /**
  * You: where you let people see you, which communities you're in, and the
@@ -66,7 +68,7 @@ export default function CircleYouPanel({
           className="mt-4 flex items-center gap-2 rounded-2xl border p-3"
           style={{ borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 6%, var(--card))" }}
         >
-          <span className="beacon-dot flex-none" />
+          <IconBeacon size={16} className="flex-none" style={{ color: "var(--brand)" }} />
           <p className="min-w-0 flex-1 text-[12.5px] leading-4">
             Beaconing at <span className="font-semibold">{beaconEventName}</span>
           </p>
@@ -81,25 +83,8 @@ export default function CircleYouPanel({
         <p className="mt-0.5 text-[11.5px] text-[var(--ink-soft)]">
           Only members of the communities you&rsquo;re in. There is no public map here — nobody outside them can look you up at all.
         </p>
-        <div className="mt-2 flex flex-col gap-1.5">
-          {LOCATION_MODES.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => onMode(m.id)}
-              className="flex items-start gap-2.5 rounded-2xl border p-3 text-left transition-colors"
-              style={
-                me.mode === m.id
-                  ? { borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 7%, var(--card))" }
-                  : { borderColor: "var(--line)" }
-              }
-            >
-              <span className="text-[17px] leading-none">{m.emoji}</span>
-              <span className="min-w-0">
-                <span className="block text-[13px] font-semibold leading-tight">{m.label}</span>
-                <span className="block text-[11.5px] leading-4 text-[var(--ink-soft)]">{m.detail}</span>
-              </span>
-            </button>
-          ))}
+        <div className="mt-2">
+          <LocationModePicker value={me.mode} onChange={onMode} />
         </div>
 
         {me.mode !== "off" && (
@@ -142,7 +127,7 @@ export default function CircleYouPanel({
                   <div className="mt-2 flex items-center gap-1.5 rounded-xl p-2" style={{ background: "var(--sunk)" }}>
                     <code className="min-w-0 flex-1 truncate text-[11px] text-[var(--ink-soft)]">/join/{invite.code}</code>
                     <button onClick={() => copyInvite(invite.code)} className="btn btn-ghost btn-sm flex-none">
-                      {copied === invite.code ? "Copied ✓" : "Copy invite"}
+                      {copied === invite.code ? <><IconCheck size={13} /> Copied</> : <><IconCopy size={13} /> Copy invite</>}
                     </button>
                   </div>
                 )}

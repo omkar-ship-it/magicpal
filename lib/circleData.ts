@@ -46,10 +46,10 @@ export const rnd = (key: string): number => mix32(hashSeed(key));
  */
 export type LocationMode = "off" | "base" | "live";
 
-export const LOCATION_MODES: Array<{ id: LocationMode; label: string; detail: string; emoji: string }> = [
-  { id: "off", label: "Off the map", detail: "Nobody sees where you are. You're still in the directory and can still message anyone.", emoji: "🚫" },
-  { id: "base", label: "My city", detail: "Members see which city you're based in — never a street or an address.", emoji: "🏙" },
-  { id: "live", label: "My live location", detail: "Members see roughly where you are now. Useful when you travel; switch it off any time.", emoji: "📍" },
+export const LOCATION_MODES: Array<{ id: LocationMode; label: string; detail: string }> = [
+  { id: "off", label: "Off the map", detail: "Nobody sees where you are. You're still in the directory and can still message anyone." },
+  { id: "base", label: "My city", detail: "Members see which city you're based in — never a street or an address." },
+  { id: "live", label: "My live location", detail: "Members see roughly where you are now. Useful when you travel; switch it off any time." },
 ];
 
 // ─────────────────────────────────────────────────────────── cities
