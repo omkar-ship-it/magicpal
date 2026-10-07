@@ -24,14 +24,33 @@ export type CircleMe = {
   entityIds: string[];
   /** The event you're currently beaconing at, if any. */
   beaconEventId: string | null;
+  /**
+   * Open network only. A closed community vouches for everyone in it, so
+   * anyone can message anyone. With no membership doing that work, a first
+   * message has to be asked for.
+   */
+  connectedIds?: string[];
+  requestedIds?: string[];
+  /** What you said you're here for, used to rank strangers. */
+  interests?: string[];
 };
 
-const KEY = "mp_circle_me";
+/**
+ * The two experiences keep separate profiles.
+ *
+ * They're different products — one you're invited into, one you walk into —
+ * and sharing a key would mean joining a class in /circle quietly signed you
+ * up to the open network as well, which is precisely the conflation the
+ * closed version exists to avoid.
+ */
+export type Variant = "circle" | "open";
 
-export function getMe(): CircleMe | null {
+const KEYS: Record<Variant, string> = { circle: "mp_circle_me", open: "mp_open_me" };
+
+export function getMe(variant: Variant = "circle"): CircleMe | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(KEY);
+    const raw = window.localStorage.getItem(KEYS[variant]);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CircleMe;
     return parsed && typeof parsed.name === "string" ? parsed : null;
@@ -40,20 +59,20 @@ export function getMe(): CircleMe | null {
   }
 }
 
-export function setMe(me: CircleMe): void {
+export function setMe(me: CircleMe, variant: Variant = "circle"): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(KEY, JSON.stringify(me));
+    window.localStorage.setItem(KEYS[variant], JSON.stringify(me));
   } catch {
     // Private browsing, quota, blocked storage — the session still works,
     // it just won't survive a reload.
   }
 }
 
-export function clearMe(): void {
+export function clearMe(variant: Variant = "circle"): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem(KEY);
+    window.localStorage.removeItem(KEYS[variant]);
   } catch {
     // Nothing to do — see setMe.
   }

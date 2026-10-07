@@ -14,7 +14,7 @@ import { IconCity, IconHidden, IconPin } from "./Icons";
  * only: on a phone a tap already opens the real card, and a hover card that
  * fires on touch is just a card you can't dismiss.
  */
-export default function MemberHoverCard({ m }: { m: CircleMember }) {
+export default function MemberHoverCard({ m, common }: { m: CircleMember; common?: string | null }) {
   const city = cityById(m.cityId);
   const mode =
     m.mode === "off"
@@ -44,6 +44,11 @@ export default function MemberHoverCard({ m }: { m: CircleMember }) {
       <span className="mt-2 flex items-center gap-1 text-[11px] text-[var(--ink-soft)]">
         {mode.icon} {mode.text}
       </span>
+      {common && (
+        <span className="mt-1.5 block truncate text-[11px] font-semibold" style={{ color: "var(--brand)" }}>
+          {common}
+        </span>
+      )}
     </span>
   );
 }

@@ -9,6 +9,7 @@ import {
   memberById,
   postsAt,
   qualifiedName,
+  CIRCLE_POSTS,
   type CirclePost,
   type CirclePostKind,
 } from "@/lib/circleData";
@@ -59,6 +60,7 @@ function ago(minutes: number): string {
 export default function CircleFeed({
   me,
   level,
+  openNetwork,
   onLevel,
   onOpenMember,
   onOpenCity,
@@ -68,6 +70,8 @@ export default function CircleFeed({
   me: CircleMe;
   /** EVERYTHING, or an entity id. */
   level: string;
+  /** Open network: one flat feed, because there's no ladder of communities above you. */
+  openNetwork?: boolean;
   onLevel: (level: string) => void;
   onOpenMember: (id: string) => void;
   onOpenCity: (cityId: string) => void;
@@ -86,11 +90,12 @@ export default function CircleFeed({
     new Set(me.entityIds.flatMap((id) => [...ancestorsOf(id).map((a) => a.id), id]))
   ).sort((a, b) => ancestorsOf(a).length - ancestorsOf(b).length);
 
-  const canPostHere = level === EVERYTHING ? me.entityIds.length > 0 : me.entityIds.includes(level);
+  const canPostHere = openNetwork || (level === EVERYTHING ? me.entityIds.length > 0 : me.entityIds.includes(level));
   const target = level === EVERYTHING ? postAt : level;
 
-  const posts =
-    level === EVERYTHING
+  const posts = openNetwork
+    ? [...mine, ...CIRCLE_POSTS].sort((a, b) => a.minutesAgo - b.minutesAgo)
+    : level === EVERYTHING
       ? [...mine, ...everythingFeed(me.entityIds)].sort((a, b) => a.minutesAgo - b.minutesAgo)
       : [...mine.filter((p) => p.entityId === level), ...postsAt(level)].sort((a, b) => a.minutesAgo - b.minutesAgo);
 
@@ -116,16 +121,20 @@ export default function CircleFeed({
     <div>
       {/* The ladder. "Everything" is the ceiling of this world — there is no
           public network above it to fall back on. */}
-      <div className="flex flex-wrap gap-1">
-        <LevelChip label="Everything" on={level === EVERYTHING} onClick={() => onLevel(EVERYTHING)} />
-        {chain.map((id) => (
-          <LevelChip key={id} label={entityById(id)?.name ?? id} on={level === id} onClick={() => onLevel(id)} />
-        ))}
-      </div>
-      <p className="mt-1.5 text-[11.5px] text-[var(--ink-soft)]">
-        {level === EVERYTHING
-          ? "Everything from every community you're in, newest first."
-          : `Posted at ${qualifiedName(level)} — not what its groups below are saying.`}
+      {!openNetwork && (
+        <div className="flex flex-wrap gap-1">
+          <LevelChip label="Everything" on={level === EVERYTHING} onClick={() => onLevel(EVERYTHING)} />
+          {chain.map((id) => (
+            <LevelChip key={id} label={entityById(id)?.name ?? id} on={level === id} onClick={() => onLevel(id)} />
+          ))}
+        </div>
+      )}
+      <p className={`${openNetwork ? "" : "mt-1.5 "}text-[11.5px] text-[var(--ink-soft)]`}>
+        {openNetwork
+          ? "Everyone's posts, newest first. No communities to climb — this is the whole network."
+          : level === EVERYTHING
+            ? "Everything from every community you're in, newest first."
+            : `Posted at ${qualifiedName(level)} — not what its groups below are saying.`}
       </p>
 
       {/* Compose */}
@@ -164,7 +173,7 @@ export default function CircleFeed({
             />
             <div className="mt-1.5 flex items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--ink-soft)]">
-                Posting to {entityById(target ?? "")?.name ?? "your community"}
+                Posting to {openNetwork ? "the open network" : (entityById(target ?? "")?.name ?? "your community")}
               </span>
               {level === EVERYTHING && me.entityIds.length > 1 && (
                 <select value={postAt} onChange={(e) => setPostAt(e.target.value)} className="chip-select flex-none text-[11px]">

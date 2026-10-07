@@ -21,12 +21,15 @@ import {
   pointOf,
   qualifiedName,
   CIRCLE_POSTS,
+  ROLE_GROUPS,
+  commonGround,
+  relevance,
   rnd,
   type CircleEvent,
   type CircleMember,
   type LocationMode,
 } from "@/lib/circleData";
-import { clearMe, getMe, setMe, type CircleMe } from "@/lib/circleMe";
+import { clearMe, getMe, setMe, type CircleMe, type Variant } from "@/lib/circleMe";
 import type { MockMessage } from "@/lib/chatData";
 import FloatingPage, { type PageSize } from "./FloatingPage";
 import ChatWindow from "./ChatWindow";
@@ -36,6 +39,7 @@ import CircleFeed, { EVERYTHING } from "./CircleFeed";
 import CircleMeetupForm from "./CircleMeetupForm";
 import CircleDigest from "./CircleDigest";
 import CircleWelcome, { takeJustJoined } from "./CircleWelcome";
+import OpenJoin from "./OpenJoin";
 import {
   IconCalendar,
   IconChat,
@@ -102,10 +106,13 @@ function groupByCity(members: CircleMember[]): CityGroup[] {
  * message anyone), no discovery of strangers, and a location control that's
  * the first thing on your own page rather than the last.
  */
-export default function CircleMap() {
+export default function CircleMap({ variant = "circle" }: { variant?: Variant }) {
+  const isOpen = variant === "open";
   const mapRef = useRef<MapRef | null>(null);
-  const [me, setMeState] = useState<CircleMe | null>(() => getMe());
-  const [activeEntityId, setActiveEntityId] = useState<string>(() => getMe()?.entityIds[0] ?? "");
+  const [me, setMeState] = useState<CircleMe | null>(() => getMe(variant));
+  const [activeEntityId, setActiveEntityId] = useState<string>(() => getMe(variant)?.entityIds[0] ?? "");
+  /** Open network only: coarse role bucket, since membership isn't narrowing anything. */
+  const [roleFilter, setRoleFilter] = useState("all");
   const [stack, setStack] = useState<View[]>([]);
   const [panelSize, setPanelSize] = useState<PageSize>("side");
   const [query, setQuery] = useState("");
@@ -133,10 +140,21 @@ export default function CircleMap() {
     setMeState((cur) => {
       if (!cur) return cur;
       const next = { ...cur, ...patch };
-      setMe(next);
+      setMe(next, variant);
       return next;
     });
-  }, []);
+  }, [variant]);
+
+  /**
+   * Open network only. Seeded so the demo has all three states on screen
+   * rather than an inbox of one pending request: about a fifth of strangers
+   * already read as connected.
+   */
+  function connectStateFor(id: string): "none" | "requested" | "connected" {
+    if ((me?.connectedIds ?? []).includes(id)) return "connected";
+    if ((me?.requestedIds ?? []).includes(id)) return "requested";
+    return rnd(`oc-${id}`) % 100 < 18 ? "connected" : "none";
+  }
 
   const push = (v: View) => setStack((s) => [...s, v]);
   const open = (v: View) => setStack([v]);
@@ -154,10 +172,11 @@ export default function CircleMap() {
     () =>
       members.filter((m) => {
         if (cityFilter && m.cityId !== cityFilter) return false;
+        if (isOpen && !(ROLE_GROUPS.find((r) => r.id === roleFilter) ?? ROLE_GROUPS[0]).match(m)) return false;
         if (!q) return true;
         return `${m.name} ${m.headline} ${m.company} ${cityById(m.cityId)?.name ?? ""}`.toLowerCase().includes(q);
       }),
-    [members, q, cityFilter]
+    [members, q, cityFilter, isOpen, roleFilter]
   );
 
   // An online event has no venue, so the map does the thing only it can:
@@ -166,8 +185,11 @@ export default function CircleMap() {
   const openEventEarly = openEventId ? ([...myEvents, ...ALL_CIRCLE_EVENTS].find((e) => e.id === openEventId) ?? null) : null;
   const onlineEvent = openEventEarly?.kind === "online" ? openEventEarly : null;
   const base = onlineEvent ? attendeesOf(onlineEvent) : matching;
-  const onMap = base.filter((m) => m.mode !== "off");
-  const offMapCount = base.length - onMap.length;
+  // In the open network a list of 1,800 strangers in roster order is
+  // unusable; the people with something in common come first.
+  const ranked = isOpen && me ? [...base].sort((a, b) => relevance(me, b) - relevance(me, a)) : base;
+  const onMap = ranked.filter((m) => m.mode !== "off");
+  const offMapCount = ranked.length - onMap.length;
   const liveMembers = onMap.filter((m) => m.mode === "live");
   /**
    * Below this, a city is one bubble; above it, the people sharing live
@@ -185,10 +207,12 @@ export default function CircleMap() {
   /** Events hosted by any community you're in — live ones first. */
   const events = useMemo(() => {
     const mine = new Set([...(me?.entityIds ?? []), activeEntityId]);
+    // Membership is the filter in a closed community. Out in the open there
+    // is nothing to filter by, so the whole calendar is on show.
     return [...myEvents, ...ALL_CIRCLE_EVENTS]
-      .filter((e) => mine.has(e.hostEntityId))
+      .filter((e) => isOpen || mine.has(e.hostEntityId))
       .sort((a, b) => Number(b.liveNow) - Number(a.liveNow) || a.daysAway - b.daysAway);
-  }, [me, activeEntityId, myEvents]);
+  }, [me, activeEntityId, myEvents, isOpen]);
 
   // Resolve against the live list, not just the seeded one — a meetup you
   // called this session exists only in state, and opening it must still work.
@@ -267,7 +291,18 @@ export default function CircleMap() {
   }, [openEvent?.id]);
 
   // ── no invite yet ────────────────────────────────────────────────────
-  if (!me) return <NeedsInvite />;
+  if (!me)
+    return isOpen ? (
+      <OpenJoin
+        onJoined={(next) => {
+          setMeState(next);
+          setActiveEntityId(next.entityIds[0]);
+          setWelcoming(true);
+        }}
+      />
+    ) : (
+      <NeedsInvite />
+    );
 
   /** What the one open window is called. */
   function titleFor(v: string): string {
@@ -353,7 +388,7 @@ export default function CircleMap() {
             return (
               <Marker key={m.id} longitude={pt[0]} latitude={pt[1]} anchor="center">
                 <span className="hover-host relative block">
-                  <MemberHoverCard m={m} />
+                  <MemberHoverCard m={m} common={isOpen ? commonGround(me, m) : null} />
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -378,7 +413,7 @@ export default function CircleMap() {
             return (
               <Marker key={m.id} longitude={pt[0]} latitude={pt[1]} anchor="center">
                 <span className="hover-host relative block">
-                  <MemberHoverCard m={m} />
+                  <MemberHoverCard m={m} common={isOpen ? commonGround(me, m) : null} />
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -457,29 +492,39 @@ export default function CircleMap() {
           })()}
       </MapGL>
 
-      {/* ── top: which community you're looking at ── */}
-      <div className="float-in pointer-events-none fixed inset-x-0 top-3 z-[1200] flex justify-center px-3 sm:top-5">
+      {/* ── top: what the map is scoped to ── */}
+      <div className="float-in pointer-events-none fixed inset-x-0 top-3 z-[1200] flex flex-col items-center gap-1.5 px-3 sm:top-5">
         <div className="pointer-events-auto relative">
           <button
-            onClick={() => setSwitcherOpen((v) => !v)}
+            onClick={() => !isOpen && setSwitcherOpen((v) => !v)}
             className="flex max-w-[calc(100vw-24px)] items-center gap-2 rounded-2xl border border-[var(--line)] py-2 pl-3 pr-2.5"
             style={{ background: "color-mix(in srgb, var(--card) 95%, transparent)", backdropFilter: "blur(12px)", boxShadow: "var(--shadow-lift)" }}
           >
-            <span className="flex-none text-[16px] leading-none">{entity?.emoji}</span>
+            {isOpen ? (
+              <IconGlobe size={16} className="flex-none text-[var(--brand)]" />
+            ) : (
+              <span className="flex-none text-[16px] leading-none">{entity?.emoji}</span>
+            )}
             <span className="min-w-0 truncate text-[13px] font-semibold">
-              {/* The full ancestry wrapped onto two lines on a phone and ate
-                  the top of the map. Short name there, full name from sm up. */}
-              <span className="sm:hidden">{entity?.name}</span>
-              <span className="hidden sm:inline">{qualifiedName(activeEntityId)}</span>
+              {isOpen ? (
+                "Open network"
+              ) : (
+                <>
+                  {/* The full ancestry wrapped onto two lines on a phone and ate
+                      the top of the map. Short name there, full name from sm up. */}
+                  <span className="sm:hidden">{entity?.name}</span>
+                  <span className="hidden sm:inline">{qualifiedName(activeEntityId)}</span>
+                </>
+              )}
             </span>
             <span className="hidden flex-none text-[11.5px] text-[var(--ink-soft)] sm:inline">
-              {onMap.length} on the map
+              {onMap.length.toLocaleString()} on the map
               {offMapCount > 0 ? ` · ${offMapCount} off it` : ""}
             </span>
-            {me.entityIds.length > 1 && <IconChevronDown size={14} className="flex-none text-[var(--ink-soft)]" />}
+            {!isOpen && me.entityIds.length > 1 && <IconChevronDown size={14} className="flex-none text-[var(--ink-soft)]" />}
           </button>
 
-          {switcherOpen && me.entityIds.length > 1 && (
+          {switcherOpen && !isOpen && me.entityIds.length > 1 && (
             <div className="card absolute left-1/2 top-[52px] w-64 -translate-x-1/2 p-1.5">
               {me.entityIds.map((id) => {
                 const e = entityById(id);
@@ -491,7 +536,7 @@ export default function CircleMap() {
                       setCityFilter(null);
                       setSwitcherOpen(false);
                     }}
-                    className="flex w-full items-center gap-2 rounded-xl p-2 text-left hover:bg-[var(--sunk)]"
+                    className="tap flex w-full items-center gap-2 rounded-xl p-2 text-left hover:bg-[var(--sunk)]"
                   >
                     <span className="text-[15px]">{e?.emoji}</span>
                     <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{qualifiedName(id)}</span>
@@ -502,6 +547,26 @@ export default function CircleMap() {
             </div>
           )}
         </div>
+
+        {/* With no membership narrowing the map, role is the first cut. */}
+        {isOpen && !view && (
+          <div
+            className="pointer-events-auto flex max-w-[calc(100vw-24px)] gap-1 overflow-x-auto rounded-2xl border border-[var(--line)] p-1"
+            style={{ background: "color-mix(in srgb, var(--card) 93%, transparent)", backdropFilter: "blur(12px)", boxShadow: "var(--shadow)", scrollbarWidth: "none" }}
+          >
+            {ROLE_GROUPS.map((r) => (
+              <button
+                key={r.id}
+                onClick={() => setRoleFilter(r.id)}
+                className="tap flex-none whitespace-nowrap rounded-xl px-2.5 py-1 text-[11.5px] font-semibold"
+                style={roleFilter === r.id ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)" } : { color: "var(--ink-soft)" }}
+                aria-pressed={roleFilter === r.id}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* The map is showing someone else's population — say so, or the count
@@ -607,7 +672,7 @@ export default function CircleMap() {
         >
           {view === "people" && (
             <PeopleList
-              members={matching}
+              members={isOpen && me ? [...matching].sort((a, b) => relevance(me, b) - relevance(me, a)) : matching}
               total={members.length}
               offMapCount={offMapCount}
               query={query}
@@ -627,6 +692,7 @@ export default function CircleMap() {
             <CircleFeed
               me={me}
               level={feedLevel}
+              openNetwork={isOpen}
               onLevel={setFeedLevel}
               onOpenMember={(id) => push(`member:${id}`)}
               onOpenCity={(id) => {
@@ -652,7 +718,12 @@ export default function CircleMap() {
 
           {view === "events" && <EventsList events={events} myCityId={me.cityId} onOpen={(id) => push(`event:${id}`)} onStart={() => push("meetup")} />}
 
-          {view === "chats" && <ChatsList members={members} communityName={entity?.name ?? "this community"} onOpen={(id) => push(`chat:${id}`)} />}
+          {view === "chats" && <ChatsList
+              members={members}
+              communityName={isOpen ? "the open network" : (entity?.name ?? "this community")}
+              connectedOnly={isOpen ? (id) => connectStateFor(id) === "connected" : undefined}
+              onOpen={(id) => push(`chat:${id}`)}
+            />}
 
           {view === "you" && (
             <CircleYouPanel
@@ -669,7 +740,7 @@ export default function CircleMap() {
                 open("people");
               }}
               onLeave={() => {
-                clearMe();
+                clearMe(variant);
                 setMeState(null);
               }}
             />
@@ -702,6 +773,9 @@ export default function CircleMap() {
                 <MemberProfile
                   m={m}
                   events={events}
+                  connectState={isOpen ? connectStateFor(m.id) : null}
+                  common={isOpen ? commonGround(me, m) : null}
+                  onConnect={() => update({ requestedIds: [...(me.requestedIds ?? []), m.id] })}
                   onMessage={() => push(`chat:${m.id}`)}
                   onOpenEvent={(id) => push(`event:${id}`)}
                   onOpenCity={(id) => {
@@ -804,6 +878,7 @@ function PeopleList({
   onQuery,
   onCity,
   onOpen,
+  commonFor,
 }: {
   members: CircleMember[];
   total: number;
@@ -814,6 +889,8 @@ function PeopleList({
   onQuery: (q: string) => void;
   onCity: (id: string | null) => void;
   onOpen: (id: string) => void;
+  /** Open network only: why each stranger might matter. */
+  commonFor?: (m: CircleMember) => string | null;
 }) {
   return (
     <div>
@@ -849,6 +926,11 @@ function PeopleList({
               <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">
                 {m.headline} · {m.company}
               </span>
+              {commonFor?.(m) && (
+                <span className="block truncate text-[11px] font-semibold" style={{ color: "var(--brand)" }}>
+                  {commonFor(m)}
+                </span>
+              )}
             </span>
             <span className="flex-none text-[var(--ink-soft)]" title={modeLine(m)}>
               {m.mode === "off" ? <IconHidden size={14} /> : m.mode === "live" ? <IconPin size={14} /> : <IconCity size={14} />}
@@ -955,16 +1037,20 @@ function EventsList({
 function ChatsList({
   members,
   communityName,
+  connectedOnly,
   onOpen,
 }: {
   members: CircleMember[];
   /** Threaded through so the preview and the opened thread say the same thing. */
   communityName: string;
+  /** Open network: only people who accepted you can be in here. */
+  connectedOnly?: (id: string) => boolean;
   onOpen: (id: string) => void;
 }) {
   // Threads you actually have, with the last thing said in them — a column of
   // bare names reads as a directory, not an inbox.
   const threads = members
+    .filter((m) => !connectedOnly || connectedOnly(m.id))
     .map((m) => ({ m, thread: seedThread(m, communityName) }))
     .filter((t) => t.thread.length > 0)
     .slice(0, 14);
@@ -972,7 +1058,9 @@ function ChatsList({
   return (
     <div>
       <p className="rounded-2xl p-3 text-[12px] leading-4 text-[var(--ink-soft)]" style={{ background: "var(--sunk)" }}>
-        Anyone in the community can message anyone else. No requests, no waiting — membership already did that work.
+        {connectedOnly
+          ? "Only people who accepted your request. Out here nothing has vouched for either of you, so a first message is asked for."
+          : "Anyone in the community can message anyone else. No requests, no waiting — membership already did that work."}
       </p>
 
       <div className="stagger mt-3 flex flex-col gap-0.5">

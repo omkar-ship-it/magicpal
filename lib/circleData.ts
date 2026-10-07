@@ -44,6 +44,19 @@ export const rnd = (key: string): number => mix32(hashSeed(key));
  *  base — your city, and only your city: you sit in the city's bubble
  *  live — your actual position, as a pin of your own
  */
+/**
+ * The sentinel for "everyone", used by the open experience at /open.
+ *
+ * There, membership isn't the boundary — it's a filter. `membersOf` answers
+ * with the whole roster for this id, and the UI leans on role, city and what
+ * people can help with to make a map of strangers navigable instead.
+ *
+ * Declared up here because `membersOf` reads it and runs during module
+ * initialisation, when anything declared further down is still in its
+ * temporal dead zone.
+ */
+export const OPEN_ID = "__open";
+
 export type LocationMode = "off" | "base" | "live";
 
 export const LOCATION_MODES: Array<{ id: LocationMode; label: string; detail: string }> = [
@@ -400,6 +413,7 @@ const BY_ENTITY = (() => {
 
 /** Everyone in a community, counting the roll-up: ISB includes every ISB class. */
 export function membersOf(entityId: string): CircleMember[] {
+  if (entityId === OPEN_ID) return CIRCLE_MEMBERS;
   return BY_ENTITY.get(entityId) ?? [];
 }
 
@@ -954,3 +968,52 @@ export function everythingFeed(entityIds: string[]): CirclePost[] {
 export function postableNodes(entityIds: string[]): string[] {
   return entityIds;
 }
+
+// ───────────────────────────────────────────────── the open network
+
+/** Coarse buckets over free-text headlines, so a map of 1,800 can be narrowed fast. */
+export const ROLE_GROUPS: Array<{ id: string; label: string; match: (m: CircleMember) => boolean }> = [
+  { id: "all", label: "Everyone", match: () => true },
+  { id: "founder", label: "Founders", match: (m) => /founder|ceo|chief of staff/i.test(m.headline) },
+  { id: "investor", label: "Investors", match: (m) => /partner|principal|fund/i.test(m.headline) },
+  { id: "product", label: "Product", match: (m) => /product|design/i.test(m.headline) },
+  { id: "eng", label: "Engineering", match: (m) => /engineer|data|staff|vp eng/i.test(m.headline) },
+  { id: "ops", label: "Ops & growth", match: (m) => /growth|talent|gm|operating/i.test(m.headline) },
+];
+
+
+/**
+ * Why a stranger might matter to you.
+ *
+ * In the closed network the answer is always "you're in the same class". Out
+ * here nothing is given, so it has to be computed — a shared community, the
+ * same city, or something they've offered to help with that you said you
+ * wanted. Without this the open map is just a lot of faces.
+ */
+export function commonGround(
+  me: { cityId: string; entityIds: string[]; interests?: string[]; headline?: string },
+  m: CircleMember
+): string | null {
+  // Strongest first: something you said you wanted beats a shared postcode.
+  const wanted = m.helpWith.find((h) => (me.interests ?? []).includes(h));
+  if (wanted) return `Can help with ${wanted}`;
+  const shared = m.entityIds.find((id) => me.entityIds.includes(id));
+  if (shared) return `Also in ${entityById(shared)?.name ?? "a community you're in"}`;
+  if (m.cityId === me.cityId) return `Also in ${cityById(m.cityId)?.name}`;
+  const mine = ROLE_GROUPS.find((r) => r.id !== "all" && me.headline && r.match({ headline: me.headline } as CircleMember));
+  if (mine && mine.match(m)) return `Also in ${mine.label.toLowerCase()}`;
+  return null;
+}
+
+/** How relevant a stranger is, for ordering a list of 1,800 of them. */
+export function relevance(me: { cityId: string; entityIds: string[]; interests?: string[]; headline?: string }, m: CircleMember): number {
+  let score = 0;
+  if (m.helpWith.some((h) => (me.interests ?? []).includes(h))) score += 4;
+  if (m.entityIds.some((id) => me.entityIds.includes(id))) score += 3;
+  if (m.cityId === me.cityId) score += 2;
+  if (m.lookingFor) score += 1;
+  return score;
+}
+
+/** Everything someone could put on their "here for" list — the open network's only onboarding question. */
+export const OPEN_INTERESTS = HELP_WITH;

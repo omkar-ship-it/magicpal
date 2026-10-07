@@ -3,7 +3,7 @@
 import { entityById } from "@/lib/networks";
 import { attendeesOf, cityById, postsAt, qualifiedName, type CircleEvent, type CircleMember } from "@/lib/circleData";
 import Avatar from "./Avatar";
-import { IconAsk, IconBriefcase, IconCalendar, IconCity, IconChat, IconHidden, IconPin, IconSparkle } from "./Icons";
+import { IconAsk, IconBriefcase, IconCalendar, IconCity, IconChat, IconHidden, IconPlus, IconPin, IconSparkle } from "./Icons";
 
 function ago(minutes: number): string {
   if (minutes < 60) return `${Math.max(1, Math.round(minutes))}m`;
@@ -26,17 +26,26 @@ function ago(minutes: number): string {
 export default function MemberProfile({
   m,
   events,
+  /** null in a closed community, where membership has already done this work. */
+  connectState,
+  common,
   onMessage,
+  onConnect,
   onOpenEvent,
   onOpenCity,
 }: {
   m: CircleMember;
   events: CircleEvent[];
+  connectState?: "none" | "requested" | "connected" | null;
+  /** Why this stranger might matter — only computed in the open network. */
+  common?: string | null;
   onMessage: () => void;
+  onConnect?: () => void;
   onOpenEvent: (id: string) => void;
   onOpenCity: (cityId: string) => void;
 }) {
   const city = cityById(m.cityId);
+  const sharesACommunity = connectState == null;
   const communities = m.entityIds.map((id) => entityById(id)).filter(Boolean);
   const theirPosts = m.entityIds
     .flatMap((id) => postsAt(id))
@@ -71,14 +80,48 @@ export default function MemberProfile({
         </div>
       </div>
 
-      {/* No connection request: you're both vetted members of the same
-          community, which is the entire point of a closed network. */}
-      <button onClick={onMessage} className="btn btn-primary btn-sm mt-3 flex w-full items-center justify-center gap-1.5">
-        <IconChat size={15} /> Message {m.name.split(" ")[0]}
-      </button>
-      <p className="mt-1.5 text-center text-[11px] text-[var(--ink-soft)]">
-        No request needed — you&rsquo;re both in {communities[0]?.name ?? "this community"}.
-      </p>
+      {common && (
+        <p
+          className="mt-3 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
+          style={{ background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" }}
+        >
+          {common}
+        </p>
+      )}
+
+      {/* In a closed community, membership already vouched for you both, so
+          there is nothing to request. In the open network nothing has, so the
+          first message is asked for rather than sent. */}
+      {connectState == null || connectState === "connected" ? (
+        <>
+          <button onClick={onMessage} className="btn btn-primary btn-sm mt-3 flex w-full items-center justify-center gap-1.5">
+            <IconChat size={15} /> Message {m.name.split(" ")[0]}
+          </button>
+          <p className="mt-1.5 text-center text-[11px] text-[var(--ink-soft)]">
+            {connectState === "connected"
+              ? `You and ${m.name.split(" ")[0]} are connected.`
+              : `No request needed — you're both in ${communities[0]?.name ?? "this community"}.`}
+          </p>
+        </>
+      ) : connectState === "requested" ? (
+        <>
+          <button disabled className="btn btn-ghost btn-sm mt-3 w-full">
+            Request sent
+          </button>
+          <p className="mt-1.5 text-center text-[11px] text-[var(--ink-soft)]">
+            You&rsquo;ll be able to message once {m.name.split(" ")[0]} accepts.
+          </p>
+        </>
+      ) : (
+        <>
+          <button onClick={onConnect} className="btn btn-primary btn-sm mt-3 flex w-full items-center justify-center gap-1.5">
+            <IconPlus size={15} /> Ask to connect
+          </button>
+          <p className="mt-1.5 text-center text-[11px] text-[var(--ink-soft)]">
+            Nobody has vouched for either of you here, so a first message is asked for rather than sent.
+          </p>
+        </>
+      )}
 
       {m.lookingFor && (
         <div
@@ -129,7 +172,9 @@ export default function MemberProfile({
       </div>
 
       <div className="mt-5">
-        <p className="label">In common</p>
+        {/* Only call it shared when it is — in the open network these are
+            simply the communities they belong to, and you're in none of them. */}
+        <p className="label">{sharesACommunity ? "In common" : "Part of"}</p>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           {communities.map((e) => (
             <span
