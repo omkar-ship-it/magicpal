@@ -8,6 +8,10 @@ import type { LocationMode } from "./circleData";
 export type CircleMe = {
   name: string;
   headline: string;
+  /** An uploaded photo, already downscaled to a data URL. Null = use the character. */
+  photoUrl?: string | null;
+  /** Which generated character set to draw you with when there's no photo. */
+  avatarStyle?: string;
   cityId: string;
   mode: LocationMode;
   /** Communities you've joined, in the order you joined them. */

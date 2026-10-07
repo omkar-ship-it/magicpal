@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { avatarUrl } from "@/lib/avatar";
 import { entityById } from "@/lib/networks";
 import { CIRCLE_CITIES, cityById, inviteFor, membersOf, qualifiedName, type LocationMode } from "@/lib/circleData";
 import type { CircleMe } from "@/lib/circleMe";
 import LocationModePicker from "./LocationModePicker";
+import AvatarPicker from "./AvatarPicker";
 import { IconBeacon, IconCopy, IconCheck } from "./Icons";
 
 /**
@@ -21,6 +21,7 @@ export default function CircleYouPanel({
   beaconEventName,
   onMode,
   onCity,
+  onAvatar,
   onStopBeacon,
   onOpenCommunity,
   onLeave,
@@ -30,6 +31,7 @@ export default function CircleYouPanel({
   beaconEventName: string | null;
   onMode: (m: LocationMode) => void;
   onCity: (id: string) => void;
+  onAvatar: (next: { photoUrl: string | null; style: string }) => void;
   onStopBeacon: () => void;
   onOpenCommunity: (id: string) => void;
   onLeave: () => void;
@@ -50,17 +52,15 @@ export default function CircleYouPanel({
 
   return (
     <div>
-      <div className="flex items-center gap-3">
-        <span className="avatar h-14 w-14 flex-none text-[15px]">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={avatarUrl(me.name)} alt="" />
-        </span>
-        <div className="min-w-0">
-          <h2 className="truncate text-[19px] font-bold leading-tight">{me.name}</h2>
-          <p className="text-[12.5px] text-[var(--ink-soft)]">
-            {me.mode === "off" ? "Off the map" : `${city?.name}, ${city?.country}`}
-          </p>
-        </div>
+      <div>
+        <h2 className="truncate text-[19px] font-bold leading-tight">{me.name}</h2>
+        <p className="text-[12.5px] text-[var(--ink-soft)]">
+          {me.mode === "off" ? "Off the map" : `${city?.name}, ${city?.country}`}
+        </p>
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-[var(--line)] p-3">
+        <AvatarPicker name={me.name} photoUrl={me.photoUrl ?? null} style={me.avatarStyle ?? "notionists"} onChange={onAvatar} />
       </div>
 
       {beaconEventName && (

@@ -1,6 +1,6 @@
 "use client";
 
-import { avatarUrl } from "@/lib/avatar";
+import Avatar from "./Avatar";
 import { entityById } from "@/lib/networks";
 import { attendeesOf, beaconsAt, cityById, memberById, type CircleEvent, type CircleMember } from "@/lib/circleData";
 import { IconBeacon, IconCalendar, IconCheck, IconGlobe, IconPin } from "./Icons";
@@ -148,10 +148,7 @@ export default function CircleEventPanel({
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {here.slice(0, 18).map((m) => (
                   <button key={m.id} onClick={() => onOpenMember(m.id)} title={`${m.name} — ${m.headline}`} className="relative">
-                    <span className="avatar h-9 w-9 text-[11px]">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={avatarUrl(m.name)} alt={m.name} />
-                    </span>
+                    <Avatar name={m.name} size={36} />
                     <span className="beacon-dot absolute -bottom-0.5 -right-0.5" />
                   </button>
                 ))}
@@ -174,10 +171,7 @@ export default function CircleEventPanel({
         <div className="mt-2 flex flex-col gap-1">
           {(imGoing || hostedByMe) && (
             <div className="flex items-center gap-2.5 rounded-2xl p-2" style={{ background: "var(--sunk)" }}>
-              <span className="avatar h-9 w-9 flex-none text-[11px]">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={avatarUrl(meName)} alt="" />
-              </span>
+              <Avatar name={meName} size={36} />
               <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{meName}</span>
               <span className="flex-none text-[11px] text-[var(--ink-soft)]">{hostedByMe ? "host" : "you"}</span>
             </div>
@@ -195,10 +189,7 @@ function MemberRow({ m, beaconing, onClick }: { m: CircleMember; beaconing: bool
   const city = cityById(m.cityId);
   return (
     <button onClick={onClick} className="flex w-full items-center gap-2.5 rounded-2xl p-2 text-left transition-colors hover:bg-[var(--sunk)]">
-      <span className="avatar h-9 w-9 flex-none text-[11px]">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={avatarUrl(m.name)} alt="" />
-      </span>
+      <Avatar name={m.name} size={36} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[12.5px] font-semibold leading-tight">{m.name}</span>
         <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">

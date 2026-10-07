@@ -2,8 +2,8 @@
 
 import { avatarUrl } from "@/lib/avatar";
 import { useState } from "react";
-import { cityById, memberById, type CircleEvent, type TravelPing } from "@/lib/circleData";
-import { IconBeacon, IconCalendar, IconChat, IconChevronDown, IconGlobe, IconPlane, IconX } from "./Icons";
+import type { CircleEvent } from "@/lib/circleData";
+import { IconBeacon, IconCalendar, IconChat, IconChevronDown, IconX } from "./Icons";
 import type { CircleMe } from "@/lib/circleMe";
 
 export type DigestLine = {
@@ -29,26 +29,20 @@ export type DigestLine = {
  */
 export default function CircleDigest({
   me,
-  pings,
   events,
   newPostCount,
-  onCity,
-  onPing,
   onEvent,
   onFeed,
   onDismiss,
 }: {
   me: CircleMe;
-  pings: TravelPing[];
   events: CircleEvent[];
   newPostCount: number;
-  onCity: (id: string) => void;
-  onPing: (p: TravelPing) => void;
   onEvent: (id: string) => void;
   onFeed: () => void;
   onDismiss: () => void;
 }) {
-  const lines = buildDigest(me, pings, events, newPostCount, { city: onCity, ping: onPing, event: onEvent, feed: onFeed });
+  const lines = buildDigest(me, events, newPostCount, { event: onEvent, feed: onFeed });
   // A phone screen is mostly map; four stacked rows covered all of it. There
   // it opens as one line you can tap to expand, and only the top item shows.
   const [open, setOpen] = useState(false);
@@ -139,25 +133,11 @@ function Glyph({ line }: { line: DigestLine }) {
  */
 function buildDigest(
   me: CircleMe,
-  pings: TravelPing[],
   events: CircleEvent[],
   newPostCount: number,
-  go: { city: (id: string) => void; ping: (p: TravelPing) => void; event: (id: string) => void; feed: () => void }
+  go: { event: (id: string) => void; feed: () => void }
 ): DigestLine[] {
   const out: DigestLine[] = [];
-
-  const toMyCity = pings.filter((p) => p.cityId === me.cityId && p.daysAway <= 7);
-  if (toMyCity.length > 0) {
-    const names = toMyCity.map((p) => memberById(p.memberId)?.name ?? "").filter(Boolean);
-    out.push({
-      id: "incoming",
-      icon: <IconPlane size={16} />,
-      headline: `${toMyCity.length} ${toMyCity.length === 1 ? "person is" : "people are"} in ${cityById(me.cityId)?.name} this week`,
-      detail: names.slice(0, 2).join(", ") + (names.length > 2 ? ` and ${names.length - 2} more` : ""),
-      faces: names,
-      onClick: () => go.ping(toMyCity[0]),
-    });
-  }
 
   const live = events.find((e) => e.liveNow);
   if (live) {
@@ -179,18 +159,6 @@ function buildDigest(
       headline: `${nearby.length} meetup${nearby.length === 1 ? "" : "s"} in your city`,
       detail: `${nearby[0].name} · ${nearby[0].dateLabel}`,
       onClick: () => go.event(nearby[0].id),
-    });
-  }
-
-  const soon = pings.filter((p) => p.daysAway > 0 && p.daysAway <= 10 && p.cityId !== me.cityId);
-  if (soon.length > 0) {
-    const cities = new Set(soon.map((p) => p.cityId));
-    out.push({
-      id: "moving",
-      icon: <IconGlobe size={16} />,
-      headline: `${soon.length} travelling across ${cities.size} ${cities.size === 1 ? "city" : "cities"}`,
-      detail: "Worth a look before you book your own trip",
-      onClick: go.feed,
     });
   }
 

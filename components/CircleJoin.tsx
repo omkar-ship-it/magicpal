@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { avatarUrl } from "@/lib/avatar";
+import Avatar from "./Avatar";
 import { entityById } from "@/lib/networks";
 import {
   CIRCLE_CITIES,
@@ -116,10 +116,7 @@ export default function CircleJoin({ invite }: { invite: CircleInvite }) {
             </p>
 
             <div className="mt-4 flex items-start gap-2.5 rounded-2xl p-3" style={{ background: "var(--sunk)" }}>
-              <span className="avatar h-9 w-9 flex-none text-[11px]">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={avatarUrl(invite.adminName)} alt="" />
-              </span>
+              <Avatar name={invite.adminName} size={36} />
               <div className="min-w-0">
                 <p className="text-[12.5px] font-semibold leading-tight">
                   {invite.adminName} <span className="font-normal text-[var(--ink-soft)]">invited you</span>

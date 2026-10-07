@@ -5,11 +5,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MapGL, { Marker, Popup, NavigationControl } from "react-map-gl/mapbox";
 import type { MapRef } from "react-map-gl/mapbox";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { avatarUrl } from "@/lib/avatar";
+import Avatar from "./Avatar";
+import MemberHoverCard from "./MemberHoverCard";
 import { entityById } from "@/lib/networks";
 import {
   ALL_CIRCLE_EVENTS,
-  activePings,
   attendeesOf,
   beaconPoint,
   beaconsAt,
@@ -22,7 +22,6 @@ import {
   CIRCLE_POSTS,
   rnd,
   type CircleEvent,
-  type TravelPing,
   type CircleMember,
   type LocationMode,
 } from "@/lib/circleData";
@@ -47,7 +46,6 @@ import {
   IconLock,
   IconPeople,
   IconPin,
-  IconPlane,
   IconPlus,
 } from "./Icons";
 
@@ -119,8 +117,6 @@ export default function CircleMap() {
   const [feedLevel, setFeedLevel] = useState<string>(EVERYTHING);
   /** Meetups you call this session, on top of the seeded ones. */
   const [myEvents, setMyEvents] = useState<CircleEvent[]>([]);
-  /** A travel ping opened from the feed or the digest — flies the map to its city. */
-  const [openPing, setOpenPing] = useState<TravelPing | null>(null);
   const [digestOff, setDigestOff] = useState(false);
   /** The first fit has to wait for the style to load or it silently does nothing. */
   const [mapReady, setMapReady] = useState(false);
@@ -193,8 +189,6 @@ export default function CircleMap() {
       .sort((a, b) => Number(b.liveNow) - Number(a.liveNow) || a.daysAway - b.daysAway);
   }, [me, activeEntityId, myEvents]);
 
-  /** Live travel pings in this community — the map's only time-boxed layer. */
-  const pings = useMemo(() => activePings(activeEntityId), [activeEntityId]);
   // Resolve against the live list, not just the seeded one — a meetup you
   // called this session exists only in state, and opening it must still work.
   const findEvent = (id: string) => events.find((e) => e.id === id) ?? eventById(id) ?? null;
@@ -328,7 +322,7 @@ export default function CircleMap() {
                     setCityFilter(g.city.id);
                     open("people");
                   }}
-                  className="grid place-items-center rounded-full font-bold text-white transition-transform hover:scale-110"
+                  className="map-pin grid place-items-center rounded-full font-bold text-white"
                   style={{
                     width: size,
                     height: size,
@@ -357,18 +351,20 @@ export default function CircleMap() {
             if (!pt) return null;
             return (
               <Marker key={m.id} longitude={pt[0]} latitude={pt[1]} anchor="center">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPinned(m.id);
-                  }}
-                  className="block h-6 w-6 rounded-full"
-                  style={{ padding: 0, border: "2px solid var(--card)", boxShadow: "var(--shadow)", overflow: "hidden" }}
-                  title={m.name}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={avatarUrl(m.name)} alt="" className="h-full w-full object-cover" />
-                </button>
+                <span className="hover-host relative block">
+                  <MemberHoverCard m={m} />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPinned(m.id);
+                    }}
+                    className="map-pin block rounded-full"
+                    style={{ padding: 0, boxShadow: "var(--shadow)" }}
+                    aria-label={m.name}
+                  >
+                    <Avatar name={m.name} size={26} ring={2} />
+                  </button>
+                </span>
               </Marker>
             );
           })}
@@ -380,18 +376,20 @@ export default function CircleMap() {
             if (!pt) return null;
             return (
               <Marker key={m.id} longitude={pt[0]} latitude={pt[1]} anchor="center">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPinned(m.id);
-                  }}
-                  className="beacon-ring block h-8 w-8 rounded-full"
-                  style={{ padding: 0, border: "2px solid var(--card)", overflow: "hidden" }}
-                  title={`${m.name} — here now`}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={avatarUrl(m.name)} alt="" className="h-full w-full object-cover" />
-                </button>
+                <span className="hover-host relative block">
+                  <MemberHoverCard m={m} />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPinned(m.id);
+                    }}
+                    className="beacon-ring map-pin block rounded-full"
+                    style={{ padding: 0 }}
+                    aria-label={`${m.name} — here now`}
+                  >
+                    <Avatar name={m.name} size={32} ring={2} />
+                  </button>
+                </span>
               </Marker>
             );
           })}
@@ -408,7 +406,7 @@ export default function CircleMap() {
                     ev.stopPropagation();
                     push(`event:${e.id}`);
                   }}
-                  className={`grid h-7 w-7 place-items-center rounded-xl${e.liveNow ? " beacon-ring" : ""}`}
+                  className={`map-pin grid h-7 w-7 place-items-center rounded-xl${e.liveNow ? " beacon-ring" : ""}`}
                   style={{
                     background: "var(--card)",
                     color: e.kind === "meetup" ? "var(--ink)" : "var(--brand)",
@@ -421,32 +419,6 @@ export default function CircleMap() {
                 </button>
               </Marker>
             ))}
-
-        {/* Travel pings: someone who will be somewhere, soon. Time-boxed, and
-            pinned to where they're going rather than where they live. */}
-        {!venueEvent &&
-          pings.slice(0, 40).map((p) => {
-            const c = cityById(p.cityId);
-            const m = memberById(p.memberId);
-            if (!c || !m) return null;
-            // Offset so a ping never sits exactly under its city's bubble.
-            const off = (rnd(`pingoff-${p.id}`) % 60) / 1000 + 0.06;
-            return (
-              <Marker key={p.id} longitude={c.lng + off} latitude={c.lat + off * 0.6} anchor="center">
-                <button
-                  onClick={(ev) => {
-                    ev.stopPropagation();
-                    setOpenPing(p);
-                  }}
-                  className="grid h-7 w-7 place-items-center rounded-full"
-                  style={{ background: "var(--card)", color: "var(--brand)", border: "2px dashed var(--brand)", boxShadow: "var(--shadow)" }}
-                  title={`${m.name} in ${c.name} · ${p.datesLabel}`}
-                >
-                  <IconPlane size={13} />
-                </button>
-              </Marker>
-            );
-          })}
 
         {/* You. */}
         {me.beaconEventId && beaconEvent?.lat != null && beaconEvent?.lng != null && venueEvent?.id === beaconEvent.id ? (
@@ -470,47 +442,6 @@ export default function CircleMap() {
           )
         )}
 
-        {openPing &&
-          (() => {
-            const c = cityById(openPing.cityId);
-            const m = memberById(openPing.memberId);
-            if (!c || !m) return null;
-            const off = (rnd(`pingoff-${openPing.id}`) % 60) / 1000 + 0.06;
-            return (
-              <Popup
-                longitude={c.lng + off}
-                latitude={c.lat + off * 0.6}
-                anchor="top"
-                offset={18}
-                closeButton={false}
-                closeOnClick={false}
-                maxWidth="300px"
-                onClose={() => setOpenPing(null)}
-              >
-                <div className="w-[256px]">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--brand)" }}>
-                    Passing through
-                  </p>
-                  <p className="mt-1 text-[13px] font-semibold leading-tight">
-                    {m.name} in {c.name}
-                  </p>
-                  <p className="text-[11.5px] text-[var(--ink-soft)]">
-                    {openPing.datesLabel} · {openPing.daysAway <= 0 ? "here now" : `in ${openPing.daysAway} days`}
-                  </p>
-                  <p className="mt-1.5 text-[12.5px] leading-4">&ldquo;{openPing.note}&rdquo;</p>
-                  <div className="mt-2 flex gap-1.5">
-                    <button onClick={() => push(`chat:${m.id}`)} className="btn btn-primary btn-sm flex-1">
-                      Message
-                    </button>
-                    <button onClick={() => push("meetup")} className="btn btn-ghost btn-sm flex-1" title="Turn this into a meetup">
-                      Meet up
-                    </button>
-                  </div>
-                </div>
-              </Popup>
-            );
-          })()}
-
         {pinned &&
           (() => {
             const m = memberById(pinned);
@@ -526,7 +457,7 @@ export default function CircleMap() {
       </MapGL>
 
       {/* ── top: which community you're looking at ── */}
-      <div className="pointer-events-none fixed inset-x-0 top-3 z-[1200] flex justify-center px-3 sm:top-5">
+      <div className="float-in pointer-events-none fixed inset-x-0 top-3 z-[1200] flex justify-center px-3 sm:top-5">
         <div className="pointer-events-auto relative">
           <button
             onClick={() => setSwitcherOpen((v) => !v)}
@@ -603,10 +534,10 @@ export default function CircleMap() {
       )}
 
       {/* ── bottom bar ── */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-3 z-[1350] flex justify-center px-3 sm:bottom-4">
+      <div className="float-in pointer-events-none fixed inset-x-0 bottom-3 z-[1350] flex justify-center px-3 sm:bottom-4">
         <div
           className="pointer-events-auto flex w-full max-w-[560px] items-center gap-0.5 rounded-3xl border border-[var(--line)] p-1.5 sm:w-auto sm:gap-1"
-          style={{ background: "color-mix(in srgb, var(--card) 94%, transparent)", backdropFilter: "blur(14px)", boxShadow: "var(--shadow-lift)" }}
+          style={{ background: "color-mix(in srgb, var(--card) 99%, transparent)", backdropFilter: "blur(16px)", boxShadow: "var(--shadow-lift)" }}
         >
           <BarButton icon={<IconFeed />} label="Feed" on={view === "feed"} onClick={() => open("feed")} />
           <BarButton icon={<IconPeople />} label="People" count={members.length} on={view === "people"} onClick={() => open("people")} />
@@ -621,10 +552,7 @@ export default function CircleMap() {
             aria-label="You — location and communities"
           >
             <span className="relative">
-              <span className="avatar h-8 w-8 text-[11px]">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={avatarUrl(me.name)} alt="" />
-              </span>
+              <Avatar name={me.name} photoUrl={me.photoUrl} style={me.avatarStyle} size={32} />
               {/* The label doesn't fit on a phone, so the state rides the
                   avatar as a badge instead of disappearing. */}
               <span
@@ -655,14 +583,8 @@ export default function CircleMap() {
       {!view && !digestOff && !venueEvent && !welcoming && (
         <CircleDigest
           me={me}
-          pings={pings}
           events={events}
           newPostCount={CIRCLE_POSTS.filter((p) => p.minutesAgo < 2880).length}
-          onCity={flyToCity}
-          onPing={(p) => {
-            setOpenPing(p);
-            flyToCity(p.cityId);
-          }}
           onEvent={(id) => push(`event:${id}`)}
           onFeed={() => open("feed")}
           onDismiss={() => setDigestOff(true)}
@@ -704,16 +626,11 @@ export default function CircleMap() {
             <CircleFeed
               me={me}
               level={feedLevel}
-              pings={pings}
               onLevel={setFeedLevel}
               onOpenMember={(id) => push(`member:${id}`)}
               onOpenCity={(id) => {
                 setCityFilter(null);
                 flyToCity(id);
-              }}
-              onOpenPing={(p) => {
-                setOpenPing(p);
-                flyToCity(p.cityId);
               }}
               onCompose={() => {}}
               onStartMeetup={() => push("meetup")}
@@ -734,7 +651,7 @@ export default function CircleMap() {
 
           {view === "events" && <EventsList events={events} myCityId={me.cityId} onOpen={(id) => push(`event:${id}`)} onStart={() => push("meetup")} />}
 
-          {view === "chats" && <ChatsList members={members} pings={pings} communityName={entity?.name ?? "this community"} onOpen={(id) => push(`chat:${id}`)} />}
+          {view === "chats" && <ChatsList members={members} communityName={entity?.name ?? "this community"} onOpen={(id) => push(`chat:${id}`)} />}
 
           {view === "you" && (
             <CircleYouPanel
@@ -742,6 +659,7 @@ export default function CircleMap() {
               beaconEventName={beaconEvent?.name ?? null}
               onMode={(m: LocationMode) => update({ mode: m })}
               onCity={(id) => update({ cityId: id })}
+              onAvatar={(next) => update({ photoUrl: next.photoUrl, avatarStyle: next.style })}
               onStopBeacon={() => update({ beaconEventId: null })}
               onOpenCommunity={(id) => {
                 setActiveEntityId(id);
@@ -789,7 +707,7 @@ export default function CircleMap() {
                 <ChatWindow
                   key={m.id}
                   name={m.name}
-                  photoUrl={avatarUrl(m.name)}
+                  photoUrl={null}
                   headline={`${m.headline} · ${m.company}`}
                   wide={panelSize !== "side"}
                   initialMessages={seedThread(m, entity?.name ?? "the community")}
@@ -846,10 +764,7 @@ function MemberCard({ m, onMessage, onOpen }: { m: CircleMember; onMessage: () =
   return (
     <div className="w-[240px]">
       <button onClick={onOpen} className="flex w-full items-center gap-2.5 text-left">
-        <span className="avatar h-10 w-10 flex-none text-[12px]">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={avatarUrl(m.name)} alt="" />
-        </span>
+        <Avatar name={m.name} size={40} />
         <span className="min-w-0">
           <span className="block truncate text-[13px] font-semibold leading-tight">{m.name}</span>
           <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">
@@ -870,10 +785,7 @@ function MemberPanel({ m, onMessage }: { m: CircleMember; onMessage: () => void 
   return (
     <div>
       <div className="flex items-start gap-3">
-        <span className="avatar h-14 w-14 flex-none text-[15px]">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={avatarUrl(m.name)} alt="" />
-        </span>
+        <Avatar name={m.name} size={56} />
         <div className="min-w-0 flex-1">
           <h2 className="text-[18px] font-bold leading-tight">{m.name}</h2>
           <p className="mt-0.5 text-[12.5px] text-[var(--ink-soft)]">
@@ -933,23 +845,13 @@ function PeopleList({
         className="w-full rounded-xl border border-[var(--line)] bg-transparent px-3 py-2 text-[12.5px] outline-none focus:border-[var(--brand)]"
       />
 
-      <div className="mt-2 flex flex-wrap gap-1">
-        <button
-          onClick={() => onCity(null)}
-          className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
-          style={cityFilter === null ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)" } : { color: "var(--ink-soft)" }}
-        >
-          Everywhere
-        </button>
-        {cityGroups.slice(0, 10).map((g) => (
-          <button
-            key={g.city.id}
-            onClick={() => onCity(g.city.id)}
-            className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
-            style={cityFilter === g.city.id ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)" } : { color: "var(--ink-soft)" }}
-          >
-            {g.city.name} <span className="opacity-60">{g.members.length}</span>
-          </button>
+      {/* One scrolling row rather than a wrapped block: on a phone these
+          chips were taking four rows and pushing every actual person below
+          the fold. */}
+      <div className="-mx-1 mt-2 flex gap-1 overflow-x-auto px-1 pb-1" style={{ scrollbarWidth: "none" }}>
+        <CityChip label="Everywhere" on={cityFilter === null} onClick={() => onCity(null)} />
+        {cityGroups.slice(0, 12).map((g) => (
+          <CityChip key={g.city.id} label={g.city.name} count={g.members.length} on={cityFilter === g.city.id} onClick={() => onCity(g.city.id)} />
         ))}
       </div>
 
@@ -959,13 +861,10 @@ function PeopleList({
         </p>
       )}
 
-      <div className="mt-3 flex flex-col gap-1">
+      <div className="stagger mt-3 flex flex-col gap-1">
         {members.slice(0, 120).map((m) => (
-          <button key={m.id} onClick={() => onOpen(m.id)} className="flex w-full items-center gap-2.5 rounded-2xl p-2 text-left hover:bg-[var(--sunk)]">
-            <span className="avatar h-9 w-9 flex-none text-[11px]">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={avatarUrl(m.name)} alt="" />
-            </span>
+          <button key={m.id} onClick={() => onOpen(m.id)} className="tap flex w-full items-center gap-2.5 rounded-2xl p-2 text-left hover:bg-[var(--sunk)]">
+            <Avatar name={m.name} size={36} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[12.5px] font-semibold leading-tight">{m.name}</span>
               <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">
@@ -979,6 +878,24 @@ function PeopleList({
         ))}
       </div>
     </div>
+  );
+}
+
+function CityChip({ label, count, on, onClick }: { label: string; count?: number; on: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="tap flex-none whitespace-nowrap rounded-full px-2.5 py-1.5 text-[11.5px] font-semibold"
+      style={
+        on
+          ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)" }
+          : { background: "var(--sunk)", color: "var(--ink-soft)" }
+      }
+      aria-pressed={on}
+    >
+      {label}
+      {count != null ? <span className="ml-1 opacity-60">{count}</span> : null}
+    </button>
   );
 }
 
@@ -1024,7 +941,7 @@ function EventsList({
               {group.list.map((e) => {
                 const beacons = beaconsAt(e).length;
                 return (
-                  <button key={e.id} onClick={() => onOpen(e.id)} className="card p-3 text-left transition-colors hover:border-[var(--brand)]">
+                  <button key={e.id} onClick={() => onOpen(e.id)} className="tap card p-3 text-left hover:border-[var(--brand)]">
                     {e.liveNow && (
                       <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: "var(--brand)" }}>
                         <span className="beacon-dot" /> Happening now · {beacons} here
@@ -1058,12 +975,10 @@ function EventsList({
 
 function ChatsList({
   members,
-  pings,
   communityName,
   onOpen,
 }: {
   members: CircleMember[];
-  pings: TravelPing[];
   /** Threaded through so the preview and the opened thread say the same thing. */
   communityName: string;
   onOpen: (id: string) => void;
@@ -1074,7 +989,6 @@ function ChatsList({
     .map((m) => ({ m, thread: seedThread(m, communityName) }))
     .filter((t) => t.thread.length > 0)
     .slice(0, 14);
-  const travellingNow = new Set(pings.filter((p) => p.daysAway <= 0).map((p) => p.memberId));
 
   return (
     <div>
@@ -1082,29 +996,17 @@ function ChatsList({
         Anyone in the community can message anyone else. No requests, no waiting — membership already did that work.
       </p>
 
-      <div className="mt-3 flex flex-col gap-0.5">
+      <div className="stagger mt-3 flex flex-col gap-0.5">
         {threads.map(({ m, thread }) => {
           const last = thread[thread.length - 1];
           return (
             <button
               key={m.id}
               onClick={() => onOpen(m.id)}
-              className="flex w-full items-start gap-2.5 rounded-2xl p-2.5 text-left transition-colors hover:bg-[var(--sunk)]"
+              className="tap flex w-full items-start gap-2.5 rounded-2xl p-2.5 text-left hover:bg-[var(--sunk)]"
             >
               <span className="relative flex-none">
-                <span className="avatar h-10 w-10 text-[12px]">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={avatarUrl(m.name)} alt="" />
-                </span>
-                {travellingNow.has(m.id) && (
-                  <span
-                    className="absolute -bottom-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full"
-                    style={{ background: "var(--brand)", color: "#fff", boxShadow: "0 0 0 2px var(--card)" }}
-                    title="Travelling right now"
-                  >
-                    <IconPlane size={9} />
-                  </span>
-                )}
+                <Avatar name={m.name} size={40} />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline gap-2">

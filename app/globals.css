@@ -389,6 +389,17 @@ h1, h2, h3 {
   background: var(--sunk);
   color: var(--ink);
 }
+/* Tailwind's `hidden` can't suppress a .win-btn: this file is unlayered, so
+   its `display: grid` outranks the layered utility. Controls that only make
+   sense beside a map — not under a bottom sheet — opt out through here. */
+.win-btn-wide {
+  display: none;
+}
+@media (min-width: 640px) {
+  .win-btn-wide {
+    display: grid;
+  }
+}
 
 .sidebar-collapse-toggle {
   display: grid;
@@ -454,5 +465,117 @@ h1, h2, h3 {
   [style*="welcome-in"],
   [style*="welcome-out"] {
     animation-duration: 1ms !important;
+  }
+}
+
+/* ------------------------------------- micro-interactions (members-only)
+
+   The brief here is "premium", which in practice means nothing moves without
+   a reason and nothing moves for long. Durations sit between 120ms and
+   260ms; anything slower reads as lag rather than polish. Every rule below
+   is switched off wholesale under prefers-reduced-motion at the end. */
+
+/* Map markers: lift toward the pointer, and the hover card above them. */
+.map-pin {
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), filter 160ms ease;
+}
+.map-pin:hover,
+.map-pin:focus-visible {
+  transform: scale(1.18) translateY(-2px);
+  filter: drop-shadow(0 6px 12px rgb(0 0 0 / 0.18));
+  z-index: 40;
+}
+.map-pin:active {
+  transform: scale(1.05);
+}
+
+/* Hover cards fade up rather than appearing. Hidden until the group that
+   owns them is hovered, and never on touch, where a tap opens the real card. */
+.hover-card {
+  /* Sits above whatever it describes. Set here rather than as a Tailwind
+     arbitrary value because calc() needs real spaces around the operator,
+     which the class-name syntax eats. */
+  bottom: calc(100% + 10px);
+  left: 50%;
+  opacity: 0;
+  transform: translate(-50%, 4px);
+  transition: opacity 140ms ease, transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.hover-host:hover > .hover-card,
+.hover-host:focus-within > .hover-card {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+@media (hover: none) {
+  .hover-card {
+    display: none;
+  }
+}
+
+/* Rows and cards: a touch of travel on press so taps feel answered. */
+.tap {
+  transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), background-color 140ms ease, border-color 140ms ease;
+}
+.tap:active {
+  transform: scale(0.985);
+}
+
+/* Panels arrive from the edge they belong to — the sheet from the bottom on
+   a phone, the card from the right on a desktop. */
+@keyframes sheet-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes panel-in {
+  from { opacity: 0; transform: translateX(14px); }
+  to { opacity: 1; transform: none; }
+}
+.panel-enter {
+  animation: sheet-up 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (min-width: 640px) {
+  .panel-enter {
+    animation-name: panel-in;
+  }
+}
+
+/* The digest and the top pill settle in after the map, not with it. */
+@keyframes float-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.float-in {
+  animation: float-in 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Lists stagger very slightly, so a long roster reads as arriving rather
+   than snapping into place. Capped at eight — past that it's just waiting. */
+.stagger > * {
+  animation: float-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 24ms; }
+.stagger > *:nth-child(3) { animation-delay: 48ms; }
+.stagger > *:nth-child(4) { animation-delay: 72ms; }
+.stagger > *:nth-child(5) { animation-delay: 96ms; }
+.stagger > *:nth-child(6) { animation-delay: 120ms; }
+.stagger > *:nth-child(7) { animation-delay: 144ms; }
+.stagger > *:nth-child(n + 8) { animation-delay: 168ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .map-pin,
+  .hover-card,
+  .tap,
+  .panel-enter,
+  .float-in,
+  .stagger > * {
+    transition: none !important;
+    animation: none !important;
+  }
+  .map-pin:hover {
+    transform: none;
+  }
+  .hover-card {
+    opacity: 1;
   }
 }

@@ -55,7 +55,7 @@ export default function FloatingPage({
 
   return (
     <div
-      className={`fixed z-[1300] flex flex-col overflow-hidden rounded-3xl border border-[var(--line)] ${frame}`}
+      className={`panel-enter fixed z-[1300] flex flex-col overflow-hidden rounded-3xl border border-[var(--line)] ${frame}`}
       style={{ background: "color-mix(in srgb, var(--card) 97%, transparent)", backdropFilter: "blur(16px)", boxShadow: "var(--shadow-lift)" }}
     >
       {/* Grab handle — the affordance that tells a thumb this is a sheet. */}
@@ -82,7 +82,7 @@ export default function FloatingPage({
           {/* Width controls are a desktop idea; a phone sheet has one width. */}
           <button
             onClick={() => onSize(size === "wide" ? "side" : "wide")}
-            className="win-btn hidden sm:grid"
+            className="win-btn win-btn-wide"
             title={size === "wide" ? "Narrow" : "Widen"}
             aria-label={size === "wide" ? "Narrow" : "Widen"}
           >

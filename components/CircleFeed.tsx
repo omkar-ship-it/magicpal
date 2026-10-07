@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { avatarUrl } from "@/lib/avatar";
-import { ancestorsOf, entityById, expandMembership } from "@/lib/networks";
+import Avatar from "./Avatar";
+import { ancestorsOf, entityById } from "@/lib/networks";
 import {
   cityById,
   everythingFeed,
@@ -11,10 +11,9 @@ import {
   qualifiedName,
   type CirclePost,
   type CirclePostKind,
-  type TravelPing,
 } from "@/lib/circleData";
 import type { CircleMe } from "@/lib/circleMe";
-import { IconAsk, IconBriefcase, IconChat, IconHeart, IconMegaphone, IconPin, IconPlane, IconSparkle } from "./Icons";
+import { IconAsk, IconBriefcase, IconChat, IconHeart, IconMegaphone, IconPin, IconSparkle } from "./Icons";
 
 export const EVERYTHING = "__everything";
 
@@ -60,22 +59,18 @@ function ago(minutes: number): string {
 export default function CircleFeed({
   me,
   level,
-  pings,
   onLevel,
   onOpenMember,
   onOpenCity,
-  onOpenPing,
   onCompose,
   onStartMeetup,
 }: {
   me: CircleMe;
   /** EVERYTHING, or an entity id. */
   level: string;
-  pings: TravelPing[];
   onLevel: (level: string) => void;
   onOpenMember: (id: string) => void;
   onOpenCity: (cityId: string) => void;
-  onOpenPing: (ping: TravelPing) => void;
   onCompose: (entityId: string, kind: CirclePostKind, body: string) => void;
   onStartMeetup: () => void;
 }) {
@@ -98,13 +93,6 @@ export default function CircleFeed({
     level === EVERYTHING
       ? [...mine, ...everythingFeed(me.entityIds)].sort((a, b) => a.minutesAgo - b.minutesAgo)
       : [...mine.filter((p) => p.entityId === level), ...postsAt(level)].sort((a, b) => a.minutesAgo - b.minutesAgo);
-
-  // Only pings relevant to this level, and soonest first — the question is
-  // always "who's about to be near me", never "who travelled once".
-  const scope = level === EVERYTHING ? expandMembership(me.entityIds) : new Set([level]);
-  const shownPings = pings
-    .filter((p) => scope.has(p.entityId) || level === EVERYTHING)
-    .slice(0, 8);
 
   function submit() {
     const body = draft.trim();
@@ -205,43 +193,6 @@ export default function CircleFeed({
         )}
       </div>
 
-      {/* Passing through — the thing a map can say and a feed can't. */}
-      {shownPings.length > 0 && (
-        <div className="mt-4">
-          <p className="label">Passing through</p>
-          <div className="mt-1.5 flex flex-col gap-1.5">
-            {shownPings.map((p) => {
-              const m = memberById(p.memberId);
-              const city = cityById(p.cityId);
-              if (!m || !city) return null;
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => onOpenPing(p)}
-                  className="flex w-full items-center gap-2.5 rounded-2xl border border-[var(--line)] p-2.5 text-left transition-colors hover:border-[var(--brand)]"
-                >
-                  <span className="avatar h-9 w-9 flex-none text-[11px]">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={avatarUrl(m.name)} alt="" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12.5px] font-semibold leading-tight">
-                      {m.name} → {city.name}
-                    </span>
-                    <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">
-                      {p.datesLabel} · {p.daysAway <= 0 ? "here now" : `in ${p.daysAway}d`}
-                    </span>
-                  </span>
-                  <span className="grid h-7 w-7 flex-none place-items-center rounded-lg" style={{ background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" }}>
-                    <IconPlane size={14} />
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {/* The timeline */}
       <div className="mt-4 flex flex-col gap-2.5">
         {posts.length === 0 && (
@@ -258,10 +209,7 @@ export default function CircleFeed({
             <div key={post.id} className="card p-3.5">
               <div className="flex items-start gap-2.5">
                 <button onClick={() => author && onOpenMember(author.id)} className="flex-none" disabled={!author}>
-                  <span className="avatar h-9 w-9 text-[11px]">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={avatarUrl(isMine ? me.name : (author?.name ?? source?.name ?? "?"))} alt="" />
-                  </span>
+                  <Avatar name={isMine ? me.name : (author?.name ?? source?.name ?? "?")} size={36} />
                 </button>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13px] font-semibold leading-tight">
@@ -326,10 +274,7 @@ export default function CircleFeed({
                     const ca = memberById(c.authorId);
                     return (
                       <div key={c.id} className="flex items-start gap-2">
-                        <span className="avatar h-7 w-7 flex-none text-[10px]">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={avatarUrl(ca?.name ?? "?")} alt="" />
-                        </span>
+                        <Avatar name={ca?.name ?? "?"} size={28} />
                         <p className="min-w-0 text-[12px] leading-4">
                           <button onClick={() => ca && onOpenMember(ca.id)} className="font-semibold">
                             {ca?.name}
