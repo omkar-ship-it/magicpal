@@ -8,6 +8,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import Avatar from "./Avatar";
 import MemberHoverCard from "./MemberHoverCard";
 import MemberProfile from "./MemberProfile";
+import BookTime, { type Booking } from "./BookTime";
 import { entityById } from "@/lib/networks";
 import {
   ALL_CIRCLE_EVENTS,
@@ -24,6 +25,9 @@ import {
   ROLE_GROUPS,
   commonGround,
   relevance,
+  timeOfferFor,
+  causeById,
+  formatAmount,
   rnd,
   type CircleEvent,
   type CircleMember,
@@ -44,6 +48,7 @@ import {
   IconCalendar,
   IconChat,
   IconChevronDown,
+  IconClock,
   IconFeed,
   IconGlobe,
   IconHidden,
@@ -113,6 +118,8 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
   const [activeEntityId, setActiveEntityId] = useState<string>(() => getMe(variant)?.entityIds[0] ?? "");
   /** Open network only: coarse role bucket, since membership isn't narrowing anything. */
   const [roleFilter, setRoleFilter] = useState("all");
+  /** Sessions you booked this session, shown back on the member and in Chats. */
+  const [bookings, setBookings] = useState<Booking[]>([]);
   const [stack, setStack] = useState<View[]>([]);
   const [panelSize, setPanelSize] = useState<PageSize>("side");
   const [query, setQuery] = useState("");
@@ -172,7 +179,13 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
     () =>
       members.filter((m) => {
         if (cityFilter && m.cityId !== cityFilter) return false;
-        if (isOpen && !(ROLE_GROUPS.find((r) => r.id === roleFilter) ?? ROLE_GROUPS[0]).match(m)) return false;
+        if (isOpen) {
+          if (roleFilter === "book") {
+            if (!timeOfferFor(m)) return false;
+          } else if (!(ROLE_GROUPS.find((r) => r.id === roleFilter) ?? ROLE_GROUPS[0]).match(m)) {
+            return false;
+          }
+        }
         if (!q) return true;
         return `${m.name} ${m.headline} ${m.company} ${cityById(m.cityId)?.name ?? ""}`.toLowerCase().includes(q);
       }),
@@ -314,6 +327,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
     if (v === "you") return "You";
     if (v.startsWith("event:")) return openEvent?.name ?? "Event";
     if (v.startsWith("member:")) return memberById(v.slice(7))?.name ?? "Member";
+    if (v.startsWith("book:")) return `Book ${memberById(v.slice(5))?.name.split(" ")[0] ?? "time"}`;
     if (v.startsWith("chat:")) return memberById(v.slice(5))?.name ?? "Chat";
     return "";
   }
@@ -554,7 +568,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
             className="pointer-events-auto flex max-w-[calc(100vw-24px)] gap-1 overflow-x-auto rounded-2xl border border-[var(--line)] p-1"
             style={{ background: "color-mix(in srgb, var(--card) 93%, transparent)", backdropFilter: "blur(12px)", boxShadow: "var(--shadow)", scrollbarWidth: "none" }}
           >
-            {ROLE_GROUPS.map((r) => (
+            {[...ROLE_GROUPS, { id: "book", label: "Open to book" }].map((r) => (
               <button
                 key={r.id}
                 onClick={() => setRoleFilter(r.id)}
@@ -718,12 +732,15 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
 
           {view === "events" && <EventsList events={events} myCityId={me.cityId} onOpen={(id) => push(`event:${id}`)} onStart={() => push("meetup")} />}
 
-          {view === "chats" && <ChatsList
+          {view === "chats" && (
+            <ChatsList
+              bookings={bookings}
               members={members}
               communityName={isOpen ? "the open network" : (entity?.name ?? "this community")}
               connectedOnly={isOpen ? (id) => connectStateFor(id) === "connected" : undefined}
               onOpen={(id) => push(`chat:${id}`)}
-            />}
+            />
+          )}
 
           {view === "you" && (
             <CircleYouPanel
@@ -733,6 +750,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
               onCity={(id) => update({ cityId: id })}
               onAvatar={(next) => update({ photoUrl: next.photoUrl, avatarStyle: next.style })}
               onField={update}
+              openNetwork={isOpen}
               onStopBeacon={() => update({ beaconEventId: null })}
               onOpenCommunity={(id) => {
                 setActiveEntityId(id);
@@ -776,11 +794,28 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
                   connectState={isOpen ? connectStateFor(m.id) : null}
                   common={isOpen ? commonGround(me, m) : null}
                   onConnect={() => update({ requestedIds: [...(me.requestedIds ?? []), m.id] })}
+                  onBook={isOpen ? () => push(`book:${m.id}`) : undefined}
                   onMessage={() => push(`chat:${m.id}`)}
                   onOpenEvent={(id) => push(`event:${id}`)}
                   onOpenCity={(id) => {
                     setCityFilter(id);
                     flyToCity(id);
+                  }}
+                />
+              );
+            })()}
+
+          {view.startsWith("book:") &&
+            (() => {
+              const m = memberById(view.slice(5));
+              if (!m) return null;
+              return (
+                <BookTime
+                  m={m}
+                  onCancel={pop}
+                  onDone={(b) => {
+                    setBookings((cur) => [b, ...cur]);
+                    pop();
                   }}
                 />
               );
@@ -1035,11 +1070,14 @@ function EventsList({
 }
 
 function ChatsList({
+  bookings,
   members,
   communityName,
   connectedOnly,
   onOpen,
 }: {
+  /** Time you've booked, which is a conversation that hasn't happened yet. */
+  bookings: Booking[];
   members: CircleMember[];
   /** Threaded through so the preview and the opened thread say the same thing. */
   communityName: string;
@@ -1057,6 +1095,35 @@ function ChatsList({
 
   return (
     <div>
+      {bookings.length > 0 && (
+        <div className="mb-3">
+          <p className="label label-icon">
+            <IconClock size={13} /> Booked
+          </p>
+          <div className="mt-1.5 flex flex-col gap-1.5">
+            {bookings.map((b) => {
+              const m = memberById(b.memberId);
+              const cause = causeById(b.causeId);
+              if (!m) return null;
+              return (
+                <button key={b.reference} onClick={() => onOpen(m.id)} className="tap card flex items-center gap-2.5 p-2.5 text-left">
+                  <Avatar name={m.name} size={36} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12.5px] font-semibold leading-tight">{m.name}</span>
+                    <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">
+                      {b.when} · {b.minutes} min
+                    </span>
+                    <span className="block truncate text-[11px]" style={{ color: "var(--brand)" }}>
+                      {formatAmount({ symbol: b.symbol }, b.amount)} to {cause?.name}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <p className="rounded-2xl p-3 text-[12px] leading-4 text-[var(--ink-soft)]" style={{ background: "var(--sunk)" }}>
         {connectedOnly
           ? "Only people who accepted your request. Out here nothing has vouched for either of you, so a first message is asked for."

@@ -1017,3 +1017,125 @@ export function relevance(me: { cityId: string; entityIds: string[]; interests?:
 
 /** Everything someone could put on their "here for" list — the open network's only onboarding question. */
 export const OPEN_INTERESTS = HELP_WITH;
+
+// ──────────────────────────────────────── time, booked against a cause
+
+/**
+ * Causes are fictional, deliberately.
+ *
+ * This is a prototype that simulates a donation, and putting a real
+ * charity's name on a flow that takes no money and sends them nothing
+ * would misrepresent them. These read as real without being anybody.
+ */
+export type Cause = { id: string; name: string; area: string; blurb: string };
+
+export const CAUSES: Cause[] = [
+  { id: "lantern", name: "Lantern Trust", area: "Girls' education", blurb: "Keeps girls in rural schools past year eight, where most of the drop-off happens." },
+  { id: "reading", name: "The Reading Room", area: "Childhood literacy", blurb: "Puts a trained reading volunteer in a classroom for an hour a week." },
+  { id: "tideline", name: "Tide Line", area: "Coastal cleanup", blurb: "Pays fishing crews to land plastic instead of fish on days the catch is poor." },
+  { id: "clearwater", name: "Clearwater", area: "Clean water", blurb: "Repairs village handpumps that already exist and have stopped working." },
+  { id: "canopy", name: "Canopy", area: "Urban trees", blurb: "Plants and — the hard part — waters street trees for their first three summers." },
+  { id: "warmline", name: "Warmline", area: "Mental health", blurb: "A staffed phone line for people who aren't in crisis but are close to it." },
+  { id: "secondchance", name: "Second Chance", area: "Prison education", blurb: "Degree-level teaching inside, and a job on the other side of the gate." },
+  { id: "firstresponse", name: "First Response Fund", area: "Disaster relief", blurb: "Cash to households in the first seventy-two hours, before the agencies arrive." },
+  { id: "openfields", name: "Open Fields", area: "Smallholder farming", blurb: "Soil testing and seed for farms under two acres." },
+  { id: "paws", name: "Paws & Co", area: "Animal rescue", blurb: "Street dog sterilisation and the clinic that follows it." },
+];
+
+export const causeById = (id: string): Cause | undefined => CAUSES.find((c) => c.id === id);
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Local money, so an amount reads as a real ask rather than an abstraction. */
+function currencyFor(region: Region): { symbol: string; code: string; scale: number } {
+  if (region === "south-asia") return { symbol: "₹", code: "INR", scale: 1000 };
+  if (region === "europe") return { symbol: "€", code: "EUR", scale: 10 };
+  if (region === "oceania") return { symbol: "A$", code: "AUD", scale: 15 };
+  if (region === "sea" || region === "east-asia") return { symbol: "$", code: "USD", scale: 10 };
+  return { symbol: "$", code: "USD", scale: 10 };
+}
+
+/**
+ * Someone's open office hours, and what it costs to take one.
+ *
+ * The money never touches the member — it goes to a cause they picked. That
+ * is the whole mechanic. In a closed network, membership is what filters a
+ * cold request: you're in the same class, so the request is probably worth
+ * reading. Out in the open nothing filters anything, and the two obvious
+ * fixes are both bad — charge for access and the network becomes a
+ * marketplace; charge nothing and the people worth reaching drown. A
+ * contribution to something the expert actually cares about is a credible
+ * signal of seriousness from the asker, costs the expert nothing to accept,
+ * and leaves neither of them feeling like they bought or sold a favour.
+ */
+export type TimeOffer = {
+  causeId: string;
+  note: string;
+  currency: { symbol: string; code: string };
+  /** Length of session → the contribution it asks for. */
+  slots: Array<{ minutes: number; amount: number }>;
+  sessionsDone: number;
+  raised: number;
+};
+
+const OFFER_NOTES = [
+  "Happy to look at anything concrete — a deck, a pricing page, a hiring plan. Vaguer questions I'm less use for.",
+  "Best on the first hundred customers and the mess around them. Bring the actual numbers.",
+  "I'll give you a straight answer rather than an encouraging one. Come with a decision you're stuck on.",
+  "Come with one question. We'll get further than with five.",
+  "Worth it if you're pre-launch or just post. After that I'm less useful than your own data.",
+  "I say yes to most of these and I've never regretted one. Just make it specific.",
+];
+
+/** Seniority sets the ask: a partner's half hour is a bigger commitment than a staff engineer's. */
+function offerBand(m: CircleMember): number {
+  if (/founder|ceo|partner|principal/i.test(m.headline)) return 3;
+  if (/vp|head|director|gm/i.test(m.headline)) return 2;
+  return 1;
+}
+
+/**
+ * Roughly a third of the open network offers time. Any more and it reads as
+ * a paid-advice marketplace, which is the thing this is trying not to be.
+ */
+export function timeOfferFor(m: CircleMember): TimeOffer | null {
+  if (rnd(`offer-${m.id}`) % 100 >= 34) return null;
+  const city = cityById(m.cityId);
+  if (!city) return null;
+  const cur = currencyFor(city.region);
+  const band = offerBand(m);
+  const base = cur.scale * (band === 3 ? 5 : band === 2 ? 3 : 2);
+  return {
+    causeId: CAUSES[rnd(`cause-${m.id}`) % CAUSES.length].id,
+    note: OFFER_NOTES[rnd(`onote-${m.id}`) % OFFER_NOTES.length],
+    currency: { symbol: cur.symbol, code: cur.code },
+    slots: [
+      { minutes: 20, amount: base },
+      { minutes: 45, amount: base * 2 },
+    ],
+    sessionsDone: 3 + (rnd(`odone-${m.id}`) % 40),
+    raised: base * (6 + (rnd(`oraised-${m.id}`) % 70)),
+  };
+}
+
+/** Next fortnight of openings, deterministic per member. */
+export function slotsFor(m: CircleMember): Array<{ id: string; day: string; date: string; times: string[] }> {
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+  const now = new Date();
+  return [0, 1, 2].map((n) => {
+    const d = new Date(now);
+    d.setDate(d.getDate() + 2 + n * 2 + (rnd(`slotd-${m.id}-${n}`) % 2));
+    const pool = ["08:30", "09:00", "11:30", "14:00", "16:30", "18:00"];
+    const count = 2 + (rnd(`slotc-${m.id}-${n}`) % 3);
+    return {
+      id: `s-${m.id}-${n}`,
+      day: days[d.getDay() === 0 || d.getDay() === 6 ? 0 : d.getDay() - 1],
+      date: `${MONTHS[d.getMonth()]} ${d.getDate()}`,
+      times: pool.filter((_, i) => (rnd(`slott-${m.id}-${n}-${i}`) % 100) < 55).slice(0, count),
+    };
+  });
+}
+
+export function formatAmount(cur: { symbol: string }, amount: number): string {
+  return `${cur.symbol}${amount.toLocaleString()}`;
+}

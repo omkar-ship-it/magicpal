@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { entityById } from "@/lib/networks";
-import { CIRCLE_CITIES, cityById, inviteFor, membersOf, qualifiedName, type LocationMode } from "@/lib/circleData";
+import { CAUSES, CIRCLE_CITIES, causeById, cityById, inviteFor, membersOf, qualifiedName, type LocationMode } from "@/lib/circleData";
 import type { CircleMe } from "@/lib/circleMe";
 import LocationModePicker from "./LocationModePicker";
 import AvatarPicker from "./AvatarPicker";
-import { IconAsk, IconSparkle } from "./Icons";
+import { IconAsk, IconClock, IconHeart, IconSparkle } from "./Icons";
 import { IconBeacon, IconCopy, IconCheck } from "./Icons";
 
 /**
@@ -24,6 +24,7 @@ export default function CircleYouPanel({
   onCity,
   onAvatar,
   onField,
+  openNetwork,
   onStopBeacon,
   onOpenCommunity,
   onLeave,
@@ -35,6 +36,8 @@ export default function CircleYouPanel({
   onCity: (id: string) => void;
   onAvatar: (next: { photoUrl: string | null; style: string }) => void;
   onField: (patch: Partial<CircleMe>) => void;
+  /** The time-for-a-cause offer only exists in the open network. */
+  openNetwork?: boolean;
   onStopBeacon: () => void;
   onOpenCommunity: (id: string) => void;
   onLeave: () => void;
@@ -174,6 +177,8 @@ export default function CircleYouPanel({
         )}
       </div>
 
+      {openNetwork && <OfferEditor me={me} onField={onField} />}
+
       <div className="mt-6">
         <p className="label">Your communities</p>
         <div className="mt-2 flex flex-col gap-1.5">
@@ -241,5 +246,97 @@ function Field({
         <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={cls} />
       )}
     </label>
+  );
+}
+
+/**
+ * Your own office hours.
+ *
+ * The same mechanic from the other side: you give time, somebody gives to a
+ * cause you picked, and no money comes near you. Worth building both halves
+ * for a demo — the offer only reads as generous once you've seen how little
+ * the person offering gets out of it.
+ */
+function OfferEditor({ me, onField }: { me: CircleMe; onField: (patch: Partial<CircleMe>) => void }) {
+  const offer = me.offer ?? null;
+  const cause = offer ? causeById(offer.causeId) : null;
+  const symbol = me.cityId === "blr" || me.cityId === "bom" || me.cityId === "del" || me.cityId === "hyd" ? "₹" : "$";
+
+  return (
+    <div className="mt-6 rounded-2xl border border-[var(--line)] p-3.5">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="label label-icon mb-0">
+            <IconClock size={13} /> Offer your time
+          </p>
+          <p className="mt-0.5 text-[11.5px] leading-4 text-[var(--ink-soft)]">
+            People book a slot by giving to a cause you choose. Nothing comes to you.
+          </p>
+        </div>
+        <button
+          onClick={() =>
+            onField({
+              offer: offer ? null : { causeId: CAUSES[0].id, note: "Come with one question. We'll get further than with five.", base: symbol === "₹" ? 2000 : 25 },
+            })
+          }
+          className="btn btn-ghost btn-sm flex-none"
+        >
+          {offer ? "Turn off" : "Turn on"}
+        </button>
+      </div>
+
+      {offer && (
+        <div className="mt-3 flex flex-col gap-3">
+          <label className="block">
+            <span className="label">Cause</span>
+            <select
+              value={offer.causeId}
+              onChange={(e) => onField({ offer: { ...offer, causeId: e.target.value } })}
+              className="mt-1.5 w-full rounded-xl border border-[var(--line)] bg-transparent px-3 py-2 text-[13px] outline-none focus:border-[var(--brand)]"
+            >
+              {CAUSES.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} — {c.area}
+                </option>
+              ))}
+            </select>
+            {cause && <span className="mt-1 block text-[11px] leading-4 text-[var(--ink-soft)]">{cause.blurb}</span>}
+          </label>
+
+          <label className="block">
+            <span className="label">What you&rsquo;re useful for</span>
+            <textarea
+              value={offer.note}
+              onChange={(e) => onField({ offer: { ...offer, note: e.target.value } })}
+              rows={2}
+              className="mt-1.5 w-full resize-none rounded-xl border border-[var(--line)] bg-transparent px-3 py-2 text-[13px] outline-none focus:border-[var(--brand)]"
+            />
+          </label>
+
+          <label className="block">
+            <span className="label">Contribution for 20 minutes</span>
+            <div className="mt-1.5 flex items-center gap-2">
+              <span className="text-[15px] font-semibold">{symbol}</span>
+              <input
+                type="number"
+                min={0}
+                value={offer.base}
+                onChange={(e) => onField({ offer: { ...offer, base: Math.max(0, Number(e.target.value) || 0) } })}
+                className="w-full rounded-xl border border-[var(--line)] bg-transparent px-3 py-2 text-[13px] outline-none focus:border-[var(--brand)]"
+              />
+            </div>
+          </label>
+
+          <p className="flex items-start gap-2 rounded-xl p-2.5 text-[12px] leading-4" style={{ background: "color-mix(in srgb, var(--brand) 7%, var(--card))" }}>
+            <IconHeart size={14} className="mt-0.5 flex-none" style={{ color: "var(--brand)" }} />
+            <span>
+              20 min for {symbol}
+              {offer.base.toLocaleString()}, 45 min for {symbol}
+              {(offer.base * 2).toLocaleString()} — all of it to {cause?.name ?? "your cause"}.
+            </span>
+          </p>
+        </div>
+      )}
+    </div>
   );
 }

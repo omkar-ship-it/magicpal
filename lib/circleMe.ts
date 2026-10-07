@@ -33,6 +33,11 @@ export type CircleMe = {
   requestedIds?: string[];
   /** What you said you're here for, used to rank strangers. */
   interests?: string[];
+  /**
+   * Open network only: your own office hours, and the cause the
+   * contribution goes to. Absent means you aren't offering time.
+   */
+  offer?: { causeId: string; note: string; base: number } | null;
 };
 
 /**

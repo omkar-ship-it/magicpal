@@ -1,9 +1,9 @@
 "use client";
 
 import { entityById } from "@/lib/networks";
-import { attendeesOf, cityById, postsAt, qualifiedName, type CircleEvent, type CircleMember } from "@/lib/circleData";
+import { attendeesOf, causeById, cityById, formatAmount, postsAt, qualifiedName, timeOfferFor, type CircleEvent, type CircleMember } from "@/lib/circleData";
 import Avatar from "./Avatar";
-import { IconAsk, IconBriefcase, IconCalendar, IconCity, IconChat, IconHidden, IconPlus, IconPin, IconSparkle } from "./Icons";
+import { IconAsk, IconBriefcase, IconCalendar, IconCity, IconChat, IconClock, IconHeart, IconHidden, IconPlus, IconPin, IconSparkle } from "./Icons";
 
 function ago(minutes: number): string {
   if (minutes < 60) return `${Math.max(1, Math.round(minutes))}m`;
@@ -31,6 +31,7 @@ export default function MemberProfile({
   common,
   onMessage,
   onConnect,
+  onBook,
   onOpenEvent,
   onOpenCity,
 }: {
@@ -41,11 +42,15 @@ export default function MemberProfile({
   common?: string | null;
   onMessage: () => void;
   onConnect?: () => void;
+  /** Open network only — booking time is how you reach past a cold request. */
+  onBook?: () => void;
   onOpenEvent: (id: string) => void;
   onOpenCity: (cityId: string) => void;
 }) {
   const city = cityById(m.cityId);
   const sharesACommunity = connectState == null;
+  const offer = onBook ? timeOfferFor(m) : null;
+  const cause = offer ? causeById(offer.causeId) : null;
   const communities = m.entityIds.map((id) => entityById(id)).filter(Boolean);
   const theirPosts = m.entityIds
     .flatMap((id) => postsAt(id))
@@ -121,6 +126,32 @@ export default function MemberProfile({
             Nobody has vouched for either of you here, so a first message is asked for rather than sent.
           </p>
         </>
+      )}
+
+      {offer && cause && (
+        <div className="mt-4 rounded-2xl border border-[var(--line)] p-3.5">
+          <p className="label label-icon">
+            <IconClock size={13} /> Open office hours
+          </p>
+          <p className="mt-0.5 text-[13px] leading-5">{offer.note}</p>
+
+          <div className="mt-2.5 flex items-start gap-2 rounded-xl p-2.5" style={{ background: "color-mix(in srgb, var(--brand) 7%, var(--card))" }}>
+            <IconHeart size={14} className="mt-0.5 flex-none" style={{ color: "var(--brand)" }} />
+            <span className="min-w-0 text-[12px] leading-4">
+              {/* The distinction the whole mechanic rests on, stated before
+                  anyone clicks: the expert is not being paid. */}
+              <span className="font-semibold">{m.name.split(" ")[0]} isn&rsquo;t paid.</span> Your contribution goes to {cause.name} —{" "}
+              {cause.area.toLowerCase()}.
+            </span>
+          </div>
+
+          <button onClick={onBook} className="btn btn-primary btn-sm mt-2.5 flex w-full items-center justify-center gap-1.5">
+            <IconClock size={14} /> Book {offer.slots[0].minutes} min · {formatAmount(offer.currency, offer.slots[0].amount)} to {cause.name}
+          </button>
+          <p className="mt-1.5 text-center text-[11px] text-[var(--ink-soft)]">
+            {offer.sessionsDone} sessions · {formatAmount(offer.currency, offer.raised)} raised
+          </p>
+        </div>
       )}
 
       {m.lookingFor && (
