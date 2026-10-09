@@ -3,7 +3,7 @@
 import Avatar from "./Avatar";
 import { entityById } from "@/lib/networks";
 import { attendeesOf, beaconsAt, cityById, memberById, type CircleEvent, type CircleMember } from "@/lib/circleData";
-import { IconBeacon, IconCalendar, IconCheck, IconGlobe, IconPin } from "./Icons";
+import { IconBeacon, IconCalendar, IconCheck, IconClock, IconGlobe, IconPeople, IconPin } from "./Icons";
 
 /**
  * An event, and the one thing an event makes possible that a map otherwise
@@ -165,6 +165,67 @@ export default function CircleEventPanel({
       )}
 
       <p className="mt-4 text-[13.5px] leading-5">{event.about}</p>
+
+      {/* What anyone checks before deciding whether to go: when exactly,
+          where exactly, who's running it, and how to get there. Scattering
+          these across a page is how an event listing fails. */}
+      <div className="mt-4">
+        <p className="label label-icon">
+          <IconClock size={13} /> Details
+        </p>
+        <div className="mt-1.5 grid grid-cols-[88px_1fr] gap-x-3 gap-y-1.5 text-[12.5px]">
+          <span className="text-[var(--ink-soft)]">When</span>
+          <span className="font-medium">
+            {event.dateLabel} · {event.timeLabel}
+          </span>
+          <span className="text-[var(--ink-soft)]">Where</span>
+          <span className="font-medium">{online ? "Online — link below" : `${event.venue}, ${city?.name}`}</span>
+          <span className="text-[var(--ink-soft)]">Host</span>
+          <span className="font-medium">
+            {hostMember ? hostMember.name : hostedByMe ? "You" : (host?.name ?? "The community")}
+          </span>
+          <span className="text-[var(--ink-soft)]">Open to</span>
+          <span className="font-medium">
+            {event.kind === "meetup" ? `${host?.name} members in ${city?.name}` : `All of ${host?.name}`}
+          </span>
+          <span className="text-[var(--ink-soft)]">Cost</span>
+          <span className="font-medium">Free</span>
+        </div>
+
+        {!online && event.lat != null && event.lng != null && (
+          <a
+            href={`https://www.google.com/maps/search/?api=1&query=${event.lat},${event.lng}`}
+            target="_blank"
+            rel="noreferrer"
+            className="btn btn-ghost btn-sm mt-2.5 flex w-full items-center justify-center gap-1.5"
+          >
+            <IconPin size={14} /> Directions
+          </a>
+        )}
+      </div>
+
+      {/* Alumni events are mostly decided on who else is going, so the
+          shape of the room is shown before the roster of names. */}
+      <div className="mt-4">
+        <p className="label label-icon">
+          <IconPeople size={13} /> Who&rsquo;s coming
+        </p>
+        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] text-[var(--ink-soft)]">
+          {[...new Set(going.map((g) => cityById(g.cityId)?.name))]
+            .filter(Boolean)
+            .slice(0, 5)
+            .map((c) => (
+              <span key={c}>
+                {c} {going.filter((g) => cityById(g.cityId)?.name === c).length}
+              </span>
+            ))}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {going.slice(0, 16).map((m) => (
+            <Avatar key={m.id} name={m.name} size={32} title={`${m.name} — ${m.headline}`} />
+          ))}
+        </div>
+      </div>
 
       <div className="mt-5">
         <p className="label">Going ({going.length + (imGoing || hostedByMe ? 1 : 0)})</p>

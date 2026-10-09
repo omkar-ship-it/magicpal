@@ -1,7 +1,7 @@
 "use client";
 
 import { entityById } from "@/lib/networks";
-import { attendeesOf, causeById, cityById, formatAmount, mentorTier, postsAt, qualifiedName, timeOfferFor, type CircleEvent, type CircleMember } from "@/lib/circleData";
+import { attendeesOf, causeById, cityById, formatAmount, mentorTier, postsAt, qualifiedName, rnd, timeOfferFor, type CircleEvent, type CircleMember } from "@/lib/circleData";
 import Avatar from "./Avatar";
 import VerifiedBadge, { UnverifiedChip } from "./VerifiedBadge";
 import { IconAsk, IconBriefcase, IconCalendar, IconCity, IconChat, IconClock, IconHeart, IconHidden, IconPlus, IconPin, IconSparkle } from "./Icons";
@@ -305,11 +305,47 @@ export default function MemberProfile({
         </div>
       )}
 
-      <p className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-[var(--ink-soft)]">
-        <span>Class of {m.gradYear}</span>
-        {m.links.linkedin && <span>LinkedIn</span>}
-        {m.links.site && <span>{m.links.site}</span>}
-      </p>
+      {/* The facts anyone actually checks before writing: how long they've
+          been here, how quickly they reply, and how many people you both
+          know. Useful because the first two set an expectation the message
+          can be written against. */}
+      <div className="mt-5">
+        <p className="label">Details</p>
+        <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[12.5px]">
+          <span className="text-[var(--ink-soft)]">Graduated</span>
+          <span className="font-medium">Class of {m.gradYear}</span>
+          <span className="text-[var(--ink-soft)]">Based in</span>
+          <span className="font-medium">{city?.name ?? "—"}{city ? `, ${city.country}` : ""}</span>
+          <span className="text-[var(--ink-soft)]">On MagicPal</span>
+          <span className="font-medium">{1 + (rnd(`since-${m.id}`) % 3)} years</span>
+          <span className="text-[var(--ink-soft)]">Usually replies</span>
+          <span className="font-medium">{["within a day", "within a few days", "within a week"][rnd(`reply-${m.id}`) % 3]}</span>
+          <span className="text-[var(--ink-soft)]">Both know</span>
+          <span className="font-medium">{2 + (rnd(`mutual-${m.id}`) % 12)} of the same people</span>
+          <span className="text-[var(--ink-soft)]">Verified</span>
+          <span className="font-medium">{m.verified ? "Yes, by the institution" : "Not yet"}</span>
+        </div>
+      </div>
+
+      {(m.links.linkedin || m.links.site) && (
+        <div className="mt-4 flex flex-wrap gap-1.5">
+          {m.links.linkedin && (
+            <a
+              href={`https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(m.name)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="btn btn-ghost btn-sm"
+            >
+              LinkedIn
+            </a>
+          )}
+          {m.links.site && (
+            <a href={`https://${m.links.site}`} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
+              {m.links.site}
+            </a>
+          )}
+        </div>
+      )}
     </div>
   );
 }
