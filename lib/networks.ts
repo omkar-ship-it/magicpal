@@ -52,6 +52,16 @@ export type MockEntity = {
    * see that Class of 2021 exists without being able to read it.
    */
   access?: "open" | "request" | "paid";
+  /**
+   * What this root actually is. Only set on top-level nodes; descendants
+   * inherit it through `rootKindOf`.
+   *
+   * It matters because the two kinds can offer different things. An
+   * institution has alumni — people who went through the same thing years
+   * apart, which is the gradient mentorship runs on. An interest community
+   * has members who joined last Tuesday and owe each other nothing.
+   */
+  kind?: "institution" | "community";
 };
 
 export const PUBLIC_ENTITY_ID = "public";
@@ -72,6 +82,7 @@ function node(
     place?: { city: string; lat: number; lng: number };
     membershipTiers?: PriceTier[];
     access?: MockEntity["access"];
+    kind?: MockEntity["kind"];
   } = {}
 ): MockEntity {
   return { id, name, parentId, label, emoji, memberCountMock, blurbMock, ...opts };
@@ -211,11 +222,12 @@ const ISB_TREE: MockEntity[] = [
   node("isb", "Indian School of Business", null, "Network", "🎓", 14200, "ISB alumni across product, strategy, venture, and operating roles.", {
     childLabel: "Programmes",
     place: { city: "Hyderabad", lat: 17.4239, lng: 78.3413 },
+    kind: "institution",
   }),
   node("isb-pgp", "PGP", "isb", "Programme", "📘", 9800, "Post Graduate Programme in Management — the one-year flagship.", { childLabel: "Classes", childGroup: "Programmes" }),
   node("isb-egp", "EGP", "isb", "Programme", "📗", 2600, "Executive Graduate Programme — for working senior managers.", { childLabel: "Classes", childGroup: "Programmes" }),
   node("isb-ivi", "IVI", "isb", "Programme", "🚀", 480, "I-Venture @ ISB — the incubator and its founder cohorts.", { childLabel: "Cohorts", childGroup: "Programmes" }),
-  ...[2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025].map((y) =>
+  ...[2010, 2012, 2014, 2016, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025].map((y) =>
     node(`isb-pgp-${y}`, `Class of ${y}`, "isb-pgp", "Class", "🎓", 600 + (y % 7) * 40, `The PGP cohort that graduated in ${y}.`, { access: "request" })
   ),
   ...[2020, 2022, 2024].map((y) => node(`isb-egp-${y}`, `Class of ${y}`, "isb-egp", "Class", "🎓", 180 + (y % 5) * 20, `The EGP cohort that graduated in ${y}.`, { access: "request" })),
@@ -229,6 +241,7 @@ const IITB_TREE: MockEntity[] = [
   node("iitb", "IIT Bombay", null, "Network", "🎓", 12400, "IIT Bombay graduates building and leading across the world.", {
     childLabel: "Chapters",
     place: { city: "Mumbai", lat: 19.1334, lng: 72.9133 },
+    kind: "institution",
   }),
   node("iitb-bay", "Bay Area Chapter", "iitb", "Chapter", "📍", 980, "IITB alumni around San Francisco and the peninsula.", { childLabel: "Groups", childGroup: "Chapters", place: { city: "San Francisco", lat: 37.7749, lng: -122.4194 } }),
   node("iitb-blr", "Bengaluru Chapter", "iitb", "Chapter", "📍", 1640, "The largest IITB chapter outside Mumbai.", { childLabel: "Groups", childGroup: "Chapters", place: { city: "Bengaluru", lat: 12.9716, lng: 77.5946 } }),
@@ -251,11 +264,12 @@ const STANFORD_TREE: MockEntity[] = [
   node("stanford", "Stanford University", null, "Network", "🎓", 15100, "Stanford alumni building and connecting worldwide.", {
     childLabel: "Schools",
     place: { city: "Stanford, CA", lat: 37.4275, lng: -122.1697 },
+    kind: "institution",
   }),
   node("stanford-gsb", "Graduate School of Business", "stanford", "School", "📘", 2100, "GSB alumni worldwide.", { childLabel: "Classes" }),
   node("stanford-eng", "School of Engineering", "stanford", "School", "⚙️", 3400, "Engineering alumni across software, hardware, and research.", { childLabel: "Classes" }),
   node("stanford-india", "Stanford in India", "stanford", "Chapter", "📍", 640, "Alumni who've moved back or are building in India.", { place: { city: "Bengaluru", lat: 12.9279, lng: 77.6271 } }),
-  ...[2016, 2019, 2022].map((y) => node(`stanford-gsb-${y}`, `Class of ${y}`, "stanford-gsb", "Class", "🎓", 380, `GSB class of ${y}.`, { access: "request" })),
+  ...[2010, 2013, 2016, 2019, 2022].map((y) => node(`stanford-gsb-${y}`, `Class of ${y}`, "stanford-gsb", "Class", "🎓", 380, `GSB class of ${y}.`, { access: "request" })),
   ...[2018, 2021].map((y) => node(`stanford-eng-${y}`, `Class of ${y}`, "stanford-eng", "Class", "🎓", 520, `Engineering class of ${y}.`, { access: "request" })),
 ];
 
@@ -267,8 +281,8 @@ const FLAT_NETWORKS: MockEntity[] = [
   node("exmsft", "Ex-Microsoft", null, "Network", "🏢", 4100, "Microsoft alumni across cloud, AI, and enterprise.", { place: { city: "Hyderabad", lat: 17.4399, lng: 78.3489 } }),
   node("exmck", "Ex-McKinsey", null, "Network", "🏢", 3300, "Ex-consultants now operating, founding, and investing."),
   node("exflipkart", "Ex-Flipkart", null, "Network", "🏢", 3900, "The Flipkart mafia — commerce, logistics, and fintech.", { place: { city: "Bengaluru", lat: 12.9237, lng: 77.675 } }),
-  node("bits", "BITS Pilani", null, "Network", "🎓", 9300, "BITSians in tech, research, and startups everywhere.", { place: { city: "Pilani", lat: 28.3639, lng: 75.5869 } }),
-  node("hbs", "Harvard Business School", null, "Network", "🎓", 11200, "HBS alumni in operating, investing, and founding roles.", { place: { city: "Boston", lat: 42.3663, lng: -71.1222 } }),
+  node("bits", "BITS Pilani", null, "Network", "🎓", 9300, "BITSians in tech, research, and startups everywhere.", { place: { city: "Pilani", lat: 28.3639, lng: 75.5869 }, kind: "institution" }),
+  node("hbs", "Harvard Business School", null, "Network", "🎓", 11200, "HBS alumni in operating, investing, and founding roles.", { place: { city: "Boston", lat: 42.3663, lng: -71.1222 }, kind: "institution" }),
   node("product-leadership", "Product Leadership Community", null, "Network", "🧭", 14200, "Heads of product and senior PMs comparing craft, org design, and the things that actually ship."),
   node("women-product", "Women in Product", null, "Network", "🧭", 16800, "Product leaders supporting other women building product.", { childLabel: "Circles" }),
   node("women-product-mentor", "Mentorship Circle", "women-product", "Circle", "👥", 1200, "Structured mentor pairings, two cohorts a year."),
@@ -342,6 +356,21 @@ export function ancestorsOf(id: string): MockEntity[] {
     cur = e.parentId;
   }
   return out;
+}
+
+/**
+ * The kind of the root this node hangs off — a class under ISB is
+ * institutional, a circle under Women in Product is not.
+ */
+export function rootKindOf(id: string): "institution" | "community" {
+  const trail = ancestorsOf(id);
+  const root = trail[0] ?? entityById(id);
+  return root?.kind ?? "community";
+}
+
+/** True for anything that is, or sits under, an educational institution. */
+export function isAlumniNetwork(id: string): boolean {
+  return rootKindOf(id) === "institution";
 }
 
 export function descendantIds(id: string): string[] {

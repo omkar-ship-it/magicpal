@@ -10,7 +10,8 @@ import MemberHoverCard from "./MemberHoverCard";
 import MemberProfile from "./MemberProfile";
 import BookTime, { type Booking } from "./BookTime";
 import Matches from "./Matches";
-import { entityById } from "@/lib/networks";
+import Mentorship from "./Mentorship";
+import { entityById, isAlumniNetwork } from "@/lib/networks";
 import {
   ALL_CIRCLE_EVENTS,
   attendeesOf,
@@ -46,6 +47,7 @@ import CircleDigest from "./CircleDigest";
 import CircleWelcome, { takeJustJoined } from "./CircleWelcome";
 import OpenJoin from "./OpenJoin";
 import {
+  IconAsk,
   IconCalendar,
   IconChat,
   IconChevronDown,
@@ -144,6 +146,12 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
 
   const view = stack[stack.length - 1] ?? null;
   const entity = entityById(activeEntityId);
+  /**
+   * Mentorship exists only under an institution. An interest community has
+   * no batch gradient — everyone joined last Tuesday — so the module isn't
+   * offered there rather than offered and quietly ignored.
+   */
+  const hasMentoring = !isOpen && isAlumniNetwork(activeEntityId);
 
   const update = useCallback((patch: Partial<CircleMe>) => {
     setMeState((cur) => {
@@ -321,6 +329,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
 
   /** What the one open window is called. */
   function titleFor(v: string): string {
+    if (v === "mentoring") return "Mentoring";
     if (v === "matches") return "For you";
     if (v === "feed") return "Feed";
     if (v === "meetup") return "Call a meetup";
@@ -552,6 +561,9 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
                       setActiveEntityId(id);
                       setCityFilter(null);
                       setSwitcherOpen(false);
+                      // The module is gone for a community, so the open view
+                      // has to go with it rather than render into nothing.
+                      if (!isAlumniNetwork(id)) setStack((cur) => cur.filter((v) => v !== "mentoring"));
                     }}
                     className="tap flex w-full items-center gap-2 rounded-xl p-2 text-left hover:bg-[var(--sunk)]"
                   >
@@ -623,6 +635,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
           style={{ background: "color-mix(in srgb, var(--card) 99%, transparent)", backdropFilter: "blur(16px)", boxShadow: "var(--shadow-lift)" }}
         >
           {isOpen && <BarButton icon={<IconSparkle />} label="For you" on={view === "matches"} onClick={() => open("matches")} />}
+          {hasMentoring && <BarButton icon={<IconAsk />} label="Mentoring" on={view === "mentoring"} onClick={() => open("mentoring")} />}
           <BarButton icon={<IconFeed />} label="Feed" on={view === "feed"} onClick={() => open("feed")} />
           <BarButton icon={<IconPeople />} label="People" count={isOpen ? undefined : members.length} on={view === "people"} onClick={() => open("people")} />
           <BarButton icon={<IconCalendar />} label="Events" count={events.length} on={view === "events"} onClick={() => open("events")} />
@@ -705,6 +718,16 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
                 if (c) mapRef.current?.flyTo({ center: [c.lng, c.lat], zoom: 9, duration: 1200 });
               }}
               onOpen={(id) => push(`member:${id}`)}
+            />
+          )}
+
+          {view === "mentoring" && hasMentoring && (
+            <Mentorship
+              me={me}
+              entityId={activeEntityId}
+              onUpdate={(next) => update({ mentorship: next })}
+              onOpenMember={(id) => push(`member:${id}`)}
+              onMessage={(id) => push(`chat:${id}`)}
             />
           )}
 

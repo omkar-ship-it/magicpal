@@ -13,7 +13,7 @@ import {
   type CircleInvite,
   type LocationMode,
 } from "@/lib/circleData";
-import { setMe } from "@/lib/circleMe";
+import { getMe, setMe } from "@/lib/circleMe";
 import LocationModePicker from "./LocationModePicker";
 import InviteMap from "./InviteMap";
 import { markJustJoined } from "./CircleWelcome";
@@ -44,9 +44,10 @@ export default function CircleJoin({ invite }: { invite: CircleInvite }) {
       .sort((a, b) => b.count - a.count);
   }, [members]);
 
-  const [name, setName] = useState("");
-  const [headline, setHeadline] = useState("");
-  const [company, setCompany] = useState("");
+  const existing = typeof window === "undefined" ? null : getMe("circle");
+  const [name, setName] = useState(existing?.name ?? "");
+  const [headline, setHeadline] = useState(existing?.headline ?? "");
+  const [company, setCompany] = useState(existing?.company ?? "");
   const [cityId, setCityId] = useState(cities[0]?.city.id ?? "blr");
   const [mode, setMode] = useState<LocationMode>("base");
   const [locating, setLocating] = useState(false);
@@ -78,14 +79,19 @@ export default function CircleJoin({ invite }: { invite: CircleInvite }) {
   function join() {
     if (!name.trim()) return;
     setJoining(true);
+    // A second invite adds a community; it doesn't replace the one you're
+    // already in. Overwriting quietly dropped people out of their class the
+    // moment a friend sent them a different link.
+    const existing = getMe("circle");
     setMe({
+      ...(existing ?? {}),
       name: name.trim(),
-      headline: headline.trim(),
-      company: company.trim(),
+      headline: headline.trim() || existing?.headline || "",
+      company: company.trim() || existing?.company || "",
       cityId,
       mode,
-      entityIds: [invite.entityId],
-      beaconEventId: null,
+      entityIds: Array.from(new Set([...(existing?.entityIds ?? []), invite.entityId])),
+      beaconEventId: existing?.beaconEventId ?? null,
     });
     markJustJoined();
     router.push("/circle");
@@ -151,6 +157,13 @@ export default function CircleJoin({ invite }: { invite: CircleInvite }) {
 
           {/* Everything it takes to be in. */}
           <div className="flex flex-col gap-5 p-6">
+            {existing && (
+              <p className="rounded-2xl p-3 text-[12.5px] leading-4" style={{ background: "var(--sunk)" }}>
+                You&rsquo;re already on MagicPal as <span className="font-semibold">{existing.name}</span>. Joining this adds it to your
+                communities — it doesn&rsquo;t replace {existing.entityIds.length === 1 ? "the one" : "the ones"} you&rsquo;re in.
+              </p>
+            )}
+
             <label className="block">
               <span className="label">Your name</span>
               <input

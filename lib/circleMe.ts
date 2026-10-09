@@ -38,6 +38,23 @@ export type CircleMe = {
    * contribution goes to. Absent means you aren't offering time.
    */
   offer?: { causeId: string; note: string; base: number } | null;
+  /**
+   * Alumni networks only. Scoped to one network by `entityId`, so switching
+   * to a community doesn't carry a mentorship across into somewhere it
+   * doesn't belong.
+   */
+  mentorship?: {
+    role: "mentee" | "mentor";
+    entityId: string;
+    goal?: string;
+    mentorId?: string;
+    requestedIds?: string[];
+    startedDaysAgo?: number;
+    done?: number[];
+    outcome?: string;
+    acceptedIds?: string[];
+    declinedIds?: string[];
+  } | null;
 };
 
 /**

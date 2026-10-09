@@ -216,6 +216,15 @@ const COMPANIES = [
 export const CIRCLE_ENTITY_IDS = [
   "isb-pgp-2019",
   "isb-pgp-2022",
+  // Earlier cohorts, so an institution has people who came out before you.
+  // Without them a class can only ever mentor itself, which is nobody.
+  "isb-pgp-2010",
+  "isb-pgp-2012",
+  "isb-pgp-2014",
+  "isb-pgp-2016",
+  "iitb-2010",
+  "iitb-2012",
+  "stanford-gsb-2013",
   "isb-egp-2022",
   "iitb-2018",
   "iitb-blr",

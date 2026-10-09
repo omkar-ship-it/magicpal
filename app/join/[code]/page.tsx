@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { inviteByCode } from "@/lib/circleData";
-import CircleJoin from "@/components/CircleJoin";
+import CircleJoinLoader from "@/components/CircleJoinLoader";
 
 /**
  * The link an alumni admin shares. Deliberately outside the (app) group so
@@ -11,5 +11,5 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
   const { code } = await params;
   const invite = inviteByCode(code);
   if (!invite) notFound();
-  return <CircleJoin invite={invite} />;
+  return <CircleJoinLoader invite={invite} />;
 }
