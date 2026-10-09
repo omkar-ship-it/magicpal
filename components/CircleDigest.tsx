@@ -2,7 +2,9 @@
 
 import { avatarUrl } from "@/lib/avatar";
 import { useState } from "react";
-import type { CircleEvent } from "@/lib/circleData";
+import type { CircleEvent, CircleMember } from "@/lib/circleData";
+import { matchesFor, daysUntilNextBatch } from "@/lib/matching";
+import { IconSparkle } from "./Icons";
 import { IconBeacon, IconCalendar, IconChat, IconChevronDown, IconX } from "./Icons";
 import type { CircleMe } from "@/lib/circleMe";
 
@@ -31,6 +33,8 @@ export default function CircleDigest({
   me,
   events,
   newPostCount,
+  pool,
+  onMatches,
   onEvent,
   onFeed,
   onDismiss,
@@ -38,11 +42,31 @@ export default function CircleDigest({
   me: CircleMe;
   events: CircleEvent[];
   newPostCount: number;
+  /** Open network only: the roster to match against. */
+  pool?: CircleMember[];
+  onMatches?: () => void;
   onEvent: (id: string) => void;
   onFeed: () => void;
   onDismiss: () => void;
 }) {
   const lines = buildDigest(me, events, newPostCount, { event: onEvent, feed: onFeed });
+  // Out in the open, the most actionable thing on any given day isn't an
+  // event or a post — it's the three people picked for you this week.
+  if (pool && onMatches) {
+    const picks = matchesFor(me, pool, { limit: 3 });
+    if (picks.length > 0) {
+      const days = daysUntilNextBatch();
+      lines.unshift({
+        id: "matches",
+        icon: <IconSparkle size={16} />,
+        hot: true,
+        headline: `${picks.length} introductions for you`,
+        detail: `${picks[0].member.name.split(" ")[0]}, ${picks[1]?.member.name.split(" ")[0] ?? ""} and one more · new set in ${days}d`,
+        faces: picks.map((p) => p.member.name),
+        onClick: onMatches,
+      });
+    }
+  }
   // A phone screen is mostly map; four stacked rows covered all of it. There
   // it opens as one line you can tap to expand, and only the top item shows.
   const [open, setOpen] = useState(false);
@@ -62,20 +86,29 @@ export default function CircleDigest({
           </button>
         </div>
 
-        {/* Phone: collapsed to the single most actionable line. */}
+        {/* Phone: collapsed to the single most actionable line. Tapping the
+            row does that line's thing — the chevron is what discloses the
+            rest. Wiring the row to expand instead made the most useful tap
+            target on the screen do nothing but reveal a list. */}
         <div className="flex items-center gap-1 sm:hidden">
-          <button onClick={() => setOpen((v) => !v)} className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl p-1.5 text-left">
+          <button onClick={top.onClick} className="tap flex min-w-0 flex-1 items-center gap-2 rounded-2xl p-1.5 text-left">
             <Glyph line={top} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[12.5px] font-semibold leading-tight">{top.headline}</span>
-              <span className="block truncate text-[11px] text-[var(--ink-soft)]">
-                {open ? "Tap to collapse" : `${top.detail}${lines.length > 1 ? ` · +${lines.length - 1} more` : ""}`}
-              </span>
+              <span className="block truncate text-[11px] text-[var(--ink-soft)]">{top.detail}</span>
             </span>
-            {lines.length > 1 && (
-              <IconChevronDown size={15} className="flex-none text-[var(--ink-soft)]" style={{ transform: open ? "rotate(180deg)" : undefined }} />
-            )}
           </button>
+          {lines.length > 1 && (
+            <button
+              onClick={() => setOpen((v) => !v)}
+              className="win-btn flex-none"
+              title={open ? "Show less" : `${lines.length - 1} more`}
+              aria-label={open ? "Show less" : `${lines.length - 1} more`}
+              aria-expanded={open}
+            >
+              <IconChevronDown size={14} style={{ transform: open ? "rotate(180deg)" : undefined }} />
+            </button>
+          )}
           <button onClick={onDismiss} className="win-btn flex-none" title="Dismiss" aria-label="Dismiss">
             <IconX size={14} />
           </button>

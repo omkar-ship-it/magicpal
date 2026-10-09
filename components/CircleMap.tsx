@@ -9,6 +9,7 @@ import Avatar from "./Avatar";
 import MemberHoverCard from "./MemberHoverCard";
 import MemberProfile from "./MemberProfile";
 import BookTime, { type Booking } from "./BookTime";
+import Matches from "./Matches";
 import { entityById } from "@/lib/networks";
 import {
   ALL_CIRCLE_EVENTS,
@@ -55,6 +56,7 @@ import {
   IconCity,
   IconLock,
   IconPeople,
+  IconSparkle,
   IconPin,
   IconPlus,
 } from "./Icons";
@@ -319,6 +321,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
 
   /** What the one open window is called. */
   function titleFor(v: string): string {
+    if (v === "matches") return "For you";
     if (v === "feed") return "Feed";
     if (v === "meetup") return "Call a meetup";
     if (v === "people") return qualifiedName(activeEntityId) || "Members";
@@ -619,8 +622,9 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
           className="pointer-events-auto flex w-full max-w-[560px] items-center gap-0.5 rounded-3xl border border-[var(--line)] p-1.5 sm:w-auto sm:gap-1"
           style={{ background: "color-mix(in srgb, var(--card) 99%, transparent)", backdropFilter: "blur(16px)", boxShadow: "var(--shadow-lift)" }}
         >
+          {isOpen && <BarButton icon={<IconSparkle />} label="For you" on={view === "matches"} onClick={() => open("matches")} />}
           <BarButton icon={<IconFeed />} label="Feed" on={view === "feed"} onClick={() => open("feed")} />
-          <BarButton icon={<IconPeople />} label="People" count={members.length} on={view === "people"} onClick={() => open("people")} />
+          <BarButton icon={<IconPeople />} label="People" count={isOpen ? undefined : members.length} on={view === "people"} onClick={() => open("people")} />
           <BarButton icon={<IconCalendar />} label="Events" count={events.length} on={view === "events"} onClick={() => open("events")} />
           <BarButton icon={<IconChat />} label="Chats" on={view === "chats" || Boolean(view?.startsWith("chat:"))} onClick={() => open("chats")} />
           <span className="mx-0.5 h-8 w-px flex-none" style={{ background: "var(--line)" }} />
@@ -665,6 +669,8 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
           me={me}
           events={events}
           newPostCount={CIRCLE_POSTS.filter((p) => p.minutesAgo < 2880).length}
+          pool={isOpen ? members : undefined}
+          onMatches={isOpen ? () => open("matches") : undefined}
           onEvent={(id) => push(`event:${id}`)}
           onFeed={() => open("feed")}
           onDismiss={() => setDigestOff(true)}
@@ -699,6 +705,16 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
                 if (c) mapRef.current?.flyTo({ center: [c.lng, c.lat], zoom: 9, duration: 1200 });
               }}
               onOpen={(id) => push(`member:${id}`)}
+            />
+          )}
+
+          {view === "matches" && (
+            <Matches
+              me={me}
+              pool={members}
+              onOpenMember={(id) => push(`member:${id}`)}
+              onMessage={() => {}}
+              onOpenChat={(id) => push(`chat:${id}`)}
             />
           )}
 
