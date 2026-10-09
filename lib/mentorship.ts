@@ -196,16 +196,35 @@ export function mentorshipStats(entityId: string, myGradYear: number) {
   };
 }
 
-/** Somebody asking you. Seeded so the mentor side has something to show. */
-export function incomingRequestFor(entityId: string, myGradYear: number): { member: CircleMember; goal: string; note: string } | null {
-  const juniors = membersOf(institutionOf(entityId)).filter((m) => m.gradYear >= myGradYear + 2 && rnd(`req-${m.id}`) % 100 < 6);
-  const m = juniors[0];
-  if (!m) return null;
-  return {
-    member: m,
-    goal: GOAL_TEMPLATES[rnd(`rg-${m.id}`) % GOAL_TEMPLATES.length],
-    note: `We haven't met — I'm ${m.gradYear - myGradYear} years behind you out of the same place. I've read what you've done and I think you've already made the decision I'm stuck on. Four conversations, and I'll come prepared to each.`,
-  };
+export type MenteeCandidate = { member: CircleMember; goal: string; note: string; wants: string | null };
+
+/**
+ * People asking, ranked for one mentor.
+ *
+ * A mentor shouldn't be handed a single take-it-or-leave-it request —
+ * choosing who you spend four hours on is most of why anyone agrees to
+ * spend them. Verified only, and ordered so the ones who want something
+ * the mentor actually said they'd talk about come first.
+ */
+export function menteeCandidatesFor(entityId: string, myGradYear: number, myTopics: string[], limit = 6): MenteeCandidate[] {
+  return membersOf(institutionOf(entityId))
+    .filter((m) => m.verified && m.gradYear >= myGradYear + 2 && rnd(`req-${m.id}`) % 100 < 22)
+    .map((m) => {
+      const goal = GOAL_TEMPLATES[rnd(`rg-${m.id}`) % GOAL_TEMPLATES.length];
+      const wants = m.helpWith.find((h) => myTopics.includes(h)) ?? null;
+      return {
+        member: m,
+        goal,
+        wants,
+        note: `We haven't met — I'm ${m.gradYear - myGradYear} years behind you out of the same place. ${
+          wants ? `You've said you'll talk about ${wants}, which is most of what this turns on.` : "I think you've already made the decision I'm stuck on."
+        } Four conversations, and I'll come prepared to each.`,
+        score: (wants ? 20 : 0) + (10 - Math.abs(m.gradYear - myGradYear - 7)) + (rnd(`mcs-${m.id}`) % 5),
+      };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ ...rest }) => rest as MenteeCandidate);
 }
 
 export const cityOf = (m: CircleMember) => cityById(m.cityId)?.name ?? "";

@@ -2,16 +2,15 @@
 
 import { useState } from "react";
 import { entityById } from "@/lib/networks";
-import { memberById, mentorTier, type CircleMember } from "@/lib/circleData";
+import { memberById, type CircleMember } from "@/lib/circleData";
 import type { CircleMe } from "@/lib/circleMe";
 import {
   GOAL_TEMPLATES,
   MENTOR_WANTS,
   OUTCOMES,
   SESSION_ARC,
-  cityOf,
   draftRequest,
-  incomingRequestFor,
+  menteeCandidatesFor,
   institutionName,
   mentorMatchesFor,
   mentorshipStats,
@@ -21,6 +20,7 @@ import {
 } from "@/lib/mentorship";
 import Avatar from "./Avatar";
 import VerifiedBadge from "./VerifiedBadge";
+import MatchPair from "./MatchPair";
 import { IconAsk, IconCheck, IconClock, IconHeart, IconPeople, IconSparkle } from "./Icons";
 
 type Ment = NonNullable<CircleMe["mentorship"]>;
@@ -100,7 +100,6 @@ export default function Mentorship({
         myGradYear={myGradYear}
         verified={verified}
         set={set}
-        onOpenMember={onOpenMember}
         onMessage={onMessage}
       />
 
@@ -185,9 +184,17 @@ function MenteeBlock({
 
   if (!a?.goal) {
     return (
-      <Section title="Find a mentor" icon={<IconAsk size={13} />}>
+      <Section
+        title="I want a mentor"
+        icon={<IconAsk size={13} />}
+        toggle={{ on: a !== null, onChange: (v) => set({ asMentee: v ? { goal: "" } : null }) }}
+      >
         {!verified ? (
           <Locked />
+        ) : a === null ? (
+          <p className="text-[12.5px] leading-4 text-[var(--ink-soft)]">
+            Four conversations with someone who came out of here before you. Turn it on and say what you&rsquo;re trying to work out.
+          </p>
         ) : (
           <>
             <Shape />
@@ -227,9 +234,10 @@ function MenteeBlock({
   }
 
   const goal = a.goal;
-  const matches = mentorMatchesFor(entityId, myGradYear, goal, me.interests ?? []).filter((mm) => mm.member.verified);
+  const matches = mentorMatchesFor(entityId, myGradYear, goal, me.interests ?? [], 8).filter((mm) => mm.member.verified && !mm.full);
+  const pick = matches[(a.pickIndex ?? 0) % Math.max(1, matches.length)];
 
-  if (composing) {
+  if (composing && pick) {
     return (
       <Section title={`Ask ${composing.member.name.split(" ")[0]}`} icon={<IconAsk size={13} />}>
         <div className="card p-3.5">
@@ -274,92 +282,54 @@ function MenteeBlock({
   }
 
   return (
-    <Section title="Who to ask" icon={<IconAsk size={13} />}>
+    <Section title="Your match" icon={<IconAsk size={13} />} toggle={{ on: true, onChange: () => set({ asMentee: null }) }}>
       <div className="rounded-2xl p-3" style={{ background: "var(--sunk)" }}>
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Your goal</p>
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">What you&rsquo;re working out</p>
         <p className="mt-0.5 text-[13.5px] font-medium">{goal}</p>
-        <button onClick={() => set({ asMentee: null })} className="mt-1 text-[11.5px] font-semibold" style={{ color: "var(--brand)" }}>
+        <button onClick={() => set({ asMentee: { ...a, goal: "" } })} className="mt-1 text-[11.5px] font-semibold" style={{ color: "var(--brand)" }}>
           Change
         </button>
       </div>
-      <p className="mt-2 text-[11.5px] leading-4 text-[var(--ink-soft)]">
-        {matches.length} verified alumni of {institutionName(entityId)} who came out before you — never classmates. Ask one; you can ask
-        someone else if they say no.
-      </p>
 
-      <div className="mt-3 flex flex-col gap-2.5">
-        {matches.map((mm) => (
-          <MentorCard
-            key={mm.member.id}
-            mm={mm}
-            declined={(a.declinedBy ?? []).includes(mm.member.id)}
-            onOpen={() => onOpenMember(mm.member.id)}
-            onAsk={() => {
-              setNote(draftRequest(mm.member.name, mm.yearsAhead, goal, mm.helpWith.find((h) => (me.interests ?? []).includes(h)) ?? null));
-              setComposing(mm);
-            }}
-          />
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-function MentorCard({ mm, declined, onOpen, onAsk }: { mm: MentorMatch; declined: boolean; onOpen: () => void; onAsk: () => void }) {
-  const tier = mentorTier(mm.member.mentoredCount);
-  return (
-    <div className="card p-3.5">
-      <button onClick={onOpen} className="flex w-full items-center gap-2.5 text-left">
-        <Avatar name={mm.member.name} size={44} />
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1 text-[14px] font-semibold leading-tight">
-            <span className="min-w-0 truncate">{mm.member.name}</span>
-            {mm.member.verified && <VerifiedBadge size={13} />}
-          </span>
-          <span className="block truncate text-[12px] text-[var(--ink-soft)]">
-            {mm.member.headline} · {mm.member.company}
-          </span>
-          <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">
-            Class of {mm.member.gradYear} · {cityOf(mm.member)}
-          </span>
-        </span>
-        <span
-          className="flex-none rounded-full px-2 py-0.5 text-[10.5px] font-semibold"
-          style={{ background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" }}
-        >
-          {mm.yearsAhead}y ahead
-        </span>
-      </button>
-
-      {tier && (
-        <p className="mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: "var(--brand)", color: "#fff" }}>
-          <IconHeart size={11} /> {tier} · {mm.member.mentoredCount} mentored
+      {!pick ? (
+        <p className="mt-3 rounded-2xl p-4 text-center text-[12.5px] text-[var(--ink-soft)]" style={{ background: "var(--sunk)" }}>
+          Every mentor who fits is at capacity right now. They free up as arcs end.
         </p>
+      ) : (
+        <div className="mt-3">
+          <MatchPair
+            me={me}
+            other={pick.member}
+            side="mentee"
+            why={pick.why}
+            theyOffer={pick.helpWith.find((h) => (me.interests ?? []).includes(h)) ?? null}
+            youOffer={null}
+            yearsGap={pick.yearsAhead}
+          />
+
+          <div className="mt-3 flex gap-1.5">
+            <button
+              onClick={() => set({ asMentee: { ...a, pickIndex: ((a.pickIndex ?? 0) + 1) % Math.max(1, matches.length) } })}
+              className="btn btn-ghost btn-sm flex-1"
+            >
+              Someone else
+            </button>
+            <button
+              onClick={() => {
+                setNote(draftRequest(pick.member.name, pick.yearsAhead, goal, pick.helpWith.find((h) => (me.interests ?? []).includes(h)) ?? null));
+                setComposing(pick);
+              }}
+              className="btn btn-primary btn-sm flex-1"
+            >
+              Request {pick.member.name.split(" ")[0]}
+            </button>
+          </div>
+          <p className="mt-1.5 text-center text-[11px] text-[var(--ink-soft)]">
+            {matches.length} fit your goal. One request at a time — it&rsquo;s why mentors here still read them.
+          </p>
+        </div>
       )}
-
-      <p className="mt-2 text-[13px] leading-5">{mm.why}</p>
-
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {mm.helpWith.slice(0, 3).map((h) => (
-          <span key={h} className="pill" style={{ background: "var(--sunk)", color: "var(--ink)" }}>
-            {h}
-          </span>
-        ))}
-      </div>
-
-      <div className="mt-2.5 flex items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--ink-soft)]">
-          {mm.sessionsGiven} sessions · {mm.full ? "two mentees already" : `${2 - mm.menteesNow} slot${2 - mm.menteesNow === 1 ? "" : "s"} open`}
-        </span>
-        {declined ? (
-          <span className="flex-none text-[11.5px] text-[var(--ink-soft)]">Said no this round</span>
-        ) : (
-          <button onClick={onAsk} disabled={mm.full} className="btn btn-primary btn-sm flex-none">
-            {mm.full ? "Full" : "Ask them"}
-          </button>
-        )}
-      </div>
-    </div>
+    </Section>
   );
 }
 
@@ -372,7 +342,6 @@ function MentorBlock({
   myGradYear,
   verified,
   set,
-  onOpenMember,
   onMessage,
 }: {
   me: CircleMe;
@@ -381,15 +350,22 @@ function MentorBlock({
   myGradYear: number;
   verified: boolean;
   set: (p: Partial<Ment>) => void;
-  onOpenMember: (id: string) => void;
   onMessage: (id: string) => void;
 }) {
   const b = ment?.asMentor ?? null;
   const [wants, setWants] = useState(MENTOR_WANTS[0]);
+  const [pick, setPick] = useState(0);
 
   if (!b) {
     return (
-      <Section title="Offer to mentor" icon={<IconHeart size={13} />}>
+      <Section
+        title="I can mentor"
+        icon={<IconHeart size={13} />}
+        toggle={{
+          on: false,
+          onChange: () => set({ asMentor: { topics: me.helpWith ?? [], capacity: 2, wants, note: "", acceptedIds: [], declinedIds: [] } }),
+        }}
+      >
         {!verified ? (
           <Locked />
         ) : (
@@ -427,62 +403,66 @@ function MentorBlock({
     );
   }
 
-  const req = incomingRequestFor(entityId, myGradYear);
+  const candidates = menteeCandidatesFor(entityId, myGradYear, b.topics);
   const accepted = b.acceptedIds ?? [];
   const declined = b.declinedIds ?? [];
-  const pending = req && !accepted.includes(req.member.id) && !declined.includes(req.member.id);
+  const queue = candidates.filter((c) => !accepted.includes(c.member.id) && !declined.includes(c.member.id));
+  const req = queue[pick % Math.max(1, queue.length)];
   const atCap = accepted.length >= b.capacity;
 
   return (
-    <Section title="You're mentoring" icon={<IconHeart size={13} />}>
+    <Section title="You're mentoring" icon={<IconHeart size={13} />} toggle={{ on: true, onChange: () => set({ asMentor: null }) }}>
       <p className="text-[11.5px] leading-4 text-[var(--ink-soft)]">
         Listed for <span className="font-semibold">{b.wants.toLowerCase()}</span> · {accepted.length} of {b.capacity} taken
       </p>
 
-      {pending && req && (
-        <div className="card mt-2.5 p-3.5" style={{ borderColor: "var(--brand)" }}>
-          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--brand)" }}>
-            Someone is asking · {waitedLabel(2)}
+      {req && !atCap && (
+        <div className="mt-2.5">
+          <MatchPair
+            me={me}
+            other={req.member}
+            side="mentor"
+            why={`${req.member.name.split(" ")[0]} came out ${req.member.gradYear - myGradYear} years after you and is trying to work out: ${req.goal.toLowerCase()}. ${
+              req.wants ? `That turns on ${req.wants}, which you've said you'll talk about.` : "You've been through the version of it they're looking at."
+            }`}
+            theyOffer={null}
+            youOffer={req.wants}
+            yearsGap={req.member.gradYear - myGradYear}
+          />
+
+          <p className="mt-2.5 rounded-xl p-2.5 text-[12.5px] leading-4" style={{ background: "var(--sunk)" }}>
+            &ldquo;{req.note}&rdquo;
           </p>
-          <button onClick={() => onOpenMember(req.member.id)} className="mt-2 flex w-full items-center gap-2.5 text-left">
-            <Avatar name={req.member.name} size={42} />
-            <span className="min-w-0 flex-1">
-              <span className="flex items-center gap-1 text-[13.5px] font-semibold leading-tight">
-                <span className="min-w-0 truncate">{req.member.name}</span>
-                {req.member.verified && <VerifiedBadge size={12} />}
-              </span>
-              <span className="block truncate text-[12px] text-[var(--ink-soft)]">
-                {req.member.headline} · {req.member.company}
-              </span>
-              <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">
-                Class of {req.member.gradYear} · {req.member.gradYear - myGradYear} years behind you
-              </span>
-            </span>
-          </button>
 
-          <div className="mt-2.5 rounded-xl p-2.5" style={{ background: "var(--sunk)" }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">What they want out of it</p>
-            <p className="mt-0.5 text-[13px] font-medium">{req.goal}</p>
-          </div>
-
-          <p className="mt-2 text-[12.5px] leading-4">&ldquo;{req.note}&rdquo;</p>
-
-          <div className="mt-3 flex gap-1.5">
-            <button onClick={() => set({ asMentor: { ...b, declinedIds: [...declined, req.member.id] } })} className="btn btn-ghost btn-sm flex-1">
-              Not this round
+          <div className="mt-2.5 flex gap-1.5">
+            {/* Choosing who you spend four hours on is most of why anyone
+                agrees to spend them, so a mentor isn't handed one
+                take-it-or-leave-it request. */}
+            <button onClick={() => setPick((p) => p + 1)} disabled={queue.length < 2} className="btn btn-ghost btn-sm flex-1">
+              Someone else
             </button>
             <button
               onClick={() => set({ asMentor: { ...b, acceptedIds: [...accepted, req.member.id] } })}
-              disabled={atCap}
               className="btn btn-primary btn-sm flex-1"
             >
-              {atCap ? "You're full" : "Take it on"}
+              Take {req.member.name.split(" ")[0]} on
             </button>
           </div>
-          <p className="mt-1.5 text-[11px] leading-4 text-[var(--ink-soft)]">
-            Saying no is fine, and they&rsquo;re told plainly rather than left waiting. The cap is what makes a yes mean something.
-          </p>
+          <button
+            onClick={() => set({ asMentor: { ...b, declinedIds: [...declined, req.member.id] } })}
+            className="mt-1.5 w-full text-[11.5px] font-semibold"
+            style={{ color: "var(--ink-soft)" }}
+          >
+            Not this round — they&rsquo;re told plainly
+          </button>
+          <p className="mt-1.5 text-center text-[11px] text-[var(--ink-soft)]">{queue.length} asking · you take two at a time</p>
         </div>
+      )}
+
+      {atCap && (
+        <p className="mt-2.5 rounded-2xl p-3 text-center text-[12.5px] leading-4 text-[var(--ink-soft)]" style={{ background: "var(--sunk)" }}>
+          You&rsquo;re full. New requests wait until one of your arcs ends — which is the reason a yes from you is worth something.
+        </p>
       )}
 
       {accepted.length > 0 && (
@@ -495,7 +475,10 @@ function MentorBlock({
                 <div className="flex items-center gap-2.5">
                   <Avatar name={mm.name} size={38} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-semibold leading-tight">{mm.name}</span>
+                    <span className="flex items-center gap-1 text-[13px] font-semibold leading-tight">
+                      <span className="min-w-0 truncate">{mm.name}</span>
+                      {mm.verified && <VerifiedBadge size={11} />}
+                    </span>
                     <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">Session 1 of 4 · {SESSION_ARC[0].label}</span>
                   </span>
                   <button onClick={() => onMessage(id)} className="btn btn-ghost btn-sm flex-none">
@@ -509,15 +492,11 @@ function MentorBlock({
         </div>
       )}
 
-      {!pending && accepted.length === 0 && (
+      {queue.length === 0 && accepted.length === 0 && (
         <p className="mt-2.5 rounded-2xl p-3 text-center text-[12.5px] leading-4 text-[var(--ink-soft)]" style={{ background: "var(--sunk)" }}>
           You&rsquo;re listed. Requests tend to arrive in a rush after the class newsletter goes out.
         </p>
       )}
-
-      <button onClick={() => set({ asMentor: null })} className="btn btn-ghost btn-sm mt-2.5">
-        Stop mentoring
-      </button>
     </Section>
   );
 }
@@ -674,12 +653,44 @@ function Locked() {
   );
 }
 
-function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+/**
+ * A block you switch on. Both sides of mentoring are opt-in and
+ * independent — most alumni are eventually both — so each gets its own
+ * switch rather than a single either/or role.
+ */
+function Section({
+  title,
+  icon,
+  toggle,
+  children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  toggle?: { on: boolean; onChange: (v: boolean) => void };
+  children: React.ReactNode;
+}) {
   return (
     <div className="mt-5">
-      <p className="label label-icon">
-        {icon} {title}
-      </p>
+      <div className="flex items-center gap-2">
+        <p className="label label-icon mb-0 min-w-0 flex-1">
+          {icon} {title}
+        </p>
+        {toggle && (
+          <button
+            onClick={() => toggle.onChange(!toggle.on)}
+            role="switch"
+            aria-checked={toggle.on}
+            aria-label={title}
+            className="relative h-[22px] w-[38px] flex-none rounded-full transition-colors"
+            style={{ background: toggle.on ? "var(--brand)" : "var(--line)" }}
+          >
+            <span
+              className="absolute top-[3px] h-4 w-4 rounded-full bg-white transition-transform"
+              style={{ left: 3, transform: toggle.on ? "translateX(16px)" : "none" }}
+            />
+          </button>
+        )}
+      </div>
       <div className="mt-1.5">{children}</div>
     </div>
   );

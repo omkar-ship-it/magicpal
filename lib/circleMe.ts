@@ -58,6 +58,8 @@ export type CircleMe = {
       done?: number[];
       outcome?: string;
       declinedBy?: string[];
+      /** Which of the ranked matches is on screen — 'someone else' advances it. */
+      pickIndex?: number;
     } | null;
     asMentor?: {
       topics: string[];

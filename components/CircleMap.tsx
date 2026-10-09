@@ -143,6 +143,8 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
   const [zoom, setZoom] = useState(1.6);
   /** Which level of the hierarchy the feed is pointed at. */
   const [feedLevel, setFeedLevel] = useState<string>(EVERYTHING);
+  /** The feed shows the network you're standing in, not a merged everything. */
+  const feedAt = isOpen ? EVERYTHING : (feedLevel === EVERYTHING ? activeEntityId : feedLevel);
   /** Meetups you call this session, on top of the seeded ones. */
   const [myEvents, setMyEvents] = useState<CircleEvent[]>([]);
   const [digestOff, setDigestOff] = useState(false);
@@ -310,6 +312,29 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
 
   // Opening an event moves the map to it: a located one to its city, an
   // online one out to the whole spread of people joining.
+  // Opening the Events list frames the calendar, so "show me events" puts
+  // them on the map rather than leaving you to find the pins yourself.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || view !== "events") return;
+    const pts = events.filter((e) => e.lat != null && e.lng != null).map((e) => [e.lng!, e.lat!] as [number, number]);
+    if (pts.length === 0) return;
+    const lats = pts.map((p) => p[1]);
+    const lngs = pts.map((p) => p[0]);
+    map.fitBounds(
+      [
+        [Math.min(...lngs), Math.min(...lats)],
+        [Math.max(...lngs), Math.max(...lats)],
+      ],
+      {
+        padding: narrow ? { top: 80, bottom: 190, left: 28, right: 28 } : { top: 90, bottom: 150, left: 70, right: 500 },
+        duration: 1300,
+        maxZoom: 6,
+      }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, mapReady, events.length]);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !openEvent || openEvent.liveNow) return;
@@ -374,41 +399,51 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
       >
         <NavigationControl position="bottom-right" showCompass={false} />
 
-        {/* City bubbles — the coarse layer. Everyone on the map is counted
-            here; those sharing live location also get a pin of their own. */}
+        {/* Faces, not counts.
+            A numbered bubble tells you how many people are in Mumbai; a
+            stack of faces tells you *who*, which is the question anyone
+            actually opens a map of people to answer. Up to three show, and
+            the rest are a quiet "+" rather than a figure — the number was
+            never the interesting part. */}
         {!venueEvent &&
           cityGroups.map((g) => {
-            // Zoomed out, the bubble stands for everyone in the city. Once the
-            // precise pins appear it stands only for the people who aren't in
-            // them, so nobody is counted twice.
             const shown = precise ? g.members.filter((m) => m.mode === "base") : g.members;
             if (shown.length === 0) return null;
-            const size = Math.min(62, 24 + Math.sqrt(shown.length) * 6);
+            const faces = shown.slice(0, 3);
             return (
               <Marker key={g.city.id} longitude={g.city.lng} latitude={g.city.lat} anchor="center">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setCityFilter(g.city.id);
-                    open("people");
-                  }}
-                  className="map-pin grid place-items-center rounded-full font-bold text-white"
-                  style={{
-                    width: size,
-                    height: size,
-                    fontSize: size > 44 ? 14 : 12,
-                    background: "color-mix(in srgb, var(--brand) 82%, transparent)",
-                    border: "2px solid var(--card)",
-                    boxShadow: "var(--shadow-lift)",
-                  }}
-                  title={
-                    precise
-                      ? `${shown.length} in ${g.city.name} sharing city only`
-                      : `${g.members.length} in ${g.city.name}`
-                  }
-                >
-                  {shown.length}
-                </button>
+                <span className="hover-host relative block">
+                  {shown.length === 1 && <MemberHoverCard m={shown[0]} common={isOpen ? commonGround(me, shown[0]) : null} />}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (shown.length === 1) {
+                        setPinned(shown[0].id);
+                      } else {
+                        setCityFilter(g.city.id);
+                        open("people");
+                      }
+                    }}
+                    className="map-pin flex items-center"
+                    style={{ padding: 0 }}
+                    title={`${shown.length} in ${g.city.name}`}
+                    aria-label={`${shown.length} in ${g.city.name}`}
+                  >
+                    <span className="flex -space-x-2.5">
+                      {faces.map((m) => (
+                        <Avatar key={m.id} name={m.name} size={28} ring={2} />
+                      ))}
+                      {shown.length > 3 && (
+                        <span
+                          className="grid h-7 w-7 place-items-center rounded-full text-[11px] font-bold text-white"
+                          style={{ background: "var(--brand)", boxShadow: "0 0 0 2px var(--card)" }}
+                        >
+                          +
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </span>
               </Marker>
             );
           })}
@@ -476,16 +511,20 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
                     ev.stopPropagation();
                     push(`event:${e.id}`);
                   }}
-                  className={`map-pin grid h-7 w-7 place-items-center rounded-xl${e.liveNow ? " beacon-ring" : ""}`}
+                  className={`map-pin grid place-items-center rounded-xl${e.liveNow ? " beacon-ring" : ""}`}
                   style={{
+                    // Bigger while you're looking at the calendar, so the
+                    // answer to "where are these" is on the map itself.
+                    width: view === "events" ? 36 : 28,
+                    height: view === "events" ? 36 : 28,
                     background: "var(--card)",
                     color: e.kind === "meetup" ? "var(--ink)" : "var(--brand)",
                     border: `2px solid ${e.kind === "meetup" ? "var(--line)" : "var(--brand)"}`,
-                    boxShadow: "var(--shadow)",
+                    boxShadow: view === "events" ? "var(--shadow-lift)" : "var(--shadow)",
                   }}
                   title={`${e.name} — ${e.dateLabel}`}
                 >
-                  {e.kind === "meetup" ? <IconPin size={15} /> : <IconCalendar size={15} />}
+                  {e.kind === "meetup" ? <IconPin size={view === "events" ? 18 : 15} /> : <IconCalendar size={view === "events" ? 18 : 15} />}
                 </button>
               </Marker>
             ))}
@@ -570,6 +609,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
                       setActiveEntityId(id);
                       setCityFilter(null);
                       setSwitcherOpen(false);
+                      setFeedLevel(EVERYTHING);
                       // The module is gone for a community, so the open view
                       // has to go with it rather than render into nothing.
                       if (!isAlumniNetwork(id)) setStack((cur) => cur.filter((v) => v !== "mentoring"));
@@ -780,7 +820,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
           {view === "feed" && (
             <CircleFeed
               me={me}
-              level={feedLevel}
+              level={feedAt}
               openNetwork={isOpen}
               onLevel={setFeedLevel}
               onOpenMember={(id) => push(`member:${id}`)}
