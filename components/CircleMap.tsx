@@ -6,11 +6,13 @@ import MapGL, { Marker, Popup, NavigationControl } from "react-map-gl/mapbox";
 import type { MapRef } from "react-map-gl/mapbox";
 import "mapbox-gl/dist/mapbox-gl.css";
 import Avatar from "./Avatar";
+import VerifiedBadge from "./VerifiedBadge";
 import MemberHoverCard from "./MemberHoverCard";
 import MemberProfile from "./MemberProfile";
 import BookTime, { type Booking } from "./BookTime";
 import Matches from "./Matches";
 import Mentorship from "./Mentorship";
+import SearchBar, { NO_FACETS, matchesFacets, matchesQuery, type Facets } from "./SearchBar";
 import { entityById, isAlumniNetwork } from "@/lib/networks";
 import {
   ALL_CIRCLE_EVENTS,
@@ -24,10 +26,8 @@ import {
   pointOf,
   qualifiedName,
   CIRCLE_POSTS,
-  ROLE_GROUPS,
   commonGround,
   relevance,
-  timeOfferFor,
   causeById,
   formatAmount,
   rnd,
@@ -72,6 +72,15 @@ const MAP_STYLE = "mapbox://styles/mapbox/light-v11";
  * just piles the avatars on top of each other.
  */
 const PRECISE_ZOOM = 9;
+
+/**
+ * Communities anyone in the closed experience can add without an invite.
+ *
+ * Alumni networks still need one — that's the whole point of them — but an
+ * interest community is open by nature, and making people hunt for a link
+ * to join one is friction with nothing on the other side of it.
+ */
+const JOINABLE = ["climate", "blr-founders", "women-product", "yc"];
 
 /** Openers, so a cold thread has something in it. Deterministic per member. */
 function seedThread(m: CircleMember, communityName: string): MockMessage[] {
@@ -120,10 +129,10 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
   const mapRef = useRef<MapRef | null>(null);
   const [me, setMeState] = useState<CircleMe | null>(() => getMe(variant));
   const [activeEntityId, setActiveEntityId] = useState<string>(() => getMe(variant)?.entityIds[0] ?? "");
-  /** Open network only: coarse role bucket, since membership isn't narrowing anything. */
-  const [roleFilter, setRoleFilter] = useState("all");
   /** Sessions you booked this session, shown back on the member and in Chats. */
   const [bookings, setBookings] = useState<Booking[]>([]);
+  /** Search facets. Shared by both experiences — what narrows the list narrows the map. */
+  const [facets, setFacets] = useState<Facets>(NO_FACETS);
   const [stack, setStack] = useState<View[]>([]);
   const [panelSize, setPanelSize] = useState<PageSize>("side");
   const [query, setQuery] = useState("");
@@ -189,17 +198,10 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
     () =>
       members.filter((m) => {
         if (cityFilter && m.cityId !== cityFilter) return false;
-        if (isOpen) {
-          if (roleFilter === "book") {
-            if (!timeOfferFor(m)) return false;
-          } else if (!(ROLE_GROUPS.find((r) => r.id === roleFilter) ?? ROLE_GROUPS[0]).match(m)) {
-            return false;
-          }
-        }
-        if (!q) return true;
-        return `${m.name} ${m.headline} ${m.company} ${cityById(m.cityId)?.name ?? ""}`.toLowerCase().includes(q);
+        if (!matchesFacets(m, facets)) return false;
+        return matchesQuery(m, q);
       }),
-    [members, q, cityFilter, isOpen, roleFilter]
+    [members, q, cityFilter, facets]
   );
 
   // An online event has no venue, so the map does the thing only it can:
@@ -225,6 +227,12 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
 
   /** One bubble per city: the coarse, city-level truth about where the community is. */
   const cityGroups = groupByCity(onMap);
+  /** Topics people here actually offer, so the filter never lists an empty one. */
+  const topicsInNetwork = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const m of members) for (const h of m.helpWith) seen.set(h, (seen.get(h) ?? 0) + 1);
+    return [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+  }, [members]);
 
   // ── events and beacons ───────────────────────────────────────────────
   /** Events hosted by any community you're in — live ones first. */
@@ -520,6 +528,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
 
       {/* ── top: what the map is scoped to ── */}
       <div className="float-in pointer-events-none fixed inset-x-0 top-3 z-[1200] flex flex-col items-center gap-1.5 px-3 sm:top-5">
+        <div className="flex max-w-full items-start gap-1.5">
         <div className="pointer-events-auto relative">
           <button
             onClick={() => !isOpen && setSwitcherOpen((v) => !v)}
@@ -547,10 +556,10 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
               {onMap.length.toLocaleString()} on the map
               {offMapCount > 0 ? ` · ${offMapCount} off it` : ""}
             </span>
-            {!isOpen && me.entityIds.length > 1 && <IconChevronDown size={14} className="flex-none text-[var(--ink-soft)]" />}
+            {!isOpen && <IconChevronDown size={14} className="flex-none text-[var(--ink-soft)]" />}
           </button>
 
-          {switcherOpen && !isOpen && me.entityIds.length > 1 && (
+          {switcherOpen && !isOpen && (
             <div className="card absolute left-1/2 top-[52px] w-64 -translate-x-1/2 p-1.5">
               {me.entityIds.map((id) => {
                 const e = entityById(id);
@@ -573,29 +582,56 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
                   </button>
                 );
               })}
+
+              {/* The switcher is also where you find more. Discovery that
+                  lives somewhere else is discovery nobody does. */}
+              {JOINABLE.filter((id) => !me.entityIds.includes(id)).length > 0 && (
+                <>
+                  <p className="mt-1.5 px-2 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
+                    Open to you
+                  </p>
+                  {JOINABLE.filter((id) => !me.entityIds.includes(id)).map((id) => {
+                    const e = entityById(id);
+                    return (
+                      <button
+                        key={id}
+                        onClick={() => {
+                          update({ entityIds: [...me.entityIds, id] });
+                          setActiveEntityId(id);
+                          setCityFilter(null);
+                          setSwitcherOpen(false);
+                          if (!isAlumniNetwork(id)) setStack((cur) => cur.filter((v) => v !== "mentoring"));
+                        }}
+                        className="tap flex w-full items-center gap-2 rounded-xl p-2 text-left hover:bg-[var(--sunk)]"
+                      >
+                        <span className="text-[15px]">{e?.emoji}</span>
+                        <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{e?.name}</span>
+                        <span className="flex-none text-[11px] font-semibold" style={{ color: "var(--brand)" }}>
+                          Join
+                        </span>
+                      </button>
+                    );
+                  })}
+                </>
+              )}
             </div>
           )}
         </div>
 
-        {/* With no membership narrowing the map, role is the first cut. */}
-        {isOpen && !view && (
-          <div
-            className="pointer-events-auto flex max-w-[calc(100vw-24px)] gap-1 overflow-x-auto rounded-2xl border border-[var(--line)] p-1"
-            style={{ background: "color-mix(in srgb, var(--card) 93%, transparent)", backdropFilter: "blur(12px)", boxShadow: "var(--shadow)", scrollbarWidth: "none" }}
-          >
-            {[...ROLE_GROUPS, { id: "book", label: "Open to book" }].map((r) => (
-              <button
-                key={r.id}
-                onClick={() => setRoleFilter(r.id)}
-                className="tap flex-none whitespace-nowrap rounded-xl px-2.5 py-1 text-[11.5px] font-semibold"
-                style={roleFilter === r.id ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)" } : { color: "var(--ink-soft)" }}
-                aria-pressed={roleFilter === r.id}
-              >
-                {r.label}
-              </button>
-            ))}
-          </div>
-        )}
+          <SearchBar
+            people={members}
+            events={events}
+            facets={facets}
+            query={query}
+            cities={cityGroups.map((g) => ({ id: g.city.id, name: g.city.name, count: g.members.length }))}
+            topics={topicsInNetwork}
+            showMentorFilters={!isOpen}
+            onQuery={setQuery}
+            onFacets={setFacets}
+            onOpenMember={(id) => push(`member:${id}`)}
+            onOpenEvent={(id) => push(`event:${id}`)}
+          />
+        </div>
       </div>
 
       {/* The map is showing someone else's population — say so, or the count
@@ -790,6 +826,8 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
               onAvatar={(next) => update({ photoUrl: next.photoUrl, avatarStyle: next.style })}
               onField={update}
               openNetwork={isOpen}
+              activeEntityId={activeEntityId}
+              onOpenMember={(id) => push(`member:${id}`)}
               onStopBeacon={() => update({ beaconEventId: null })}
               onOpenCommunity={(id) => {
                 setActiveEntityId(id);
@@ -833,7 +871,8 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
                   connectState={isOpen ? connectStateFor(m.id) : null}
                   common={isOpen ? commonGround(me, m) : null}
                   onConnect={() => update({ requestedIds: [...(me.requestedIds ?? []), m.id] })}
-                  onBook={isOpen ? () => push(`book:${m.id}`) : undefined}
+                  onBook={() => push(`book:${m.id}`)}
+                  freeBooking={!isOpen}
                   onMessage={() => push(`chat:${m.id}`)}
                   onOpenEvent={(id) => push(`event:${id}`)}
                   onOpenCity={(id) => {
@@ -851,6 +890,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
               return (
                 <BookTime
                   m={m}
+                  free={!isOpen}
                   onCancel={pop}
                   onDone={(b) => {
                     setBookings((cur) => [b, ...cur]);
@@ -996,7 +1036,10 @@ function PeopleList({
           <button key={m.id} onClick={() => onOpen(m.id)} className="tap flex w-full items-center gap-2.5 rounded-2xl p-2 text-left hover:bg-[var(--sunk)]">
             <Avatar name={m.name} size={36} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[12.5px] font-semibold leading-tight">{m.name}</span>
+              <span className="flex items-center gap-1 text-[12.5px] font-semibold leading-tight">
+                <span className="min-w-0 truncate">{m.name}</span>
+                {m.verified && <VerifiedBadge size={12} />}
+              </span>
               <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">
                 {m.headline} · {m.company}
               </span>

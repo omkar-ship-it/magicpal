@@ -27,10 +27,13 @@ export type Booking = {
  */
 export default function BookTime({
   m,
+  free,
   onCancel,
   onDone,
 }: {
   m: CircleMember;
+  /** Alumni booking: no contribution, because membership already vouched. */
+  free?: boolean;
   onCancel: () => void;
   onDone: (b: Booking) => void;
 }) {
@@ -71,10 +74,10 @@ export default function BookTime({
 
         <div className="mt-4 rounded-2xl p-4 text-left" style={{ background: "var(--sunk)" }}>
           <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
-            <IconHeart size={13} /> Your contribution
+            <IconHeart size={13} /> {free ? "Your slot" : "Your contribution"}
           </p>
           <p className="mt-1 text-[15px] font-bold">
-            {formatAmount(offer.currency, slot.amount)} to {cause.name}
+            {free ? "No charge — same network" : `${formatAmount(offer.currency, slot.amount)} to ${cause.name}`}
           </p>
           <p className="mt-0.5 text-[12px] leading-4 text-[var(--ink-soft)]">{cause.blurb}</p>
           <p className="mt-2 text-[11px] text-[var(--ink-soft)]" style={{ fontVariantNumeric: "tabular-nums" }}>
@@ -111,6 +114,7 @@ export default function BookTime({
       </div>
 
       {/* Said before anything is chosen, not after. */}
+      {!free && (
       <div className="mt-3 rounded-2xl border p-3" style={{ borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 6%, var(--card))" }}>
         <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--brand)" }}>
           <IconHeart size={13} /> Goes to {cause.name}
@@ -122,6 +126,7 @@ export default function BookTime({
           {offer.sessionsDone} sessions so far · {formatAmount(offer.currency, offer.raised)} raised
         </p>
       </div>
+      )}
 
       <p className="mt-3 text-[13px] leading-5">{offer.note}</p>
 
@@ -145,7 +150,7 @@ export default function BookTime({
                   aria-pressed={minutes === s.minutes}
                 >
                   <span className="block text-[13px] font-semibold">{s.minutes} minutes</span>
-                  <span className="block text-[11.5px] text-[var(--ink-soft)]">{formatAmount(offer.currency, s.amount)} to the cause</span>
+                  <span className="block text-[11.5px] text-[var(--ink-soft)]">{free ? "No charge" : `${formatAmount(offer.currency, s.amount)} to the cause`}</span>
                 </button>
               ))}
             </div>
@@ -188,8 +193,12 @@ export default function BookTime({
             <button onClick={onCancel} className="btn btn-ghost btn-sm flex-1">
               Cancel
             </button>
-            <button onClick={() => setStep("give")} disabled={!picked} className="btn btn-primary btn-sm flex-1">
-              Continue
+            <button
+              onClick={() => (free && picked ? confirm() : setStep("give"))}
+              disabled={!picked || busy}
+              className="btn btn-primary btn-sm flex-1"
+            >
+              {free ? (busy ? "Booking…" : "Book it") : "Continue"}
             </button>
           </div>
         </>

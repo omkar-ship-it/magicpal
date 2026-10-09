@@ -6,6 +6,7 @@ import { CAUSES, CIRCLE_CITIES, causeById, cityById, inviteFor, membersOf, quali
 import type { CircleMe } from "@/lib/circleMe";
 import LocationModePicker from "./LocationModePicker";
 import AvatarPicker from "./AvatarPicker";
+import Verification from "./Verification";
 import { IconAsk, IconClock, IconHeart, IconSparkle } from "./Icons";
 import { IconBeacon, IconCopy, IconCheck } from "./Icons";
 
@@ -25,6 +26,8 @@ export default function CircleYouPanel({
   onAvatar,
   onField,
   openNetwork,
+  activeEntityId,
+  onOpenMember,
   onStopBeacon,
   onOpenCommunity,
   onLeave,
@@ -38,6 +41,9 @@ export default function CircleYouPanel({
   onField: (patch: Partial<CircleMe>) => void;
   /** The time-for-a-cause offer only exists in the open network. */
   openNetwork?: boolean;
+  /** Verification is per institution, so it needs to know which one you're looking at. */
+  activeEntityId?: string;
+  onOpenMember?: (id: string) => void;
   onStopBeacon: () => void;
   onOpenCommunity: (id: string) => void;
   onLeave: () => void;
@@ -178,6 +184,10 @@ export default function CircleYouPanel({
       </div>
 
       {openNetwork && <OfferEditor me={me} onField={onField} />}
+
+      {!openNetwork && activeEntityId && onOpenMember && (
+        <Verification me={me} entityId={activeEntityId} onUpdate={onField} onOpenMember={onOpenMember} />
+      )}
 
       <div className="mt-6">
         <p className="label">Your communities</p>

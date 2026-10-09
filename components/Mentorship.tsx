@@ -2,35 +2,52 @@
 
 import { useState } from "react";
 import { entityById } from "@/lib/networks";
-import { memberById, type CircleMember } from "@/lib/circleData";
+import { memberById, mentorTier, type CircleMember } from "@/lib/circleData";
 import type { CircleMe } from "@/lib/circleMe";
 import {
   GOAL_TEMPLATES,
+  MENTOR_WANTS,
   OUTCOMES,
   SESSION_ARC,
   cityOf,
+  draftRequest,
   incomingRequestFor,
+  institutionName,
   mentorMatchesFor,
   mentorshipStats,
-  institutionName,
   sessionDates,
+  waitedLabel,
   type MentorMatch,
 } from "@/lib/mentorship";
 import Avatar from "./Avatar";
+import VerifiedBadge from "./VerifiedBadge";
 import { IconAsk, IconCheck, IconClock, IconHeart, IconPeople, IconSparkle } from "./Icons";
 
-type Enrolment = NonNullable<CircleMe["mentorship"]>;
+type Ment = NonNullable<CircleMe["mentorship"]>;
+type Mentee = NonNullable<NonNullable<Ment["asMentee"]>>;
 
 /**
  * Mentorship for an alumni network.
  *
- * Three jobs, in the order they matter: match on the batch gradient that
- * only an institution has, make the commitment finite enough that a busy
- * alum says yes, and record what actually came of it.
+ * ── The shape, and why ────────────────────────────────────────────────
+ * The system proposes, the person disposes. Pure auto-pairing ambushes
+ * mentors into relationships they didn't choose; pure browse-and-ask means
+ * nobody asks, because cold outreach to someone senior is the hardest
+ * message anyone never sends. So: a shortlist with reasons, a drafted
+ * request, and a human on each end of the yes.
  *
- * The last one is the quiet one. A programme that can't say what happened
- * can't be renewed, and most can't, because they only ever count the people
- * who did the thing — never the ones who were talked out of a bad idea.
+ * Two limits do most of the work, and they are the feature rather than
+ * restrictions on it. A mentee may have exactly one request open — letting
+ * someone spray ten is how the best mentors end up with fifty and answer
+ * none, and how a mentee avoids ever actually choosing. A mentor takes two
+ * people, which is what makes a yes survivable and therefore gettable.
+ *
+ * ── Why anyone mentors at all ─────────────────────────────────────────
+ * Supply is the binding constraint in every alumni mentoring programme,
+ * and status is the only currency that reliably buys it. So giving is made
+ * visible: a tier on the profile, a count, and one line written by each
+ * mentee when the arc closed. That block is the real engine here, more
+ * than the matching is.
  */
 export default function Mentorship({
   me,
@@ -41,182 +58,264 @@ export default function Mentorship({
 }: {
   me: CircleMe;
   entityId: string;
-  onUpdate: (m: Enrolment | null) => void;
+  onUpdate: (m: Ment | null) => void;
   onOpenMember: (id: string) => void;
   onMessage: (id: string) => void;
 }) {
   const entity = entityById(entityId);
-  // Your year drives everything: who is ahead of you, and by how much.
   const myGradYear = Number(entity?.name.match(/(\d{4})/)?.[1] ?? entityId.match(/(\d{4})/)?.[1] ?? 2019);
   const stats = mentorshipStats(entityId, myGradYear);
-  const enrol = me.mentorship?.entityId === entityId ? me.mentorship : null;
+  const ment = me.mentorship?.entityId === entityId ? me.mentorship : null;
+  const verified = me.verification?.[entityId] === "verified";
 
-  if (!enrol) return <Intro entity={entity?.name ?? "this network"} stats={stats} onPick={(role) => onUpdate({ role, entityId })} />;
-  if (enrol.role === "mentor") return <MentorSide enrol={enrol} entityId={entityId} myGradYear={myGradYear} onUpdate={onUpdate} onOpenMember={onOpenMember} onMessage={onMessage} />;
-  return <MenteeSide me={me} enrol={enrol} entityId={entityId} myGradYear={myGradYear} onUpdate={onUpdate} onOpenMember={onOpenMember} onMessage={onMessage} />;
-}
+  const set = (patch: Partial<Ment>) => onUpdate({ entityId, ...(ment ?? {}), ...patch });
 
-/* ───────────────────────────────────────────────────────── not yet in */
-
-function Intro({
-  entity,
-  stats,
-  onPick,
-}: {
-  entity: string;
-  stats: ReturnType<typeof mentorshipStats>;
-  onPick: (role: "mentee" | "mentor") => void;
-}) {
   return (
     <div>
-      <Header title="Mentoring" sub={`Alumni of ${entity}, in both directions.`} />
+      <Header title="Mentoring" sub={`${institutionName(entityId)} alumni, in both directions.`} />
 
-      {/* The shape, before the ask. The commitment being finite and legible
-          is the reason a busy alum reads any further. */}
-      <div className="mt-4 rounded-2xl border p-4" style={{ borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 6%, var(--card))" }}>
-        <p className="text-[14px] font-bold leading-tight">Four conversations over three months.</p>
-        <p className="mt-1 text-[12.5px] leading-5 text-[var(--ink-soft)]">
-          That&rsquo;s the whole commitment. It has an end date, each conversation has a job, and mentors take two people at a time —
-          which is why they say yes.
+      {/* Verification gates both sides. The claim a closed network makes is
+          that the person on the other end really did go where they say, and
+          mentoring is where that claim actually gets used. */}
+      {!verified && (
+        <p className="mt-3 rounded-2xl p-3 text-[12.5px] leading-4" style={{ background: "color-mix(in srgb, var(--warn) 10%, var(--card))" }}>
+          Mentoring is for verified alumni on both sides. Get verified from your own page — an admin usually turns it round in a day.
         </p>
-        <div className="mt-3 flex flex-col gap-1.5">
-          {SESSION_ARC.map((s) => (
-            <div key={s.n} className="flex items-start gap-2">
-              <span className="mt-0.5 grid h-5 w-5 flex-none place-items-center rounded-full text-[10px] font-bold" style={{ background: "var(--card)", color: "var(--brand)" }}>
-                {s.n}
-              </span>
-              <span className="min-w-0 text-[12px] leading-4">
-                <span className="font-semibold">{s.label}</span> — {s.purpose}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
+      )}
 
-      <div className="mt-4 flex gap-1.5">
-        <button onClick={() => onPick("mentee")} className="btn btn-primary btn-sm flex-1">
-          Find a mentor
-        </button>
-        <button onClick={() => onPick("mentor")} className="btn btn-ghost btn-sm flex-1">
-          Offer to mentor
-        </button>
-      </div>
+      <MenteeBlock
+        me={me}
+        ment={ment}
+        entityId={entityId}
+        myGradYear={myGradYear}
+        verified={verified}
+        set={set}
+        onOpenMember={onOpenMember}
+        onMessage={onMessage}
+      />
+      <MentorBlock
+        me={me}
+        ment={ment}
+        entityId={entityId}
+        myGradYear={myGradYear}
+        verified={verified}
+        set={set}
+        onOpenMember={onOpenMember}
+        onMessage={onMessage}
+      />
 
       <Stats stats={stats} />
     </div>
   );
 }
 
-/* ───────────────────────────────────────────────────────── mentee */
+/* ────────────────────────────────────────────── asking someone ahead */
 
-function MenteeSide({
+function MenteeBlock({
   me,
-  enrol,
+  ment,
   entityId,
   myGradYear,
-  onUpdate,
+  verified,
+  set,
   onOpenMember,
   onMessage,
 }: {
   me: CircleMe;
-  enrol: Enrolment;
+  ment: Ment | null;
   entityId: string;
   myGradYear: number;
-  onUpdate: (m: Enrolment | null) => void;
+  verified: boolean;
+  set: (p: Partial<Ment>) => void;
   onOpenMember: (id: string) => void;
   onMessage: (id: string) => void;
 }) {
+  const a = ment?.asMentee ?? null;
   const [goalDraft, setGoalDraft] = useState("");
+  const [composing, setComposing] = useState<MentorMatch | null>(null);
+  const [note, setNote] = useState("");
 
-  // Step one: a goal. Matching without one produces "grow my network".
-  if (!enrol.goal) {
-    return (
-      <div>
-        <Header title="What do you want out of it?" sub="One goal, specific enough to tell whether it happened. This is what you're matched on." />
-        <div className="mt-4 flex flex-col gap-1.5">
-          {GOAL_TEMPLATES.map((g) => (
-            <button key={g} onClick={() => onUpdate({ ...enrol, goal: g })} className="tap card p-3 text-left hover:border-[var(--brand)]">
-              <span className="text-[13px] font-medium">{g}</span>
+  if (a?.mentorId) {
+    const mentor = memberById(a.mentorId);
+    if (mentor) return <Pairing a={a} mentor={mentor} set={set} onOpenMember={onOpenMember} onMessage={onMessage} />;
+  }
+
+  if (a?.pending) {
+    const mentor = memberById(a.pending.mentorId);
+    const pending = a.pending;
+    if (mentor)
+      return (
+        <Section title="You've asked" icon={<IconClock size={13} />}>
+          <div className="card p-3.5">
+            <button onClick={() => onOpenMember(mentor.id)} className="flex w-full items-center gap-2.5 text-left">
+              <Avatar name={mentor.name} size={40} />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1 text-[13.5px] font-semibold leading-tight">
+                  <span className="min-w-0 truncate">{mentor.name}</span>
+                  {mentor.verified && <VerifiedBadge size={12} />}
+                </span>
+                <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">
+                  Class of {mentor.gradYear} · sent {waitedLabel(pending.sentDaysAgo)}
+                </span>
+              </span>
             </button>
-          ))}
-        </div>
-        <div className="mt-3">
-          <p className="label">Or write your own</p>
-          <div className="mt-1.5 flex gap-1.5">
-            <input
-              value={goalDraft}
-              onChange={(e) => setGoalDraft(e.target.value)}
-              placeholder="Work out whether to…"
-              className="min-w-0 flex-1 rounded-xl border border-[var(--line)] bg-transparent px-3 py-2 text-[13px] outline-none focus:border-[var(--brand)]"
-            />
-            <button onClick={() => goalDraft.trim() && onUpdate({ ...enrol, goal: goalDraft.trim() })} disabled={!goalDraft.trim()} className="btn btn-primary btn-sm flex-none">
-              Use this
-            </button>
+            <p className="mt-2 whitespace-pre-line rounded-xl p-2.5 text-[12px] leading-4" style={{ background: "var(--sunk)" }}>
+              {pending.note}
+            </p>
+            <p className="mt-2 text-[11.5px] leading-4 text-[var(--ink-soft)]">
+              One request at a time. It&rsquo;s the reason mentors here still read them — withdraw if you&rsquo;d rather ask someone else.
+            </p>
+            <div className="mt-2.5 flex gap-1.5">
+              <button onClick={() => set({ asMentee: { ...a, pending: null } })} className="btn btn-ghost btn-sm flex-1">
+                Withdraw
+              </button>
+              {/* Seeded, so the arc below is reachable without waiting on a
+                  reply that no real person is going to send to a prototype. */}
+              <button
+                onClick={() => set({ asMentee: { ...a, pending: null, mentorId: mentor.id, startedDaysAgo: 24, done: [1, 2] } })}
+                className="btn btn-primary btn-sm flex-1"
+              >
+                Simulate accept
+              </button>
+            </div>
           </div>
-        </div>
-        <button onClick={() => onUpdate(null)} className="btn btn-ghost btn-sm mt-4">
-          Back
-        </button>
-      </div>
+        </Section>
+      );
+  }
+
+  if (!a?.goal) {
+    return (
+      <Section title="Find a mentor" icon={<IconAsk size={13} />}>
+        {!verified ? (
+          <Locked />
+        ) : (
+          <>
+            <Shape />
+            <p className="mt-3 text-[12.5px] leading-4 text-[var(--ink-soft)]">
+              Start with one goal, specific enough that you could tell whether it happened. It&rsquo;s what you&rsquo;re matched on.
+            </p>
+            <div className="mt-2 flex flex-col gap-1.5">
+              {GOAL_TEMPLATES.slice(0, 5).map((g) => (
+                <button
+                  key={g}
+                  onClick={() => set({ asMentee: { goal: g } })}
+                  className="tap card p-3 text-left text-[13px] font-medium hover:border-[var(--brand)]"
+                >
+                  {g}
+                </button>
+              ))}
+            </div>
+            <div className="mt-2 flex gap-1.5">
+              <input
+                value={goalDraft}
+                onChange={(e) => setGoalDraft(e.target.value)}
+                placeholder="Or write your own…"
+                className="min-w-0 flex-1 rounded-xl border border-[var(--line)] bg-transparent px-3 py-2 text-[13px] outline-none focus:border-[var(--brand)]"
+              />
+              <button
+                onClick={() => goalDraft.trim() && set({ asMentee: { goal: goalDraft.trim() } })}
+                disabled={!goalDraft.trim()}
+                className="btn btn-primary btn-sm flex-none"
+              >
+                Use
+              </button>
+            </div>
+          </>
+        )}
+      </Section>
     );
   }
 
-  // Step three: matched and running.
-  if (enrol.mentorId) {
-    const mentor = memberById(enrol.mentorId);
-    if (mentor) return <Pairing enrol={enrol} mentor={mentor} onUpdate={onUpdate} onOpenMember={onOpenMember} onMessage={onMessage} />;
+  const goal = a.goal;
+  const matches = mentorMatchesFor(entityId, myGradYear, goal, me.interests ?? []).filter((mm) => mm.member.verified);
+
+  if (composing) {
+    return (
+      <Section title={`Ask ${composing.member.name.split(" ")[0]}`} icon={<IconAsk size={13} />}>
+        <div className="card p-3.5">
+          <div className="flex items-center gap-2.5">
+            <Avatar name={composing.member.name} size={40} />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-1 text-[13.5px] font-semibold leading-tight">
+                <span className="min-w-0 truncate">{composing.member.name}</span>
+                {composing.member.verified && <VerifiedBadge size={12} />}
+              </span>
+              <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">
+                Class of {composing.member.gradYear} · {composing.yearsAhead}y ahead
+              </span>
+            </span>
+          </div>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={8}
+            className="mt-2.5 w-full resize-none rounded-xl bg-[var(--sunk)] p-2.5 text-[12.5px] leading-4 outline-none"
+          />
+          <p className="mt-1.5 text-[11px] leading-4 text-[var(--ink-soft)]">
+            Drafted from your goal and theirs. Edit it — a request nobody wrote isn&rsquo;t worth reading either.
+          </p>
+          <div className="mt-2.5 flex gap-1.5">
+            <button onClick={() => setComposing(null)} className="btn btn-ghost btn-sm flex-1">
+              Back
+            </button>
+            <button
+              onClick={() => {
+                set({ asMentee: { ...a, goal, pending: { mentorId: composing.member.id, note, sentDaysAgo: 0 } } });
+                setComposing(null);
+              }}
+              className="btn btn-primary btn-sm flex-1"
+            >
+              Send request
+            </button>
+          </div>
+        </div>
+      </Section>
+    );
   }
 
-  // Step two: who to ask.
-  const matches = mentorMatchesFor(entityId, myGradYear, enrol.goal, me.interests ?? []);
-  const requested = enrol.requestedIds ?? [];
-
   return (
-    <div>
-      <Header title="Who to ask" sub={`${matches.length} alumni of ${institutionName(entityId)} who've been where you're going — not classmates.`} />
-
-      <div className="mt-3 rounded-2xl p-3" style={{ background: "var(--sunk)" }}>
+    <Section title="Who to ask" icon={<IconAsk size={13} />}>
+      <div className="rounded-2xl p-3" style={{ background: "var(--sunk)" }}>
         <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Your goal</p>
-        <p className="mt-0.5 text-[13.5px] font-medium">{enrol.goal}</p>
-        <button onClick={() => onUpdate({ ...enrol, goal: undefined })} className="mt-1 text-[11.5px] font-semibold" style={{ color: "var(--brand)" }}>
+        <p className="mt-0.5 text-[13.5px] font-medium">{goal}</p>
+        <button onClick={() => set({ asMentee: null })} className="mt-1 text-[11.5px] font-semibold" style={{ color: "var(--brand)" }}>
           Change
         </button>
       </div>
+      <p className="mt-2 text-[11.5px] leading-4 text-[var(--ink-soft)]">
+        {matches.length} verified alumni of {institutionName(entityId)} who came out before you — never classmates. Ask one; you can ask
+        someone else if they say no.
+      </p>
 
-      <div className="mt-4 flex flex-col gap-2.5">
+      <div className="mt-3 flex flex-col gap-2.5">
         {matches.map((mm) => (
           <MentorCard
             key={mm.member.id}
             mm={mm}
-            requested={requested.includes(mm.member.id)}
+            declined={(a.declinedBy ?? []).includes(mm.member.id)}
             onOpen={() => onOpenMember(mm.member.id)}
-            onRequest={() =>
-              onUpdate({
-                ...enrol,
-                requestedIds: [...requested, mm.member.id],
-                // First ask is seeded as accepted, so the arc below is
-                // reachable in a demo without waiting for a reply.
-                ...(requested.length === 0 ? { mentorId: mm.member.id, startedDaysAgo: 24, done: [1, 2] } : {}),
-              })
-            }
+            onAsk={() => {
+              setNote(draftRequest(mm.member.name, mm.yearsAhead, goal, mm.helpWith.find((h) => (me.interests ?? []).includes(h)) ?? null));
+              setComposing(mm);
+            }}
           />
         ))}
       </div>
-
-      <button onClick={() => onUpdate(null)} className="btn btn-ghost btn-sm mt-4">
-        Leave the programme
-      </button>
-    </div>
+    </Section>
   );
 }
 
-function MentorCard({ mm, requested, onOpen, onRequest }: { mm: MentorMatch; requested: boolean; onOpen: () => void; onRequest: () => void }) {
+function MentorCard({ mm, declined, onOpen, onAsk }: { mm: MentorMatch; declined: boolean; onOpen: () => void; onAsk: () => void }) {
+  const tier = mentorTier(mm.member.mentoredCount);
   return (
     <div className="card p-3.5">
       <button onClick={onOpen} className="flex w-full items-center gap-2.5 text-left">
         <Avatar name={mm.member.name} size={44} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[14px] font-semibold leading-tight">{mm.member.name}</span>
+          <span className="flex items-center gap-1 text-[14px] font-semibold leading-tight">
+            <span className="min-w-0 truncate">{mm.member.name}</span>
+            {mm.member.verified && <VerifiedBadge size={13} />}
+          </span>
           <span className="block truncate text-[12px] text-[var(--ink-soft)]">
             {mm.member.headline} · {mm.member.company}
           </span>
@@ -232,6 +331,12 @@ function MentorCard({ mm, requested, onOpen, onRequest }: { mm: MentorMatch; req
         </span>
       </button>
 
+      {tier && (
+        <p className="mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: "var(--brand)", color: "#fff" }}>
+          <IconHeart size={11} /> {tier} · {mm.member.mentoredCount} mentored
+        </p>
+      )}
+
       <p className="mt-2 text-[13px] leading-5">{mm.why}</p>
 
       <div className="mt-2 flex flex-wrap gap-1.5">
@@ -244,14 +349,12 @@ function MentorCard({ mm, requested, onOpen, onRequest }: { mm: MentorMatch; req
 
       <div className="mt-2.5 flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--ink-soft)]">
-          {mm.sessionsGiven} sessions given · {mm.full ? "two mentees already" : `${2 - mm.menteesNow} slot${2 - mm.menteesNow === 1 ? "" : "s"} open`}
+          {mm.sessionsGiven} sessions · {mm.full ? "two mentees already" : `${2 - mm.menteesNow} slot${2 - mm.menteesNow === 1 ? "" : "s"} open`}
         </span>
-        {requested ? (
-          <span className="flex flex-none items-center gap-1 text-[12px] font-semibold" style={{ color: "var(--good)" }}>
-            <IconCheck size={13} /> Asked
-          </span>
+        {declined ? (
+          <span className="flex-none text-[11.5px] text-[var(--ink-soft)]">Said no this round</span>
         ) : (
-          <button onClick={onRequest} disabled={mm.full} className="btn btn-primary btn-sm flex-none">
+          <button onClick={onAsk} disabled={mm.full} className="btn btn-primary btn-sm flex-none">
             {mm.full ? "Full" : "Ask them"}
           </button>
         )}
@@ -260,34 +363,193 @@ function MentorCard({ mm, requested, onOpen, onRequest }: { mm: MentorMatch; req
   );
 }
 
-/* ───────────────────────────────────────────────────── the pairing */
+/* ─────────────────────────────────────── answering someone behind */
 
-function Pairing({
-  enrol,
-  mentor,
-  onUpdate,
+function MentorBlock({
+  me,
+  ment,
+  entityId,
+  myGradYear,
+  verified,
+  set,
   onOpenMember,
   onMessage,
 }: {
-  enrol: Enrolment;
-  mentor: CircleMember;
-  onUpdate: (m: Enrolment | null) => void;
+  me: CircleMe;
+  ment: Ment | null;
+  entityId: string;
+  myGradYear: number;
+  verified: boolean;
+  set: (p: Partial<Ment>) => void;
   onOpenMember: (id: string) => void;
   onMessage: (id: string) => void;
 }) {
-  const dates = sessionDates(enrol.startedDaysAgo ?? 0);
-  const done = enrol.done ?? [];
-  const next = SESSION_ARC.find((s) => !done.includes(s.n));
-  const finished = !next;
+  const b = ment?.asMentor ?? null;
+  const [wants, setWants] = useState(MENTOR_WANTS[0]);
+
+  if (!b) {
+    return (
+      <Section title="Offer to mentor" icon={<IconHeart size={13} />}>
+        {!verified ? (
+          <Locked />
+        ) : (
+          <>
+            <p className="text-[12.5px] leading-4 text-[var(--ink-soft)]">
+              Two people at a time, four conversations each, then it ends unless you both want another round. Say who you&rsquo;d rather
+              hear from and the requests get better.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {MENTOR_WANTS.map((w) => (
+                <button
+                  key={w}
+                  onClick={() => setWants(w)}
+                  className="tap rounded-full px-2.5 py-1.5 text-[11.5px] font-semibold"
+                  style={
+                    wants === w
+                      ? { background: "color-mix(in srgb, var(--brand) 14%, var(--card))", color: "var(--brand)" }
+                      : { background: "var(--sunk)", color: "var(--ink-soft)" }
+                  }
+                  aria-pressed={wants === w}
+                >
+                  {w}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => set({ asMentor: { topics: me.helpWith ?? [], capacity: 2, wants, note: "", acceptedIds: [], declinedIds: [] } })}
+              className="btn btn-primary btn-sm mt-3 w-full"
+            >
+              List me as a mentor
+            </button>
+          </>
+        )}
+      </Section>
+    );
+  }
+
+  const req = incomingRequestFor(entityId, myGradYear);
+  const accepted = b.acceptedIds ?? [];
+  const declined = b.declinedIds ?? [];
+  const pending = req && !accepted.includes(req.member.id) && !declined.includes(req.member.id);
+  const atCap = accepted.length >= b.capacity;
 
   return (
-    <div>
-      <Header title="Your mentor" sub={`Session ${Math.min(done.length + 1, 4)} of 4`} />
+    <Section title="You're mentoring" icon={<IconHeart size={13} />}>
+      <p className="text-[11.5px] leading-4 text-[var(--ink-soft)]">
+        Listed for <span className="font-semibold">{b.wants.toLowerCase()}</span> · {accepted.length} of {b.capacity} taken
+      </p>
 
-      <button onClick={() => onOpenMember(mentor.id)} className="mt-3 flex w-full items-center gap-3 text-left">
-        <Avatar name={mentor.name} size={52} />
+      {pending && req && (
+        <div className="card mt-2.5 p-3.5" style={{ borderColor: "var(--brand)" }}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--brand)" }}>
+            Someone is asking · {waitedLabel(2)}
+          </p>
+          <button onClick={() => onOpenMember(req.member.id)} className="mt-2 flex w-full items-center gap-2.5 text-left">
+            <Avatar name={req.member.name} size={42} />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-1 text-[13.5px] font-semibold leading-tight">
+                <span className="min-w-0 truncate">{req.member.name}</span>
+                {req.member.verified && <VerifiedBadge size={12} />}
+              </span>
+              <span className="block truncate text-[12px] text-[var(--ink-soft)]">
+                {req.member.headline} · {req.member.company}
+              </span>
+              <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">
+                Class of {req.member.gradYear} · {req.member.gradYear - myGradYear} years behind you
+              </span>
+            </span>
+          </button>
+
+          <div className="mt-2.5 rounded-xl p-2.5" style={{ background: "var(--sunk)" }}>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">What they want out of it</p>
+            <p className="mt-0.5 text-[13px] font-medium">{req.goal}</p>
+          </div>
+
+          <p className="mt-2 text-[12.5px] leading-4">&ldquo;{req.note}&rdquo;</p>
+
+          <div className="mt-3 flex gap-1.5">
+            <button onClick={() => set({ asMentor: { ...b, declinedIds: [...declined, req.member.id] } })} className="btn btn-ghost btn-sm flex-1">
+              Not this round
+            </button>
+            <button
+              onClick={() => set({ asMentor: { ...b, acceptedIds: [...accepted, req.member.id] } })}
+              disabled={atCap}
+              className="btn btn-primary btn-sm flex-1"
+            >
+              {atCap ? "You're full" : "Take it on"}
+            </button>
+          </div>
+          <p className="mt-1.5 text-[11px] leading-4 text-[var(--ink-soft)]">
+            Saying no is fine, and they&rsquo;re told plainly rather than left waiting. The cap is what makes a yes mean something.
+          </p>
+        </div>
+      )}
+
+      {accepted.length > 0 && (
+        <div className="mt-2.5 flex flex-col gap-1.5">
+          {accepted.map((id) => {
+            const mm = memberById(id);
+            if (!mm) return null;
+            return (
+              <div key={id} className="card p-3">
+                <div className="flex items-center gap-2.5">
+                  <Avatar name={mm.name} size={38} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-semibold leading-tight">{mm.name}</span>
+                    <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">Session 1 of 4 · {SESSION_ARC[0].label}</span>
+                  </span>
+                  <button onClick={() => onMessage(id)} className="btn btn-ghost btn-sm flex-none">
+                    Message
+                  </button>
+                </div>
+                <p className="mt-2 text-[12px] leading-4 text-[var(--ink-soft)]">{SESSION_ARC[0].purpose}</p>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {!pending && accepted.length === 0 && (
+        <p className="mt-2.5 rounded-2xl p-3 text-center text-[12.5px] leading-4 text-[var(--ink-soft)]" style={{ background: "var(--sunk)" }}>
+          You&rsquo;re listed. Requests tend to arrive in a rush after the class newsletter goes out.
+        </p>
+      )}
+
+      <button onClick={() => set({ asMentor: null })} className="btn btn-ghost btn-sm mt-2.5">
+        Stop mentoring
+      </button>
+    </Section>
+  );
+}
+
+/* ───────────────────────────────────────────────────── the pairing */
+
+function Pairing({
+  a,
+  mentor,
+  set,
+  onOpenMember,
+  onMessage,
+}: {
+  a: Mentee;
+  mentor: CircleMember;
+  set: (p: Partial<Ment>) => void;
+  onOpenMember: (id: string) => void;
+  onMessage: (id: string) => void;
+}) {
+  const dates = sessionDates(a.startedDaysAgo ?? 0);
+  const done = a.done ?? [];
+  const next = SESSION_ARC.find((s) => !done.includes(s.n));
+
+  return (
+    <Section title="Your mentor" icon={<IconClock size={13} />}>
+      <button onClick={() => onOpenMember(mentor.id)} className="flex w-full items-center gap-3 text-left">
+        <Avatar name={mentor.name} size={48} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[15px] font-semibold leading-tight">{mentor.name}</span>
+          <span className="flex items-center gap-1 text-[15px] font-semibold leading-tight">
+            <span className="min-w-0 truncate">{mentor.name}</span>
+            {mentor.verified && <VerifiedBadge size={13} />}
+          </span>
           <span className="block truncate text-[12.5px] text-[var(--ink-soft)]">
             {mentor.headline} · {mentor.company}
           </span>
@@ -295,59 +557,52 @@ function Pairing({
         </span>
       </button>
 
-      <button onClick={() => onMessage(mentor.id)} className="btn btn-ghost btn-sm mt-2.5 w-full">
+      <button onClick={() => onMessage(mentor.id)} className="btn btn-ghost btn-sm mt-2 w-full">
         Message {mentor.name.split(" ")[0]}
       </button>
 
-      <div className="mt-4 rounded-2xl p-3" style={{ background: "var(--sunk)" }}>
+      <div className="mt-3 rounded-2xl p-3" style={{ background: "var(--sunk)" }}>
         <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">What you&rsquo;re working on</p>
-        <p className="mt-0.5 text-[13.5px] font-medium">{enrol.goal}</p>
+        <p className="mt-0.5 text-[13.5px] font-medium">{a.goal}</p>
       </div>
 
-      {/* The arc, with what each conversation is actually for. */}
-      <div className="mt-4">
-        <p className="label label-icon">
-          <IconClock size={13} /> The four
-        </p>
-        <div className="mt-2 flex flex-col gap-1.5">
-          {SESSION_ARC.map((s, i) => {
-            const isDone = done.includes(s.n);
-            const isNext = next?.n === s.n;
-            return (
-              <div
-                key={s.n}
-                className="rounded-2xl border p-3"
-                style={
-                  isNext
-                    ? { borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 6%, var(--card))" }
-                    : { borderColor: "var(--line)", opacity: isDone ? 0.72 : 1 }
-                }
-              >
-                <div className="flex items-center gap-2">
-                  <span
-                    className="grid h-5 w-5 flex-none place-items-center rounded-full text-[10px] font-bold"
-                    style={isDone ? { background: "var(--good)", color: "#fff" } : { background: "var(--sunk)", color: "var(--ink-soft)" }}
-                  >
-                    {isDone ? <IconCheck size={11} /> : s.n}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{s.label}</span>
-                  <span className="flex-none text-[11px] text-[var(--ink-soft)]">{dates[i]}</span>
-                </div>
-                {(isNext || !isDone) && <p className="mt-1.5 pl-7 text-[12px] leading-4 text-[var(--ink-soft)]">{s.purpose}</p>}
-                {isNext && (
-                  <button onClick={() => onUpdate({ ...enrol, done: [...done, s.n] })} className="btn btn-primary btn-sm mt-2.5 ml-7">
-                    Mark this one done
-                  </button>
-                )}
+      <div className="mt-3 flex flex-col gap-1.5">
+        {SESSION_ARC.map((s, i) => {
+          const isDone = done.includes(s.n);
+          const isNext = next?.n === s.n;
+          return (
+            <div
+              key={s.n}
+              className="rounded-2xl border p-3"
+              style={
+                isNext
+                  ? { borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 6%, var(--card))" }
+                  : { borderColor: "var(--line)", opacity: isDone ? 0.72 : 1 }
+              }
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="grid h-5 w-5 flex-none place-items-center rounded-full text-[10px] font-bold"
+                  style={isDone ? { background: "var(--good)", color: "#fff" } : { background: "var(--sunk)", color: "var(--ink-soft)" }}
+                >
+                  {isDone ? <IconCheck size={11} /> : s.n}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{s.label}</span>
+                <span className="flex-none text-[11px] text-[var(--ink-soft)]">{dates[i]}</span>
               </div>
-            );
-          })}
-        </div>
+              {!isDone && <p className="mt-1.5 pl-7 text-[12px] leading-4 text-[var(--ink-soft)]">{s.purpose}</p>}
+              {isNext && (
+                <button onClick={() => set({ asMentee: { ...a, done: [...done, s.n] } })} className="btn btn-primary btn-sm ml-7 mt-2.5">
+                  Mark this one done
+                </button>
+              )}
+            </div>
+          );
+        })}
       </div>
 
-      {/* The bit that lets the programme be renewed. */}
-      {finished && (
-        <div className="mt-4 rounded-2xl border p-4" style={{ borderColor: "var(--brand)" }}>
+      {!next && (
+        <div className="mt-3 rounded-2xl border p-4" style={{ borderColor: "var(--brand)" }}>
           <p className="label label-icon">
             <IconSparkle size={13} /> How did it end?
           </p>
@@ -359,155 +614,82 @@ function Pairing({
             {OUTCOMES.map((o) => (
               <button
                 key={o.id}
-                onClick={() => onUpdate({ ...enrol, outcome: o.id })}
+                onClick={() => set({ asMentee: { ...a, outcome: o.id } })}
                 className="tap rounded-2xl border p-2.5 text-left text-[13px] font-medium"
                 style={
-                  enrol.outcome === o.id
+                  a.outcome === o.id
                     ? { borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 7%, var(--card))" }
                     : { borderColor: "var(--line)" }
                 }
-                aria-pressed={enrol.outcome === o.id}
+                aria-pressed={a.outcome === o.id}
               >
                 {o.label}
               </button>
             ))}
           </div>
-          {enrol.outcome && (
+          {a.outcome && (
             <p className="mt-2.5 flex items-center gap-1.5 text-[12.5px] font-semibold" style={{ color: "var(--good)" }}>
-              <IconCheck size={14} /> Logged. {mentor.name.split(" ")[0]} sees this too.
+              <IconCheck size={14} /> Logged — and it counts toward {mentor.name.split(" ")[0]}&rsquo;s mentor record.
             </p>
           )}
         </div>
       )}
 
-      <button onClick={() => onUpdate(null)} className="btn btn-ghost btn-sm mt-4">
-        Leave the programme
+      <button onClick={() => set({ asMentee: null })} className="btn btn-ghost btn-sm mt-3">
+        End this pairing
       </button>
-    </div>
-  );
-}
-
-/* ───────────────────────────────────────────────────────── mentor */
-
-function MentorSide({
-  enrol,
-  entityId,
-  myGradYear,
-  onUpdate,
-  onOpenMember,
-  onMessage,
-}: {
-  enrol: Enrolment;
-  entityId: string;
-  myGradYear: number;
-  onUpdate: (m: Enrolment | null) => void;
-  onOpenMember: (id: string) => void;
-  onMessage: (id: string) => void;
-}) {
-  const req = incomingRequestFor(entityId, myGradYear);
-  const accepted = enrol.acceptedIds ?? [];
-  const declined = enrol.declinedIds ?? [];
-  const pending = req && !accepted.includes(req.member.id) && !declined.includes(req.member.id);
-
-  return (
-    <div>
-      <Header title="Mentoring" sub="Two at a time. Four conversations each. Then it ends unless you both want another round." />
-
-      {pending && req && (
-        <div className="mt-4 card p-3.5">
-          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--brand)" }}>
-            Someone is asking
-          </p>
-          <button onClick={() => onOpenMember(req.member.id)} className="mt-2 flex w-full items-center gap-2.5 text-left">
-            <Avatar name={req.member.name} size={44} />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[14px] font-semibold leading-tight">{req.member.name}</span>
-              <span className="block truncate text-[12px] text-[var(--ink-soft)]">
-                {req.member.headline} · {req.member.company}
-              </span>
-              <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">
-                Class of {req.member.gradYear} · {cityOf(req.member)}
-              </span>
-            </span>
-          </button>
-
-          <div className="mt-2.5 rounded-xl p-2.5" style={{ background: "var(--sunk)" }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Their goal</p>
-            <p className="mt-0.5 text-[13px] font-medium">{req.goal}</p>
-          </div>
-
-          <p className="mt-2 text-[12.5px] leading-4">&ldquo;{req.note}&rdquo;</p>
-
-          <div className="mt-3 flex gap-1.5">
-            <button onClick={() => onUpdate({ ...enrol, declinedIds: [...declined, req.member.id] })} className="btn btn-ghost btn-sm flex-1">
-              Not right now
-            </button>
-            <button onClick={() => onUpdate({ ...enrol, acceptedIds: [...accepted, req.member.id] })} className="btn btn-primary btn-sm flex-1">
-              Take it on
-            </button>
-          </div>
-        </div>
-      )}
-
-      {accepted.length > 0 && (
-        <div className="mt-4">
-          <p className="label label-icon">
-            <IconPeople size={13} /> Your mentees
-          </p>
-          <div className="mt-1.5 flex flex-col gap-1.5">
-            {accepted.map((id) => {
-              const m = memberById(id);
-              if (!m) return null;
-              return (
-                <div key={id} className="card p-3">
-                  <div className="flex items-center gap-2.5">
-                    <Avatar name={m.name} size={40} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13px] font-semibold leading-tight">{m.name}</span>
-                      <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">Session 1 of 4 · {SESSION_ARC[0].label}</span>
-                    </span>
-                    <button onClick={() => onMessage(id)} className="btn btn-ghost btn-sm flex-none">
-                      Message
-                    </button>
-                  </div>
-                  <p className="mt-2 text-[12px] leading-4 text-[var(--ink-soft)]">{SESSION_ARC[0].purpose}</p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {!pending && accepted.length === 0 && (
-        <p className="mt-4 rounded-2xl p-4 text-center text-[12.5px] leading-4 text-[var(--ink-soft)]" style={{ background: "var(--sunk)" }}>
-          You&rsquo;re listed. Nobody&rsquo;s asked yet — requests tend to come in a rush after the class newsletter goes out.
-        </p>
-      )}
-
-      <div className="mt-4 rounded-2xl p-3" style={{ background: "var(--sunk)" }}>
-        <p className="flex items-start gap-2 text-[12px] leading-4">
-          <IconHeart size={14} className="mt-0.5 flex-none" style={{ color: "var(--brand)" }} />
-          <span>
-            You can be asked by two people at once and no more. The cap isn&rsquo;t politeness — it&rsquo;s the reason the yes is worth
-            anything.
-          </span>
-        </p>
-      </div>
-
-      <button onClick={() => onUpdate(null)} className="btn btn-ghost btn-sm mt-4">
-        Stop mentoring
-      </button>
-    </div>
+    </Section>
   );
 }
 
 /* ───────────────────────────────────────────────────────── shared */
 
+function Shape() {
+  return (
+    <div className="rounded-2xl border p-3.5" style={{ borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 6%, var(--card))" }}>
+      <p className="text-[13.5px] font-bold leading-tight">Four conversations over three months.</p>
+      <p className="mt-1 text-[12px] leading-4 text-[var(--ink-soft)]">
+        That&rsquo;s the whole commitment. Each one has a job, and mentors take two people at a time — which is why they say yes.
+      </p>
+      <div className="mt-2 flex flex-col gap-1">
+        {SESSION_ARC.map((s) => (
+          <div key={s.n} className="flex items-start gap-2">
+            <span className="mt-0.5 grid h-4 w-4 flex-none place-items-center rounded-full text-[9px] font-bold" style={{ background: "var(--card)", color: "var(--brand)" }}>
+              {s.n}
+            </span>
+            <span className="min-w-0 text-[11.5px] font-semibold leading-4">{s.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Locked() {
+  return (
+    <p className="rounded-2xl p-3 text-[12.5px] leading-4 text-[var(--ink-soft)]" style={{ background: "var(--sunk)" }}>
+      Available once you&rsquo;re verified. Both sides have to be — it&rsquo;s the only thing standing between this and a stranger asking
+      for an hour.
+    </p>
+  );
+}
+
+function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="mt-5">
+      <p className="label label-icon">
+        {icon} {title}
+      </p>
+      <div className="mt-1.5">{children}</div>
+    </div>
+  );
+}
+
 function Header({ title, sub }: { title: string; sub: string }) {
   return (
     <div className="flex items-start gap-2.5">
       <span className="mt-0.5 grid h-9 w-9 flex-none place-items-center rounded-xl" style={{ background: "color-mix(in srgb, var(--brand) 12%, var(--card))", color: "var(--brand)" }}>
-        <IconAsk size={18} />
+        <IconHeart size={18} />
       </span>
       <div className="min-w-0 flex-1">
         <h2 className="text-[17px] font-bold leading-tight">{title}</h2>
@@ -521,8 +703,10 @@ function Stats({ stats }: { stats: ReturnType<typeof mentorshipStats> }) {
   const { outcomes } = stats;
   const logged = outcomes.did + outcomes.against + outcomes.stalled;
   return (
-    <div className="mt-5">
-      <p className="label">Across the class</p>
+    <div className="mt-6">
+      <p className="label label-icon">
+        <IconPeople size={13} /> Across the class
+      </p>
       <div className="mt-1.5 grid grid-cols-3 gap-px overflow-hidden rounded-2xl" style={{ background: "var(--line)" }}>
         {[
           { n: stats.pairs, l: "pairs" },
@@ -537,7 +721,6 @@ function Stats({ stats }: { stats: ReturnType<typeof mentorshipStats> }) {
           </div>
         ))}
       </div>
-
       <div className="mt-2 flex flex-col gap-1">
         {[
           { label: "Did the thing", n: outcomes.did, good: true },
@@ -546,7 +729,10 @@ function Stats({ stats }: { stats: ReturnType<typeof mentorshipStats> }) {
           { label: "Didn't work out", n: outcomes.stalled, good: false },
         ].map((o) => (
           <div key={o.label} className="flex items-center gap-2">
-            <span className="h-1.5 flex-none rounded-full" style={{ width: Math.max(6, (o.n / Math.max(1, stats.pairs)) * 90), background: o.good ? "var(--good)" : "var(--line)" }} />
+            <span
+              className="h-1.5 flex-none rounded-full"
+              style={{ width: Math.max(6, (o.n / Math.max(1, stats.pairs)) * 90), background: o.good ? "var(--good)" : "var(--line)" }}
+            />
             <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--ink-soft)]">{o.label}</span>
             <span className="flex-none text-[11.5px] font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>
               {o.n}
@@ -555,8 +741,8 @@ function Stats({ stats }: { stats: ReturnType<typeof mentorshipStats> }) {
         ))}
       </div>
       <p className="mt-2 text-[11px] leading-4 text-[var(--ink-soft)]">
-        {logged} of {stats.pairs} pairs have logged an ending. That number is the one an alumni office should be judged on — not how many
-        people signed up.
+        {logged} of {stats.pairs} pairs logged an ending. That number is what an alumni office should be judged on — not how many people
+        signed up.
       </p>
     </div>
   );

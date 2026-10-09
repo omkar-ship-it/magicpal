@@ -1,8 +1,9 @@
 "use client";
 
 import { entityById } from "@/lib/networks";
-import { attendeesOf, causeById, cityById, formatAmount, postsAt, qualifiedName, timeOfferFor, type CircleEvent, type CircleMember } from "@/lib/circleData";
+import { attendeesOf, causeById, cityById, formatAmount, mentorTier, postsAt, qualifiedName, timeOfferFor, type CircleEvent, type CircleMember } from "@/lib/circleData";
 import Avatar from "./Avatar";
+import VerifiedBadge, { UnverifiedChip } from "./VerifiedBadge";
 import { IconAsk, IconBriefcase, IconCalendar, IconCity, IconChat, IconClock, IconHeart, IconHidden, IconPlus, IconPin, IconSparkle } from "./Icons";
 
 function ago(minutes: number): string {
@@ -32,6 +33,7 @@ export default function MemberProfile({
   onMessage,
   onConnect,
   onBook,
+  freeBooking,
   onOpenEvent,
   onOpenCity,
 }: {
@@ -42,14 +44,17 @@ export default function MemberProfile({
   common?: string | null;
   onMessage: () => void;
   onConnect?: () => void;
-  /** Open network only — booking time is how you reach past a cold request. */
+  /** Booking time. Paid to a cause out in the open; free among alumni. */
   onBook?: () => void;
+  /** Alumni booking is free — nothing has to filter a cold request here. */
+  freeBooking?: boolean;
   onOpenEvent: (id: string) => void;
   onOpenCity: (cityId: string) => void;
 }) {
   const city = cityById(m.cityId);
   const sharesACommunity = connectState == null;
   const offer = onBook ? timeOfferFor(m) : null;
+  const tier = mentorTier(m.mentoredCount);
   const cause = offer ? causeById(offer.causeId) : null;
   const communities = m.entityIds.map((id) => entityById(id)).filter(Boolean);
   const theirPosts = m.entityIds
@@ -71,7 +76,15 @@ export default function MemberProfile({
       <div className="flex items-start gap-3">
         <Avatar name={m.name} size={64} />
         <div className="min-w-0 flex-1">
-          <h2 className="text-[19px] font-bold leading-tight">{m.name}</h2>
+          <h2 className="flex items-center gap-1.5 text-[19px] font-bold leading-tight">
+            <span className="min-w-0 truncate">{m.name}</span>
+            {m.verified && <VerifiedBadge size={15} label={`Verified alum of ${communities[0]?.name ?? "this network"}`} />}
+          </h2>
+          {!m.verified && (
+            <span className="mt-1 inline-block">
+              <UnverifiedChip />
+            </span>
+          )}
           <p className="mt-0.5 text-[13px] leading-5 text-[var(--ink-soft)]">
             {m.headline} · {m.company}
           </p>
@@ -128,6 +141,35 @@ export default function MemberProfile({
         </>
       )}
 
+      {tier && (
+        <div className="mt-4 rounded-2xl border p-3.5" style={{ borderColor: "var(--brand)", background: "color-mix(in srgb, var(--brand) 5%, var(--card))" }}>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: "var(--brand)", color: "#fff" }}>
+              <IconHeart size={11} /> {tier}
+            </span>
+            <span className="text-[11.5px] text-[var(--ink-soft)]">
+              {m.mentoredCount} alumni mentored · {m.mentoredCount * 4} sessions
+            </span>
+          </div>
+
+          {/* Written by the mentees themselves at the close of an arc. The
+              point of putting it here is that mentoring is a status good:
+              supply is the constraint in every programme like this, and
+              making the giving visible is the only thing that reliably
+              buys more of it. */}
+          {m.endorsements.length > 0 && (
+            <div className="mt-2.5 flex flex-col gap-1.5">
+              {m.endorsements.map((e, i) => (
+                <div key={i}>
+                  <p className="text-[12.5px] leading-4">&ldquo;{e.line}&rdquo;</p>
+                  <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">— mentee, {e.from}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {offer && cause && (
         <div className="mt-4 rounded-2xl border border-[var(--line)] p-3.5">
           <p className="label label-icon">
@@ -135,21 +177,28 @@ export default function MemberProfile({
           </p>
           <p className="mt-0.5 text-[13px] leading-5">{offer.note}</p>
 
-          <div className="mt-2.5 flex items-start gap-2 rounded-xl p-2.5" style={{ background: "color-mix(in srgb, var(--brand) 7%, var(--card))" }}>
-            <IconHeart size={14} className="mt-0.5 flex-none" style={{ color: "var(--brand)" }} />
-            <span className="min-w-0 text-[12px] leading-4">
-              {/* The distinction the whole mechanic rests on, stated before
-                  anyone clicks: the expert is not being paid. */}
-              <span className="font-semibold">{m.name.split(" ")[0]} isn&rsquo;t paid.</span> Your contribution goes to {cause.name} —{" "}
-              {cause.area.toLowerCase()}.
-            </span>
-          </div>
+          {!freeBooking && (
+            <div className="mt-2.5 flex items-start gap-2 rounded-xl p-2.5" style={{ background: "color-mix(in srgb, var(--brand) 7%, var(--card))" }}>
+              <IconHeart size={14} className="mt-0.5 flex-none" style={{ color: "var(--brand)" }} />
+              <span className="min-w-0 text-[12px] leading-4">
+                {/* The distinction the whole mechanic rests on, stated before
+                    anyone clicks: the expert is not being paid. */}
+                <span className="font-semibold">{m.name.split(" ")[0]} isn&rsquo;t paid.</span> Your contribution goes to {cause.name} —{" "}
+                {cause.area.toLowerCase()}.
+              </span>
+            </div>
+          )}
 
           <button onClick={onBook} className="btn btn-primary btn-sm mt-2.5 flex w-full items-center justify-center gap-1.5">
-            <IconClock size={14} /> Book {offer.slots[0].minutes} min · {formatAmount(offer.currency, offer.slots[0].amount)} to {cause.name}
+            <IconClock size={14} />
+            {freeBooking
+              ? `Book ${offer.slots[0].minutes} minutes`
+              : `Book ${offer.slots[0].minutes} min · ${formatAmount(offer.currency, offer.slots[0].amount)} to ${cause.name}`}
           </button>
           <p className="mt-1.5 text-center text-[11px] text-[var(--ink-soft)]">
-            {offer.sessionsDone} sessions · {formatAmount(offer.currency, offer.raised)} raised
+            {freeBooking
+              ? `${offer.sessionsDone} alumni have taken a slot. No charge — you're in the same network.`
+              : `${offer.sessionsDone} sessions · ${formatAmount(offer.currency, offer.raised)} raised`}
           </p>
         </div>
       )}

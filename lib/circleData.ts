@@ -264,7 +264,41 @@ export type CircleMember = {
   /** Year they came out of the institution. */
   gradYear: number;
   links: { linkedin: boolean; site: string | null };
+  /**
+   * Confirmed by the institution as an actual alum.
+   *
+   * This is the backbone the rest of the alumni product leans on. A closed
+   * network's whole claim is that the person on the other end really did go
+   * where they say — and the moment that's assumed rather than checked, the
+   * network is just a worse LinkedIn. Mentoring requires it on both sides.
+   */
+  verified: boolean;
+  /** Completed mentoring arcs, which is what earns the tier on a profile. */
+  mentoredCount: number;
+  /** One line each, written by a mentee when the arc closed. */
+  endorsements: Array<{ from: string; line: string }>;
 };
+
+/** What an alum is willing to be asked about, shown on their mentor block. */
+export const MENTOR_TIERS = [
+  { min: 6, label: "Distinguished mentor" },
+  { min: 3, label: "Senior mentor" },
+  { min: 1, label: "Mentor" },
+];
+
+export function mentorTier(count: number): string | null {
+  return MENTOR_TIERS.find((t) => count >= t.min)?.label ?? null;
+}
+
+const ENDORSEMENTS = [
+  "Talked me out of raising too early. Best advice I got that year.",
+  "Asked three questions and the actual problem fell out of the second one.",
+  "Didn't tell me what to do once, which turned out to be the point.",
+  "Made two introductions that each saved me a month.",
+  "Straight with me when nobody else was being straight with me.",
+  "I came in wanting a job and left having started something.",
+  "Four conversations and I finally stopped avoiding the decision.",
+];
 
 const HELP_WITH = [
   "fundraising",
@@ -393,6 +427,14 @@ function buildMembers(): CircleMember[] {
       ].slice(0, 1 + (rnd(`pn-${i}`) % 2)),
       gradYear: gradYearFor(primary, second) ?? 2015 + (rnd(`gy-${i}`) % 9),
       links: { linkedin: rnd(`li-${i}`) % 100 < 72, site: rnd(`si-${i}`) % 100 < 28 ? `${COMPANIES[rnd(`co-${i}`) % COMPANIES.length].toLowerCase().replace(/[^a-z]/g, "")}.com` : null },
+      // Most are through; a visible minority aren't, so the badge means
+      // something and the admin queue has something in it.
+      verified: rnd(`ver-${i}`) % 100 < 86,
+      mentoredCount: rnd(`mc-${i}`) % 100 < 24 ? 1 + (rnd(`mcn-${i}`) % 8) : 0,
+      endorsements: Array.from({ length: rnd(`en-${i}`) % 100 < 30 ? 2 : rnd(`en-${i}`) % 100 < 60 ? 1 : 0 }, (_, k) => ({
+        from: `Class of ${2016 + (rnd(`enf-${i}-${k}`) % 8)}`,
+        line: ENDORSEMENTS[rnd(`enl-${i}-${k}`) % ENDORSEMENTS.length],
+      })),
     });
   }
   return out;

@@ -2,6 +2,7 @@
 
 import { cityById, type CircleMember } from "@/lib/circleData";
 import Avatar from "./Avatar";
+import VerifiedBadge from "./VerifiedBadge";
 import { IconCity, IconHidden, IconPin } from "./Icons";
 
 /**
@@ -36,7 +37,10 @@ export default function MemberHoverCard({ m, common }: { m: CircleMember; common
       <span className="flex items-center gap-2.5">
         <Avatar name={m.name} size={38} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[12.5px] font-semibold leading-tight">{m.name}</span>
+          <span className="flex items-center gap-1 text-[12.5px] font-semibold leading-tight">
+            <span className="min-w-0 truncate">{m.name}</span>
+            {m.verified && <VerifiedBadge size={12} />}
+          </span>
           <span className="block truncate text-[11.5px] leading-tight text-[var(--ink-soft)]">{m.headline}</span>
           <span className="block truncate text-[11.5px] leading-tight text-[var(--ink-soft)]">{m.company}</span>
         </span>

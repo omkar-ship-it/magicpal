@@ -44,17 +44,37 @@ export type CircleMe = {
    * doesn't belong.
    */
   mentorship?: {
-    role: "mentee" | "mentor";
+    /** You can be both: asking someone ahead, answering someone behind. */
+    asMentee?: {
+      goal: string;
+      /**
+       * One at a time, deliberately. Letting a mentee spray ten requests is
+       * how the best mentors end up with fifty and answer none, and how a
+       * mentee avoids ever choosing.
+       */
+      pending?: { mentorId: string; note: string; sentDaysAgo: number } | null;
+      mentorId?: string;
+      startedDaysAgo?: number;
+      done?: number[];
+      outcome?: string;
+      declinedBy?: string[];
+    } | null;
+    asMentor?: {
+      topics: string[];
+      capacity: number;
+      wants: string;
+      note: string;
+      acceptedIds?: string[];
+      declinedIds?: string[];
+    } | null;
     entityId: string;
-    goal?: string;
-    mentorId?: string;
-    requestedIds?: string[];
-    startedDaysAgo?: number;
-    done?: number[];
-    outcome?: string;
-    acceptedIds?: string[];
-    declinedIds?: string[];
   } | null;
+  /** Alumni verification, per institution. */
+  verification?: Record<string, "pending" | "verified">;
+  /** Networks you administer — prototype toggle in the You panel. */
+  adminOf?: string[];
+  /** Verification decisions you made as an admin, this session. */
+  verifiedByMe?: Record<string, "approved" | "rejected">;
 };
 
 /**

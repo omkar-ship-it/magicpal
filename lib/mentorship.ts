@@ -212,3 +212,49 @@ export const cityOf = (m: CircleMember) => cityById(m.cityId)?.name ?? "";
 
 /** The institution's display name, for copy that should say "ISB" not "Class of 2019". */
 export const institutionName = (entityId: string) => entityById(institutionOf(entityId))?.name ?? "this network";
+
+/**
+ * Who a mentor says they want.
+ *
+ * Preferences, not filters. The point isn't to exclude people — it's that a
+ * mentor who has written down "early-career, thinking about leaving" gets
+ * requests they actually want to answer, which is the whole supply problem.
+ */
+export const MENTOR_WANTS = [
+  "Anyone who asks well",
+  "Early career, first five years out",
+  "People thinking about leaving",
+  "First-time founders",
+  "People moving function",
+  "Women earlier in the same track",
+];
+
+/** How long a request has been sitting, said the way a person would say it. */
+export function waitedLabel(days: number): string {
+  if (days <= 0) return "just now";
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  return `${Math.round(days / 7)} weeks ago`;
+}
+
+/**
+ * The request itself, drafted.
+ *
+ * A blank box produces "Hi, would you be my mentor?", which is the message
+ * mentors ignore. This one states the goal, why this person specifically,
+ * and what the mentee is committing to — and it's editable, because a
+ * request somebody didn't write isn't worth reading either.
+ */
+export function draftRequest(mentorName: string, yearsAhead: number, goal: string, overlap: string | null): string {
+  const f = mentorName.split(" ")[0];
+  return [
+    `Hi ${f} —`,
+    ``,
+    `I'm ${yearsAhead} years behind you out of the same place, and what I'm trying to work out is: ${goal.toLowerCase()}.`,
+    overlap
+      ? `You've put ${overlap} down as something you'll talk about, which is most of what this turns on.`
+      : `You've done the version of this I'm looking at, which is why I'm asking you rather than anyone else.`,
+    ``,
+    `Four conversations over three months. I'll come to each one with something specific and I won't waste them.`,
+  ].join("\n");
+}
