@@ -714,7 +714,17 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
           className="pointer-events-auto flex w-full max-w-[560px] items-center gap-0.5 rounded-3xl border border-[var(--line)] p-1.5 sm:w-auto sm:gap-1"
           style={{ background: "color-mix(in srgb, var(--card) 99%, transparent)", backdropFilter: "blur(16px)", boxShadow: "var(--shadow-lift)" }}
         >
-          {isOpen && <BarButton icon={<IconSparkle />} label="For you" on={view === "matches"} onClick={() => open("matches")} />}
+          {/* Both networks. It was open-only back when the open map was the
+              only place relevance had to be computed — a community gave it
+              to you by membership. Now the run is scoped to whichever board
+              you're standing on, so a community needs it just as much: 212
+              members is exactly the pile it exists to cut through. */}
+          <BarButton
+            icon={<IconSparkle />}
+            label="For you"
+            on={view === "matches" || Boolean(view?.startsWith("matches:"))}
+            onClick={() => open("matches")}
+          />
           {hasMentoring && <BarButton icon={<IconAsk />} label="Mentoring" on={view === "mentoring"} onClick={() => open("mentoring")} />}
           <BarButton icon={<IconFeed />} label="Feed" on={view === "feed"} onClick={() => open("feed")} />
           <BarButton icon={<IconPeople />} label="People" count={isOpen ? undefined : members.length} on={view === "people"} onClick={() => open("people")} />
