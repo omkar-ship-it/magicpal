@@ -10,7 +10,7 @@ import VerifiedBadge from "./VerifiedBadge";
 import MemberHoverCard from "./MemberHoverCard";
 import MemberProfile from "./MemberProfile";
 import BookTime, { type Booking } from "./BookTime";
-import Matches from "./Matches";
+import ForYouRun from "./ForYouRun";
 import Mentorship from "./Mentorship";
 import SearchBar, { NO_FACETS, matchesFacets, matchesQuery, type Facets } from "./SearchBar";
 import { entityById, isAlumniNetwork } from "@/lib/networks";
@@ -194,6 +194,9 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
   // Declared before the member layers because they depend on it; the full
   // event object is resolved further down once `events` exists.
   const openEventId = view?.startsWith("event:") ? view.slice(6) : null;
+  // Running against an event means the people attending it, not the
+  // community it hangs off — an event is its own pool.
+  const runEventId = view?.startsWith("matches:") ? view.slice(8) : null;
 
   const q = query.trim().toLowerCase();
   const matching = useMemo(
@@ -251,6 +254,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
   // called this session exists only in state, and opening it must still work.
   const findEvent = (id: string) => events.find((e) => e.id === id) ?? eventById(id) ?? null;
   const openEvent: CircleEvent | null = openEventId ? findEvent(openEventId) : null;
+  const runEventSubject: CircleEvent | null = runEventId ? findEvent(runEventId) : null;
   const beaconEvent = me?.beaconEventId ? findEvent(me.beaconEventId) : null;
   /** The venue view is on when you're looking at a live event or beaconing at one. */
   const venueEvent = (openEvent?.liveNow && openEvent.lat != null ? openEvent : beaconEvent?.lat != null ? beaconEvent : null) ?? null;
@@ -758,8 +762,8 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
           me={me}
           events={events}
           newPostCount={CIRCLE_POSTS.filter((p) => p.minutesAgo < 2880).length}
-          pool={isOpen ? members : undefined}
-          onMatches={isOpen ? () => open("matches") : undefined}
+          pool={members}
+          onMatches={() => open("matches")}
           onEvent={(id) => push(`event:${id}`)}
           onFeed={() => open("feed")}
           onDismiss={() => setDigestOff(true)}
@@ -807,12 +811,33 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
             />
           )}
 
-          {view === "matches" && (
-            <Matches
+          {runEventId && runEventSubject && (
+            <ForYouRun
+              key={`event:${runEventId}`}
               me={me}
-              pool={members}
+              audience={{ kind: "event", event: runEventSubject }}
+              scopeKey={`event:${runEventId}`}
               onOpenMember={(id) => push(`member:${id}`)}
-              onMessage={() => {}}
+              onOpenChat={(id) => push(`chat:${id}`)}
+            />
+          )}
+
+          {view === "matches" && (
+            <ForYouRun
+              // Remounted per board: a new scope is a new pool, new memory
+              // and new defaults, and a key says that in one line.
+              key={isOpen ? "open" : activeEntityId}
+              me={me}
+              // Scope is never something the run chooses — it is whatever
+              // board you are already standing on. Reach narrows inside it
+              // and can never widen past it.
+              audience={
+                isOpen
+                  ? { kind: "open" }
+                  : { kind: "community", entityId: activeEntityId, name: entity?.name ?? "this community" }
+              }
+              scopeKey={isOpen ? "open" : `community:${activeEntityId}`}
+              onOpenMember={(id) => push(`member:${id}`)}
               onOpenChat={(id) => push(`chat:${id}`)}
             />
           )}
@@ -883,6 +908,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
 
           {openEvent && (
             <CircleEventPanel
+              onRunMatches={() => push(`matches:${openEvent.id}`)}
               event={openEvent}
               beaconing={me.beaconEventId === openEvent.id}
               going={going.has(openEvent.id)}

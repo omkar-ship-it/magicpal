@@ -93,7 +93,7 @@ export default function Matches({
   );
 }
 
-function MatchCard({
+export function MatchCard({
   match,
   sent,
   onOpen,

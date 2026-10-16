@@ -23,6 +23,7 @@ export default function CircleEventPanel({
   onBeacon,
   onGoing,
   onOpenMember,
+  onRunMatches,
 }: {
   event: CircleEvent;
   beaconing: boolean;
@@ -32,6 +33,8 @@ export default function CircleEventPanel({
   onBeacon: (on: boolean) => void;
   onGoing: (v: boolean) => void;
   onOpenMember: (id: string) => void;
+  /** Run For you against this event's roster — before, during or after. */
+  onRunMatches?: () => void;
 }) {
   const host = entityById(event.hostEntityId);
   const city = event.cityId ? cityById(event.cityId) : null;
@@ -140,6 +143,15 @@ export default function CircleEventPanel({
                 <IconBeacon size={15} /> Beacon my location
               </button>
             </>
+          )}
+
+          {/* The same run, pointed at this event's roster. Before it, this
+              is who to look for; during, who is actually here; afterwards,
+              whoever you never got to — the deck remembers. */}
+          {onRunMatches && (
+            <button onClick={onRunMatches} className="btn btn-primary btn-sm mt-4 w-full">
+              Who should I meet here? · {going.length} attending
+            </button>
           )}
 
           {here.length > 0 && (
