@@ -923,6 +923,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
               beaconing={me.beaconEventId === openEvent.id}
               going={going.has(openEvent.id)}
               meName={me.name}
+              me={me}
               onBeacon={toggleBeacon}
               onGoing={(v) =>
                 setGoing((cur) => {

@@ -1,6 +1,8 @@
 "use client";
 
 import Avatar from "./Avatar";
+import ForYouPreview from "./ForYouPreview";
+import type { CircleMe } from "@/lib/circleMe";
 import { entityById } from "@/lib/networks";
 import { attendeesOf, beaconsAt, cityById, memberById, type CircleEvent, type CircleMember } from "@/lib/circleData";
 import { IconBeacon, IconCalendar, IconCheck, IconClock, IconGlobe, IconPeople, IconPin } from "./Icons";
@@ -20,6 +22,7 @@ export default function CircleEventPanel({
   beaconing,
   going: imGoing,
   meName,
+  me,
   onBeacon,
   onGoing,
   onOpenMember,
@@ -30,6 +33,8 @@ export default function CircleEventPanel({
   /** Whether you've said you're coming. */
   going: boolean;
   meName: string;
+  /** Needed to run matches against this event's roster, in place. */
+  me?: CircleMe;
   onBeacon: (on: boolean) => void;
   onGoing: (v: boolean) => void;
   onOpenMember: (id: string) => void;
@@ -145,15 +150,6 @@ export default function CircleEventPanel({
             </>
           )}
 
-          {/* The same run, pointed at this event's roster. Before it, this
-              is who to look for; during, who is actually here; afterwards,
-              whoever you never got to — the deck remembers. */}
-          {onRunMatches && (
-            <button onClick={onRunMatches} className="btn btn-primary btn-sm mt-4 w-full">
-              Who should I meet here? · {going.length} attending
-            </button>
-          )}
-
           {here.length > 0 && (
             <div className="mt-4">
               <p className="label">Here right now</p>
@@ -174,6 +170,21 @@ export default function CircleEventPanel({
             Beacons switch on when the event starts — that&rsquo;s when being findable in a room is worth anything.
           </p>
         )
+      )}
+
+      {/* Outside the happening-now block on purpose. It was nested inside
+          it, which meant the one case that matters most — working out who
+          to find *before* you go — was the one case it never appeared in.
+          The same run serves all three moments: beforehand it is who to
+          look for, during it is who is actually here, afterwards it is
+          whoever you never got to, because the deck remembers. */}
+      {onRunMatches && me && (
+        <ForYouPreview
+          me={me}
+          audience={{ kind: "event", event }}
+          scopeKey={`event:${event.id}`}
+          onOpen={onRunMatches}
+        />
       )}
 
       <p className="mt-4 text-[13.5px] leading-5">{event.about}</p>
