@@ -1,4 +1,5 @@
-import { CIRCLE_MEMBERS, attendeesOf, cityById, type CircleEvent, type CircleMember } from "./circleData";
+import { CIRCLE_MEMBERS, attendeesOf, cityById, pointOf, rnd, type CircleEvent, type CircleMember } from "./circleData";
+import { distanceKm } from "./geo";
 import { expandMembership } from "./networks";
 import type { CircleMe } from "./circleMe";
 import { matchesFor, type Match } from "./matching";
@@ -31,8 +32,43 @@ export type Audience =
 
 export type Reach = "here" | "city" | "country" | "world" | "roster";
 
+/**
+ * How near "near" is, for the tightest rung.
+ *
+ * A short walk. Wide enough that a venue and the bar next door are one
+ * place, tight enough that it still means something you'd cross a room
+ * or a street for.
+ */
+export const NEAR_KM = 2;
+
+/**
+ * Where *you* are, precisely enough to measure from.
+ *
+ * Symmetry matters here: the tightest rung asks whether somebody is two
+ * streets away, and that question is unanswerable if your own position is
+ * a city centroid. So it needs both ends to be live — the same rule the
+ * production pin reach applies to a reader, pointed at yourself.
+ *
+ * Members get a scattered point from their stored jitter; you have none,
+ * so one is derived from your name. Deterministic, so you don't drift
+ * around the map between runs.
+ */
+export function myPoint(me: CircleMe): { lat: number; lng: number } | null {
+  const city = cityById(me.cityId);
+  if (!city) return null;
+  if (me.mode !== "live") return { lat: city.lat, lng: city.lng };
+  const dx = ((rnd(`me-x-${me.name}`) % 1000) / 1000 - 0.5) * 0.09;
+  const dy = ((rnd(`me-y-${me.name}`) % 1000) / 1000 - 0.5) * 0.09;
+  return { lat: city.lat + dy, lng: city.lng + dx };
+}
+
+/** The tightest rung needs a precise position at both ends. */
+export function canUseNear(me: CircleMe): boolean {
+  return me.mode === "live";
+}
+
 export const REACH_LABEL: Record<Reach, string> = {
-  here: "Out right now",
+  here: "Near me now",
   city: "In my city",
   country: "In my country",
   world: "Anywhere",
@@ -122,11 +158,27 @@ function withinReach(m: CircleMember, reach: Reach, me: CircleMe): boolean {
   const mine = cityById(me.cityId);
   const theirs = cityById(m.cityId);
   if (!mine || !theirs) return false;
-  // "Out right now" is the closest honest equivalent of being in the same
-  // building: same city, and actually sharing a live position. Indoor GPS
-  // can't tell you which floor somebody is on, so presence is the better
-  // instrument than a radius.
-  if (reach === "here") return theirs.id === mine.id && m.mode === "live";
+  /**
+   * The tightest rung is a real distance, and only a live position can
+   * satisfy it.
+   *
+   * Somebody publishing only their city sits at the city centroid, which
+   * can be twenty kilometres from where they actually are — letting that
+   * count as "near you" would invent precision they never gave. Same rule
+   * the pin reach uses: a coarse position can say "in town" and can never
+   * say "two streets away".
+   *
+   * This replaced a version that meant "same city and sharing live", which
+   * was indistinguishable from "in my city" for somebody on the far side
+   * of Bengaluru.
+   */
+  if (reach === "here") {
+    if (!canUseNear(me) || m.mode !== "live") return false;
+    const theirPoint = pointOf(m);
+    const myPos = myPoint(me);
+    if (!theirPoint || !myPos) return false;
+    return distanceKm(myPos.lat, myPos.lng, theirPoint[1], theirPoint[0]) <= NEAR_KM;
+  }
   if (reach === "city") return theirs.id === mine.id;
   return theirs.country === mine.country;
 }
@@ -200,7 +252,7 @@ function sentenceFor(a: Audience, c: Criteria, me: CircleMe): string {
           ? `in ${city?.country ?? "my country"}`
           : c.reach === "city"
             ? `in ${city?.name ?? "my city"}`
-            : "out right now";
+            : `within ${NEAR_KM} km`;
   const want = c.lookingFor.length > 0 ? ` who can help with ${c.lookingFor.slice(0, 2).join(" or ")}` : "";
   const two = c.twoWayOnly ? ", both ways only" : "";
   return `${who} · ${where}${want}${two}`;

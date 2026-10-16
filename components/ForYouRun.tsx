@@ -5,6 +5,7 @@ import { cityById, type CircleEvent } from "@/lib/circleData";
 import { OPEN_INTERESTS } from "@/lib/circleData";
 import type { CircleMe } from "@/lib/circleMe";
 import {
+  canUseNear,
   defaultReach,
   reachesFor,
   REACH_LABEL,
@@ -121,15 +122,26 @@ export default function ForYouRun({
         <div className="card flex flex-col gap-3 p-3">
           <Control label="How far">
             <div className="flex flex-wrap gap-1.5">
-              {reaches.map((r) => (
-                <Chip
-                  key={r}
-                  on={criteria.reach === r}
-                  onClick={() => setCriteria((c) => ({ ...c, reach: r }))}
-                >
-                  {REACH_LABEL[r]}
-                </Chip>
-              ))}
+              {reaches.map((r) => {
+                // Offered but inert when your own position is a city
+                // centroid: "two streets away" is a question your position
+                // can't answer, and silently returning nothing would read
+                // as the feature being broken.
+                const blocked = r === "here" && !canUseNear(me);
+                return (
+                  <Chip
+                    key={r}
+                    on={criteria.reach === r}
+                    dim={blocked}
+                    title={blocked ? "Share your live location to use this" : undefined}
+                    onClick={() => {
+                      if (!blocked) setCriteria((c) => ({ ...c, reach: r }));
+                    }}
+                  >
+                    {REACH_LABEL[r]}
+                  </Chip>
+                );
+              })}
             </div>
           </Control>
 
@@ -277,18 +289,33 @@ function Control({ label, hint, children }: { label: string; hint?: string; chil
   );
 }
 
-function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+function Chip({
+  on,
+  dim,
+  title,
+  onClick,
+  children,
+}: {
+  on: boolean;
+  dim?: boolean;
+  title?: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={on}
+      aria-disabled={dim}
+      title={title}
       className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
-      style={
-        on
+      style={{
+        ...(on
           ? { background: "var(--brand)", color: "#fff" }
-          : { background: "var(--sunk)", color: "var(--ink-soft)" }
-      }
+          : { background: "var(--sunk)", color: "var(--ink-soft)" }),
+        ...(dim ? { opacity: 0.45 } : {}),
+      }}
     >
       {children}
     </button>
