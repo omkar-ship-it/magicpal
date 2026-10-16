@@ -30,28 +30,62 @@ export type Audience =
   | { kind: "community"; entityId: string; name: string }
   | { kind: "open" };
 
-export type Reach = "here" | "city" | "country" | "world" | "roster";
+export type Reach = "km1" | "km2" | "km5" | "km10" | "city" | "country" | "world" | "roster";
 
 /**
- * How near "near" is, for the tightest rung.
+ * How far, as named steps rather than a slider.
  *
- * A short walk. Wide enough that a venue and the bar next door are one
- * place, tight enough that it still means something you'd cross a room
- * or a street for.
+ * A slider invites fiddling with no feedback — nobody knows whether 3.4 km
+ * is a better answer than 2.8 km, so they drag it about and learn nothing.
+ * Naming the distances is what makes the choice decidable, which is the
+ * same reasoning the production ladder already encodes.
+ *
+ * `km: null` marks the steps that aren't distances at all. "My city" is an
+ * administrative question, not a radius — 500 km from Hyderabad reaches
+ * Chennai and not Delhi — and the user shouldn't have to care that the two
+ * are different queries underneath.
  */
-export const NEAR_KM = 2;
+export const REACH_STEPS = [
+  { id: "km1", km: 1, label: "Within 1 km" },
+  { id: "km2", km: 2, label: "Within 2 km" },
+  { id: "km5", km: 5, label: "Within 5 km" },
+  { id: "km10", km: 10, label: "Within 10 km" },
+  { id: "city", km: null, label: "My city" },
+  { id: "country", km: null, label: "My country" },
+  { id: "world", km: null, label: "Anywhere" },
+  { id: "roster", km: null, label: "Everyone attending" },
+] as const;
+
+const STEP = new Map(REACH_STEPS.map((s) => [s.id as Reach, s]));
+
+export const REACH_LABEL: Record<Reach, string> = Object.fromEntries(
+  REACH_STEPS.map((s) => [s.id, s.label])
+) as Record<Reach, string>;
+
+export function kmOf(r: Reach): number | null {
+  return STEP.get(r)?.km ?? null;
+}
+
+/**
+ * A distance step needs a live position at *both* ends.
+ *
+ * Somebody publishing only their city sits at the centroid, which in a city
+ * the size of Bengaluru can be twenty kilometres from where they actually
+ * are — so their distance from you is not merely imprecise, it is unknown.
+ * They can honestly answer "in my city" and can never answer "within 2 km".
+ * The same is true of you: measuring from your own centroid would invent
+ * precision you never gave either.
+ */
+export function isDistanceStep(r: Reach): boolean {
+  return kmOf(r) != null;
+}
 
 /**
  * Where *you* are, precisely enough to measure from.
  *
- * Symmetry matters here: the tightest rung asks whether somebody is two
- * streets away, and that question is unanswerable if your own position is
- * a city centroid. So it needs both ends to be live — the same rule the
- * production pin reach applies to a reader, pointed at yourself.
- *
- * Members get a scattered point from their stored jitter; you have none,
- * so one is derived from your name. Deterministic, so you don't drift
- * around the map between runs.
+ * Members carry a scattered point already; you have none, so one is derived
+ * from your name — deterministic, so you don't drift around the map between
+ * runs.
  */
 export function myPoint(me: CircleMe): { lat: number; lng: number } | null {
   const city = cityById(me.cityId);
@@ -62,39 +96,31 @@ export function myPoint(me: CircleMe): { lat: number; lng: number } | null {
   return { lat: city.lat + dy, lng: city.lng + dx };
 }
 
-/** The tightest rung needs a precise position at both ends. */
-export function canUseNear(me: CircleMe): boolean {
+export function canUseDistance(me: CircleMe): boolean {
   return me.mode === "live";
 }
-
-export const REACH_LABEL: Record<Reach, string> = {
-  here: "Near me now",
-  city: "In my city",
-  country: "In my country",
-  world: "Anywhere",
-  roster: "Everyone attending",
-};
 
 /**
  * The ladder's length depends on the audience, because the value of a
  * match decays with distance at completely different rates.
  *
- * An event is one room — reach above the venue is meaningless. A community
- * is bound by identity rather than proximity, so a fellow alum in Singapore
- * is genuinely useful and "anywhere" is the right default. The open network
+ * An event is one room — "my country" is meaningless there. A community is
+ * bound by identity rather than proximity, so a fellow alum in Singapore is
+ * genuinely useful and the ladder runs all the way out. The open network
  * has no bond except stated intent, so proximity is the only thing making a
  * match actionable; past the country it is noise, and it stops there.
  */
 export function reachesFor(a: Audience): Reach[] {
-  if (a.kind === "event") return ["roster", "here"];
-  if (a.kind === "community") return ["here", "city", "country", "world"];
-  return ["here", "city", "country"];
+  if (a.kind === "event") return ["roster", "km1", "km2", "km5"];
+  if (a.kind === "community") return ["km1", "km2", "km5", "km10", "city", "country", "world"];
+  return ["km1", "km2", "km5", "km10", "city", "country"];
 }
 
 export function defaultReach(a: Audience): Reach {
   if (a.kind === "event") return "roster";
   if (a.kind === "community") return "city";
-  return "city";
+  // On the open map proximity is the whole point of the match.
+  return "km5";
 }
 
 export type Criteria = {
@@ -158,27 +184,16 @@ function withinReach(m: CircleMember, reach: Reach, me: CircleMe): boolean {
   const mine = cityById(me.cityId);
   const theirs = cityById(m.cityId);
   if (!mine || !theirs) return false;
-  /**
-   * The tightest rung is a real distance, and only a live position can
-   * satisfy it.
-   *
-   * Somebody publishing only their city sits at the city centroid, which
-   * can be twenty kilometres from where they actually are — letting that
-   * count as "near you" would invent precision they never gave. Same rule
-   * the pin reach uses: a coarse position can say "in town" and can never
-   * say "two streets away".
-   *
-   * This replaced a version that meant "same city and sharing live", which
-   * was indistinguishable from "in my city" for somebody on the far side
-   * of Bengaluru.
-   */
-  if (reach === "here") {
-    if (!canUseNear(me) || m.mode !== "live") return false;
+
+  const km = kmOf(reach);
+  if (km != null) {
+    if (!canUseDistance(me) || m.mode !== "live") return false;
     const theirPoint = pointOf(m);
     const myPos = myPoint(me);
     if (!theirPoint || !myPos) return false;
-    return distanceKm(myPos.lat, myPos.lng, theirPoint[1], theirPoint[0]) <= NEAR_KM;
+    return distanceKm(myPos.lat, myPos.lng, theirPoint[1], theirPoint[0]) <= km;
   }
+
   if (reach === "city") return theirs.id === mine.id;
   return theirs.country === mine.country;
 }
@@ -243,6 +258,7 @@ function sentenceFor(a: Audience, c: Criteria, me: CircleMe): string {
   const who =
     a.kind === "event" ? a.event.name : a.kind === "community" ? a.name : "The open network";
   const city = cityById(me.cityId);
+  const km = kmOf(c.reach);
   const where =
     c.reach === "roster"
       ? "everyone attending"
@@ -252,7 +268,7 @@ function sentenceFor(a: Audience, c: Criteria, me: CircleMe): string {
           ? `in ${city?.country ?? "my country"}`
           : c.reach === "city"
             ? `in ${city?.name ?? "my city"}`
-            : `within ${NEAR_KM} km`;
+            : `within ${km} km`;
   const want = c.lookingFor.length > 0 ? ` who can help with ${c.lookingFor.slice(0, 2).join(" or ")}` : "";
   const two = c.twoWayOnly ? ", both ways only" : "";
   return `${who} · ${where}${want}${two}`;

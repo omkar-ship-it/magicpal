@@ -5,7 +5,8 @@ import { cityById, type CircleEvent } from "@/lib/circleData";
 import { OPEN_INTERESTS } from "@/lib/circleData";
 import type { CircleMe } from "@/lib/circleMe";
 import {
-  canUseNear,
+  canUseDistance,
+  isDistanceStep,
   defaultReach,
   reachesFor,
   REACH_LABEL,
@@ -127,7 +128,10 @@ export default function ForYouRun({
                 // centroid: "two streets away" is a question your position
                 // can't answer, and silently returning nothing would read
                 // as the feature being broken.
-                const blocked = r === "here" && !canUseNear(me);
+                // A distance is unanswerable from a city centroid, at
+                // either end — offered but inert, with the reason, rather
+                // than silently returning nothing.
+                const blocked = isDistanceStep(r) && !canUseDistance(me);
                 return (
                   <Chip
                     key={r}
