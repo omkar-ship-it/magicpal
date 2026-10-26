@@ -20,6 +20,7 @@ export default function Avatar({
   ring,
   className = "",
   title,
+  local = false,
 }: {
   /** Also the seed: the same person is the same face everywhere. */
   name: string;
@@ -31,6 +32,16 @@ export default function Avatar({
   ring?: number;
   className?: string;
   title?: string;
+  /**
+   * Draw the face locally instead of fetching the character art.
+   *
+   * For surfaces that put dozens of people on one screen. The art comes
+   * from a third party, and ninety-odd parallel requests to it is enough
+   * to fail on a conference wifi — which is precisely where a demo gets
+   * shown. Initials on the same seeded tint are instant, identical every
+   * time, and cannot embarrass anybody mid-sentence.
+   */
+  local?: boolean;
 }) {
   const src = photoUrl || characterUrl(style, name);
   /**
@@ -41,6 +52,7 @@ export default function Avatar({
    * when the fetch fails the tinted disc keeps its initials instead.
    */
   const [failed, setFailed] = useState(false);
+  const drawLocally = local || failed;
   const initials = name
     .trim()
     .split(/\s+/)
@@ -59,7 +71,7 @@ export default function Avatar({
       }}
       title={title ?? name}
     >
-      {failed ? (
+      {drawLocally ? (
         <span
           aria-hidden="true"
           className="grid h-full w-full place-items-center font-semibold"

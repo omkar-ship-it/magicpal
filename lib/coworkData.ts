@@ -79,6 +79,95 @@ export type Zone =
 
 const ZONES: Zone[] = ["Main floor", "Main floor", "Main floor", "Quiet zone", "Lounge", "Lounge", "Phone booths", "Café", "Meeting room", "Terrace"];
 
+/**
+ * The floor, as geometry.
+ *
+ * This is the map. At the scale of one building a street map is a grey
+ * rectangle, and pretending to place people at metre precision inside it
+ * would be inventing indoor positioning that does not exist — so the
+ * canvas is the plan, and the unit of position is the zone, which is
+ * something a person can actually declare about themselves.
+ *
+ * Percentages rather than pixels: the plan has to hold its proportions
+ * from a phone to a pitch screen.
+ */
+export type ZoneBox = {
+  id: Zone;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Desks, sofas, booths — what the room is for, in one word. */
+  note: string;
+};
+
+export const FLOOR_PLAN: ZoneBox[] = [
+  { id: "Café", x: 3, y: 10, w: 22, h: 18, note: "coffee, all day" },
+  { id: "Lounge", x: 27, y: 10, w: 28, h: 18, note: "sofas, loud talk" },
+  { id: "Terrace", x: 57, y: 10, w: 40, h: 18, note: "outdoors" },
+  { id: "Main floor", x: 3, y: 32, w: 52, h: 40, note: "hot desks" },
+  { id: "Quiet zone", x: 57, y: 32, w: 40, h: 17, note: "no calls" },
+  { id: "Phone booths", x: 57, y: 53, w: 18, h: 19, note: "calls only" },
+  { id: "Meeting room", x: 79, y: 53, w: 18, h: 19, note: "bookable" },
+];
+
+/**
+ * Where the lifts open. The one fixed point everybody orients from — and
+ * placed bottom-centre rather than in a corner, because the panels float
+ * over the bottom-left and the "you are here" marker is the last thing on
+ * this screen that should be hidden behind one.
+ */
+export const ENTRANCE = { x: 30, y: 77, w: 25, h: 16, label: "Reception & lifts" };
+
+/**
+ * How many faces a room shows before the rest become a "+N".
+ *
+ * Scaled by floor area, because a fixed cap made the big room look empty:
+ * seven faces spread across the hot-desk floor read as a quiet afternoon
+ * when twenty-five people were actually sitting in it, which is the
+ * opposite of what the plan is for.
+ */
+export function facesShown(box: ZoneBox): number {
+  return Math.max(4, Math.min(18, Math.round((box.w * box.h) / 125)));
+}
+
+export const zoneBox = (z: Zone): ZoneBox | undefined => FLOOR_PLAN.find((b) => b.id === z);
+
+/**
+ * A deterministic spot inside a zone, on a loose grid so faces never land
+ * exactly on top of each other. Seeded by the person, so somebody is in
+ * the same seat every time the page is opened — a plan where everyone
+ * teleports between refreshes reads as decoration rather than data.
+ */
+export function seatIn(box: ZoneBox, index: number, of: number): { x: number; y: number } {
+  const cols = Math.max(1, Math.ceil(Math.sqrt(of * (box.w / box.h))));
+  const rows = Math.max(1, Math.ceil(of / cols));
+  const col = index % cols;
+  const row = Math.floor(index / cols);
+
+  /**
+   * Margins in plan units, not fractions of the room.
+   *
+   * A fraction looked right until the rooms had different shapes: the same
+   * 34% that cleared the label in the hot-desk floor put the café's top row
+   * straight through its own heading, and its bottom row under the "+4
+   * more" chip. The label and the chip are a fixed size whatever the room
+   * is, so the space reserved for them has to be fixed too.
+   */
+  // TOP has to clear the label *and* half an avatar: the mark is drawn
+  // centred on its seat, so a band only as tall as the heading still put
+  // the top row's chins through it.
+  const TOP = 7.8;
+  const BOTTOM = 4.4;
+  const padX = Math.max(box.w * 0.12, 3);
+  const usableW = Math.max(box.w - padX * 2, 0);
+  const usableH = Math.max(box.h - TOP - BOTTOM, 0);
+  return {
+    x: box.x + padX + (cols === 1 ? usableW / 2 : (usableW * col) / (cols - 1 || 1)),
+    y: box.y + TOP + (rows === 1 ? usableH / 2 : (usableH * row) / (rows - 1 || 1)),
+  };
+}
+
 export type Discipline = "Engineering" | "Product" | "Design" | "Growth" | "Founder" | "Finance" | "People" | "Sales";
 
 const ROLES: Record<Discipline, string[]> = {
