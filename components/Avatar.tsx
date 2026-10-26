@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { avatarTint, characterUrl } from "@/lib/avatar";
 
 /**
@@ -32,6 +33,21 @@ export default function Avatar({
   title?: string;
 }) {
   const src = photoUrl || characterUrl(style, name);
+  /**
+   * The character art is fetched from a third party, and a hundred of them
+   * on one screen is a hundred requests that can be rate-limited, slow or
+   * simply offline. A broken-image glyph in a grid of faces is the single
+   * worst thing that can happen on a screen somebody is being shown — so
+   * when the fetch fails the tinted disc keeps its initials instead.
+   */
+  const [failed, setFailed] = useState(false);
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("");
+
   return (
     <span
       className={`relative inline-block flex-none overflow-hidden rounded-full ${className}`}
@@ -43,8 +59,26 @@ export default function Avatar({
       }}
       title={title ?? name}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt="" width={size} height={size} className="h-full w-full object-cover" loading="lazy" />
+      {failed ? (
+        <span
+          aria-hidden="true"
+          className="grid h-full w-full place-items-center font-semibold"
+          style={{ fontSize: Math.round(size * 0.38), color: "color-mix(in srgb, var(--ink) 70%, transparent)" }}
+        >
+          {initials}
+        </span>
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt=""
+          width={size}
+          height={size}
+          className="h-full w-full object-cover"
+          loading="lazy"
+          onError={() => setFailed(true)}
+        />
+      )}
     </span>
   );
 }
