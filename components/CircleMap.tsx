@@ -13,7 +13,8 @@ import BookTime, { type Booking } from "./BookTime";
 import ForYouRun from "./ForYouRun";
 import Mentorship from "./Mentorship";
 import SearchBar, { NO_FACETS, matchesFacets, matchesQuery, type Facets } from "./SearchBar";
-import { entityById, isAlumniNetwork } from "@/lib/networks";
+import { entityById, isAlumniNetwork, isWorkspace } from "@/lib/networks";
+import { WORKSPACE_IN_TODAY, WORKSPACE_VENUE, workspacePoint } from "@/lib/workspaceData";
 import {
   ALL_CIRCLE_EVENTS,
   attendeesOf,
@@ -256,9 +257,33 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
   const openEvent: CircleEvent | null = openEventId ? findEvent(openEventId) : null;
   const runEventSubject: CircleEvent | null = runEventId ? findEvent(runEventId) : null;
   const beaconEvent = me?.beaconEventId ? findEvent(me.beaconEventId) : null;
-  /** The venue view is on when you're looking at a live event or beaconing at one. */
-  const venueEvent = (openEvent?.liveNow && openEvent.lat != null ? openEvent : beaconEvent?.lat != null ? beaconEvent : null) ?? null;
-  const venueBeacons = beaconsAt(venueEvent);
+  /**
+   * The venue view is on when you're looking at a live event, beaconing at
+   * one — or standing in a workspace, which is a venue that is live every
+   * weekday rather than for one evening.
+   *
+   * Routed through the same `venueEvent` the map already understands, so
+   * the fly-to, the beacon markers and every `!venueEvent` guard below work
+   * untouched. A workspace that needed its own map would be a second app
+   * wearing this one's colours.
+   */
+  const inWorkspace = isWorkspace(activeEntityId);
+  const venueEvent =
+    (inWorkspace
+      ? WORKSPACE_VENUE
+      : openEvent?.liveNow && openEvent.lat != null
+        ? openEvent
+        : beaconEvent?.lat != null
+          ? beaconEvent
+          : null) ?? null;
+  /**
+   * Everyone in the building, not the 38% who opted into a beacon.
+   *
+   * The whole point of looking at a workspace is the scale: four hundred
+   * people inside one footprint is the problem to see, and sampling it down
+   * to a comfortable number would be hiding the thing under examination.
+   */
+  const venueBeacons = inWorkspace ? WORKSPACE_IN_TODAY : beaconsAt(venueEvent);
 
   const flyToVenue = useCallback((e: CircleEvent) => {
     if (e.lat == null || e.lng == null) return;
@@ -311,8 +336,12 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
   }, [activeEntityId, cityFilter, mapReady]);
 
   useEffect(() => {
-    if (venueEvent) flyToVenue(venueEvent);
-  }, [venueEvent, flyToVenue]);
+    // `mapReady` in the deps on purpose: a workspace is a venue from the
+    // first render, so without it this fired before the map existed and the
+    // flight was silently dropped — leaving five hundred people stacked on
+    // one pixel at world zoom.
+    if (mapReady && venueEvent) flyToVenue(venueEvent);
+  }, [mapReady, venueEvent, flyToVenue]);
 
   // Opening an event moves the map to it: a located one to its city, an
   // online one out to the whole spread of people joining.
@@ -481,7 +510,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
         {/* Venue view: everyone beaconing, metres apart. */}
         {venueEvent &&
           venueBeacons.map((m) => {
-            const pt = beaconPoint(venueEvent, m);
+            const pt = inWorkspace ? workspacePoint(m) : beaconPoint(venueEvent, m);
             if (!pt) return null;
             return (
               <Marker key={m.id} longitude={pt[0]} latitude={pt[1]} anchor="center">
@@ -559,7 +588,11 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
           (() => {
             const m = memberById(pinned);
             if (!m) return null;
-            const pt = venueEvent ? beaconPoint(venueEvent, m) : pointOf(m);
+            const pt = venueEvent
+              ? inWorkspace
+                ? workspacePoint(m)
+                : beaconPoint(venueEvent, m)
+              : pointOf(m);
             if (!pt) return null;
             return (
               <Popup longitude={pt[0]} latitude={pt[1]} anchor="top" offset={20} closeButton={false} closeOnClick={false} maxWidth="280px">

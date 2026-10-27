@@ -61,7 +61,7 @@ export type MockEntity = {
    * apart, which is the gradient mentorship runs on. An interest community
    * has members who joined last Tuesday and owe each other nothing.
    */
-  kind?: "institution" | "community";
+  kind?: "institution" | "community" | "workspace";
 };
 
 export const PUBLIC_ENTITY_ID = "public";
@@ -301,6 +301,33 @@ const FLAT_NETWORKS: MockEntity[] = [
 ];
 
 /** Independent clubs — no parent, and none possible. */
+/**
+ * Workspaces — a co-working floor or a corporate office, as a network.
+ *
+ * The reason they are entities rather than a separate product surface: a
+ * member switches between their alumni network, the open map and the floor
+ * they are sitting on from the same control, and anything that needs its
+ * own shell to exist is a second app wearing the first one's colours.
+ *
+ * What makes them different from every other node here is not the chrome,
+ * it is the geometry. A thousand alumni are spread over forty cities; a
+ * thousand desk members are inside one building, which breaks a map that
+ * assumes people are far apart. That problem is the point — see
+ * lib/workspaceData.
+ */
+const WORKSPACES: MockEntity[] = [
+  node(
+    "ws-galaxy",
+    "WeWork Galaxy",
+    null,
+    "Workspace",
+    "🏢",
+    520,
+    "Residency Road, Bengaluru — four floors, 1,100 desks.",
+    { place: { city: "Bengaluru", lat: 12.9667, lng: 77.6 }, kind: "workspace" }
+  ),
+];
+
 const CLUBS: MockEntity[] = [
   node("club-hikers", "Weekend Hikers", null, "Club", "⛺", 320, "Trail-first, work-second — a standing Saturday hike."),
   node("club-bookclub", "Founders' Book Club", null, "Club", "⛺", 150, "One business book a month, one dinner to argue about it."),
@@ -308,7 +335,19 @@ const CLUBS: MockEntity[] = [
   node("club-boardgames", "Board Game Nights", null, "Club", "⛺", 110, "Heavy euros and light trash-talk, every other Friday."),
 ];
 
-export const ALL_ENTITIES: MockEntity[] = [...TIE_TREE, ...ISB_TREE, ...IITB_TREE, ...STANFORD_TREE, ...FLAT_NETWORKS, ...CLUBS];
+export const ALL_ENTITIES: MockEntity[] = [
+  ...TIE_TREE,
+  ...ISB_TREE,
+  ...IITB_TREE,
+  ...STANFORD_TREE,
+  ...FLAT_NETWORKS,
+  ...WORKSPACES,
+  ...CLUBS,
+];
+
+/** Entities whose members are all inside one building. See lib/workspaceData. */
+export const WORKSPACE_IDS = new Set(WORKSPACES.map((w) => w.id));
+export const isWorkspace = (id: string): boolean => WORKSPACE_IDS.has(id);
 
 const BY_ID = new Map(ALL_ENTITIES.map((e) => [e.id, e]));
 const CHILDREN = new Map<string, MockEntity[]>();
@@ -362,7 +401,7 @@ export function ancestorsOf(id: string): MockEntity[] {
  * The kind of the root this node hangs off — a class under ISB is
  * institutional, a circle under Women in Product is not.
  */
-export function rootKindOf(id: string): "institution" | "community" {
+export function rootKindOf(id: string): "institution" | "community" | "workspace" {
   const trail = ancestorsOf(id);
   const root = trail[0] ?? entityById(id);
   return root?.kind ?? "community";

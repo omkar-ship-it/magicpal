@@ -442,6 +442,34 @@ function buildMembers(): CircleMember[] {
 
 export const CIRCLE_MEMBERS: CircleMember[] = buildMembers();
 
+/**
+ * Desk members, added as real membership rather than a special case.
+ *
+ * A workspace is a network like any other — it has to appear in the
+ * switcher, the people list, the feed and the events calendar without any
+ * of them knowing it's different. The only thing that *is* different is
+ * geometry, and geometry belongs on the map, not in the membership model.
+ *
+ * Drawn from the Bengaluru roster because a co-working floor is a local
+ * population: a workspace whose members are scattered across the world is
+ * an alumni network with a different label on it.
+ */
+export const WORKSPACE_ENTITY_ID = "ws-galaxy";
+const WORKSPACE_SEATS = 520;
+(() => {
+  // Bengaluru first, then the rest of the subcontinent, then anybody — a
+  // desk is held by people who moved for it, and the roster has only ~130
+  // members whose home city is Bengaluru. Home city is not the point in a
+  // workspace anyway: what matters is that all five hundred are inside one
+  // building *now*, which is the condition being examined.
+  const rank = (m: CircleMember) =>
+    m.cityId === "blr" ? 0 : cityById(m.cityId)?.region === "south-asia" ? 1 : 2;
+  const seated = [...CIRCLE_MEMBERS]
+    .sort((a, b) => rank(a) - rank(b) || (rnd(`seat-${a.id}`) % 1000) - (rnd(`seat-${b.id}`) % 1000))
+    .slice(0, WORKSPACE_SEATS);
+  for (const m of seated) m.entityIds = [...m.entityIds, WORKSPACE_ENTITY_ID];
+})();
+
 const MEMBER_BY_ID = new Map(CIRCLE_MEMBERS.map((m) => [m.id, m]));
 export const memberById = (id: string): CircleMember | undefined => MEMBER_BY_ID.get(id);
 
