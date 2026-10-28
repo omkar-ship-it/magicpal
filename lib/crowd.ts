@@ -295,9 +295,9 @@ const SQUASH = 0.78;
  */
 export function seatCrowd(bands: Band[], width: number, height: number): Field {
   const cx = width / 2;
-  // Nudged down, because the controls sit at top-centre and the innermost
-  // rings were reaching up behind them.
-  const cy = height / 2 + 26;
+  // Dead centre: the controls moved into the panel header, so the canvas is
+  // the canvas and nothing is sitting on top of it any more.
+  const cy = height / 2;
 
   const leadBand = bands.find((b) => b.lead);
   const labelled = (leadBand?.members.length ?? 0) <= LABEL_CAP;
@@ -390,6 +390,29 @@ export function seatCrowd(bands: Band[], width: number, height: number): Field {
       }
       placed += take;
     }
+  }
+
+  /**
+   * Shrink the whole field until it fits the canvas.
+   *
+   * Ring radii grow with the head-count and the canvas doesn't, so four
+   * hundred people needed seven rings reaching 480px from the centre in a
+   * panel 690px tall — and `overflow: hidden` quietly ate most of the room.
+   * What was left looked like a bug: two stray dots on the left, an arc on
+   * the right, three hundred people nowhere. Scaling about the centre keeps
+   * the ordering and the spacing exactly as computed and simply draws it
+   * smaller, which is the one adjustment that costs the layout nothing.
+   */
+  const maxR = rings.length > 0 ? Math.max(...rings) : inner;
+  const across = (Math.min(cx, width - cx) - 24) / maxR;
+  const down = (Math.min(cy, height - cy) - 24) / (maxR * SQUASH);
+  const fit = Math.min(1, across, down);
+  if (fit < 1 && fit > 0) {
+    for (const s of seats) {
+      s.x = cx + (s.x - cx) * fit;
+      s.y = cy + (s.y - cy) * fit;
+    }
+    for (let i = 0; i < rings.length; i++) rings[i] *= fit;
   }
 
   return { seats, rings, cx, cy, squash: SQUASH };

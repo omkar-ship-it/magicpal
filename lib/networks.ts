@@ -323,7 +323,7 @@ const WORKSPACES: MockEntity[] = [
     "Workspace",
     "🏢",
     520,
-    "Residency Road, Bengaluru — four floors, 1,100 desks.",
+    "Residency Road, Bengaluru — six levels, 1,100 desks.",
     { place: { city: "Bengaluru", lat: 12.9667, lng: 77.6 }, kind: "workspace" }
   ),
 ];

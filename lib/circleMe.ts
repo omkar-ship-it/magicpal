@@ -73,6 +73,16 @@ export type CircleMe = {
   } | null;
   /** Alumni verification, per institution. */
   verification?: Record<string, "pending" | "verified">;
+  /**
+   * Extra details that only mean anything inside one board.
+   *
+   * A workspace needs to know which floor your desk is on; an alumni network
+   * has no use for that and should never be shown it. Rather than a second
+   * profile per board — which is how you end up with five stale bios — this
+   * is a thin layer keyed by board, laid over the one profile underneath.
+   * The board declares what it wants (see lib/floorData); you fill it in.
+   */
+  boardProfile?: Record<string, { floorId?: string; zoneId?: string }>;
   /** Networks you administer — prototype toggle in the You panel. */
   adminOf?: string[];
   /** Verification decisions you made as an admin, this session. */

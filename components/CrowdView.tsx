@@ -4,7 +4,9 @@ import { useMemo, useRef, useState } from "react";
 import type { CircleMember } from "@/lib/circleData";
 import type { CircleMe } from "@/lib/circleMe";
 import { LABEL_CAP, LENSES, bandsFor, seatCrowd, type Lens } from "@/lib/crowd";
+import { floorsFor, type Desk } from "@/lib/floorData";
 import FloatingPage, { type PageSize } from "./FloatingPage";
+import FloorView from "./FloorView";
 import Avatar from "./Avatar";
 
 /**
@@ -24,8 +26,14 @@ import Avatar from "./Avatar";
  * The list is the other half, not a fallback: it is the view for reading
  * and comparing, and some people will live in it. Both show the same bands
  * in the same order, so switching never loses your place.
+ *
+ * And where the board has declared a building — see lib/floorData — there is
+ * a third, which outranks both and opens by default. Rank is a picture of an
+ * opinion only you can see; a floor plan is a shared frame two people can
+ * stand in front of, and it answers the question actually being asked in a
+ * co-working space, which is never "who is nearest" but "where do I go".
  */
-type Mode = "field" | "list";
+type Mode = "floors" | "field" | "list";
 
 export default function CrowdView({
   crowd,
@@ -36,6 +44,9 @@ export default function CrowdView({
   onOpenMember,
   onMinimise,
   onClose,
+  entityId,
+  myDesk,
+  onSetDesk,
 }: {
   crowd: CircleMember[];
   me: CircleMe | null;
@@ -46,9 +57,14 @@ export default function CrowdView({
   onOpenMember: (id: string) => void;
   onMinimise: () => void;
   onClose: () => void;
+  /** The board being looked at — only it knows whether a building was declared. */
+  entityId?: string | null;
+  myDesk?: Desk | null;
+  onSetDesk?: (d: Desk) => void;
 }) {
+  const floors = floorsFor(entityId);
   const [lens, setLens] = useState<Lens>("worth");
-  const [mode, setMode] = useState<Mode>("field");
+  const [mode, setMode] = useState<Mode>(floors ? "floors" : "field");
   const [q, setQ] = useState("");
   const [band, setBand] = useState<string | null>(null);
 
@@ -87,6 +103,23 @@ export default function CrowdView({
   const lead = bands.find((b) => b.lead);
   const leadBand = lead?.id ?? null;
   const labelLead = (lead?.members.length ?? 0) <= LABEL_CAP;
+
+  /**
+   * The weight a person is drawn at, in all three views.
+   *
+   * The bands already decide it; this is only the lookup. It lives here
+   * because the field and the building both need the same answer, and a
+   * second derivation is a second answer waiting to disagree with the first.
+   */
+  const tierOf = useMemo(() => {
+    const t = new Map<string, "lead" | "mid" | "rest">();
+    bands.forEach((b, i) => {
+      const tier: "lead" | "mid" | "rest" =
+        b.lead || i === 0 ? "lead" : b.id === "rest" || b.id === "quiet" ? "rest" : "mid";
+      for (const x of b.members) t.set(x.id, tier);
+    });
+    return (id: string) => t.get(id) ?? "rest";
+  }, [bands]);
 
   /**
    * First names, with a surname initial only where one wouldn't be enough.
@@ -159,7 +192,7 @@ export default function CrowdView({
               className="ml-auto flex items-center gap-0.5 rounded-full p-0.5"
               style={{ background: "var(--sunk)" }}
             >
-              {(["field", "list"] as const).map((m) => (
+              {(floors ? (["floors", "field", "list"] as const) : (["field", "list"] as const)).map((m) => (
                 <button
                   key={m}
                   type="button"
@@ -168,9 +201,15 @@ export default function CrowdView({
                   style={
                     mode === m ? { background: "var(--card)", color: "var(--ink)" } : { color: "var(--ink-soft)" }
                   }
-                  title={m === "field" ? "The room, arranged around you" : "A list, for reading"}
+                  title={
+                    m === "floors"
+                      ? "The building, level by level — where everyone actually is"
+                      : m === "field"
+                        ? "The room, arranged around you"
+                        : "A list, for reading"
+                  }
                 >
-                  {m === "field" ? "Room" : "List"}
+                  {m === "floors" ? "Building" : m === "field" ? "Room" : "List"}
                 </button>
               ))}
             </span>
@@ -186,11 +225,25 @@ export default function CrowdView({
           <p className="mt-1.5 text-[11px] text-[var(--ink-soft)]">
             {needle !== ""
               ? `${found} of ${crowd.length} match. Everyone else is dimmed, not hidden.`
-              : LENSES.find((l) => l.id === lens)?.blurb}
+              : mode === "floors"
+                ? "Everyone at the desk they declared. The lens colours them — it doesn't hide anybody."
+                : LENSES.find((l) => l.id === lens)?.blurb}
           </p>
         </div>
 
-        {mode === "field" ? (
+        {mode === "floors" && floors ? (
+          <FloorView
+            floors={floors}
+            entityId={entityId ?? ""}
+            crowd={crowd}
+            tierOf={tierOf}
+            me={me}
+            myDesk={myDesk ?? null}
+            onSetDesk={(d) => onSetDesk?.(d)}
+            onOpenMember={onOpenMember}
+            dim={(m) => needle !== "" && !matches(m)}
+          />
+        ) : mode === "field" ? (
           <div ref={measure} className="relative min-h-0 flex-1 overflow-hidden">
             {/* The structure, drawn. Faint rings make the field read as
                 designed rather than scattered, and a line from you to each
@@ -230,6 +283,20 @@ export default function CrowdView({
               const from = origin.get(seat.member.id);
               const dim = needle !== "" ? !matches(seat.member) : band != null && seat.band !== band;
               const isLead = seat.band === leadBand;
+              /**
+               * The rest of the room is drawn as texture, not as four hundred
+               * name badges.
+               *
+               * Every seat used to be an initialled disc of near-identical
+               * size, which made the view unusable for the one thing it is
+               * for: four hundred labels nobody can read is not information,
+               * it is confetti, and the six faces that matter drowned in it.
+               * They are still every one of them here, hoverable and
+               * clickable — they are just drawn as a crowd, which is what
+               * they are.
+               */
+              const tier = tierOf(seat.member.id);
+              const dot = Math.max(8, Math.round(seat.size * 0.36));
               return (
                 <button
                   key={seat.member.id}
@@ -257,12 +324,24 @@ export default function CrowdView({
                     } as React.CSSProperties
                   }
                 >
-                  <span
-                    className="relative block rounded-full"
-                    style={isLead ? { boxShadow: "0 0 0 3px var(--brand)" } : undefined}
-                  >
-                    <Avatar name={seat.member.name} size={seat.size} ring={isLead ? 3 : 2} local />
-                  </span>
+                  {tier === "rest" ? (
+                    <span
+                      className="block rounded-full"
+                      style={{
+                        width: dot,
+                        height: dot,
+                        margin: `${(seat.size - dot) / 2}px auto`,
+                        background: "color-mix(in srgb, var(--ink) 30%, transparent)",
+                      }}
+                    />
+                  ) : (
+                    <span
+                      className="relative block rounded-full"
+                      style={isLead ? { boxShadow: "0 0 0 3px var(--brand)" } : undefined}
+                    >
+                      <Avatar name={seat.member.name} size={seat.size} ring={isLead ? 3 : 2} local />
+                    </span>
+                  )}
 
                   {isLead && labelLead && (
                     <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap text-[10.5px] font-semibold">
@@ -270,22 +349,27 @@ export default function CrowdView({
                     </span>
                   )}
 
-                  <span
-                    className={`crowd-card pointer-events-none absolute left-1/2 z-30 w-[220px] -translate-x-1/2 rounded-xl border p-2.5 text-left ${
-                      seat.y > area.h * 0.62 ? "bottom-full mb-2" : "top-full mt-2"
-                    }`}
-                    style={{ background: "var(--card)", borderColor: "var(--line)", boxShadow: "var(--shadow-lift)" }}
-                  >
-                    <span className="block truncate text-[12px] font-semibold">{seat.member.name}</span>
-                    <span className="block truncate text-[11px] text-[var(--ink-soft)]">
-                      {seat.member.headline} · {seat.member.company}
-                    </span>
-                    {why.get(seat.member.id) && (
-                      <span className="mt-1 block text-[11px] leading-[1.4]" style={{ color: "var(--brand)" }}>
-                        {why.get(seat.member.id)}
+                  {/* Only where there's something to say. The rest of the room
+                      carries a native tooltip instead, which also keeps four
+                      hundred absolutely-positioned cards out of the DOM. */}
+                  {tier !== "rest" && (
+                    <span
+                      className={`crowd-card pointer-events-none absolute left-1/2 z-30 w-[220px] -translate-x-1/2 rounded-xl border p-2.5 text-left ${
+                        seat.y > area.h * 0.62 ? "bottom-full mb-2" : "top-full mt-2"
+                      }`}
+                      style={{ background: "var(--card)", borderColor: "var(--line)", boxShadow: "var(--shadow-lift)" }}
+                    >
+                      <span className="block truncate text-[12px] font-semibold">{seat.member.name}</span>
+                      <span className="block truncate text-[11px] text-[var(--ink-soft)]">
+                        {seat.member.headline} · {seat.member.company}
                       </span>
-                    )}
-                  </span>
+                      {why.get(seat.member.id) && (
+                        <span className="mt-1 block text-[11px] leading-[1.4]" style={{ color: "var(--brand)" }}>
+                          {why.get(seat.member.id)}
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </button>
               );
             })}

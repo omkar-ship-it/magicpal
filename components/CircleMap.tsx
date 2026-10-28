@@ -293,6 +293,18 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
    * wearing this one's colours.
    */
   const inWorkspace = isWorkspace(activeEntityId);
+  /**
+   * Your desk here, if this board asked for one and you answered.
+   *
+   * Read off the board-scoped layer rather than the profile proper: a floor
+   * number is meaningless in an alumni network, and a field that follows you
+   * into boards that can't use it is how a profile turns into a junk drawer.
+   */
+  const declaredDesk = me?.boardProfile?.[activeEntityId];
+  const myDesk =
+    declaredDesk?.floorId && declaredDesk.zoneId
+      ? { floorId: declaredDesk.floorId, zoneId: declaredDesk.zoneId }
+      : null;
   const venueEvent =
     (inWorkspace
       ? WORKSPACE_VENUE
@@ -713,6 +725,13 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
           // without losing what you were looking at.
           onMinimise={() => setCrowdOpen(false)}
           onClose={() => setCrowdOpen(false)}
+          // Only the board knows whether it has a building; the crowd view
+          // asks lib/floorData and offers the extra mode if the answer is yes.
+          entityId={activeEntityId}
+          myDesk={myDesk}
+          onSetDesk={(d) =>
+            update({ boardProfile: { ...(me?.boardProfile ?? {}), [activeEntityId]: d } })
+          }
         />
       )}
 
