@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { CircleMember } from "@/lib/circleData";
 import type { CircleMe } from "@/lib/circleMe";
-import { LENSES, bandsFor, seatCrowd, type Lens } from "@/lib/crowd";
+import { LABEL_CAP, LENSES, bandsFor, seatCrowd, type Lens } from "@/lib/crowd";
 import Avatar from "./Avatar";
 
 /**
@@ -57,7 +57,31 @@ export default function CrowdView({
    * less information in it than none. The ring colour and the legend carry
    * the meaning at that size.
    */
-  const labelLead = (lead?.members.length ?? 0) <= 8;
+  const labelLead = (lead?.members.length ?? 0) <= LABEL_CAP;
+
+  /**
+   * First names, with a surname initial only where one wouldn't be enough.
+   *
+   * Two of the six were both "Vikram", which makes a label that exists to
+   * identify somebody do the opposite. Adding the initial to everybody
+   * would be noise; adding it only where the name repeats is the smallest
+   * thing that makes each one unambiguous.
+   */
+  const labelOf = useMemo(() => {
+    const names = lead?.members ?? [];
+    const firstCount = new Map<string, number>();
+    for (const m of names) {
+      const f = m.name.split(" ")[0];
+      firstCount.set(f, (firstCount.get(f) ?? 0) + 1);
+    }
+    return new Map(
+      names.map((m) => {
+        const [first, ...rest] = m.name.split(" ");
+        const initial = rest[0]?.[0];
+        return [m.id, (firstCount.get(first) ?? 0) > 1 && initial ? `${first} ${initial}.` : first];
+      })
+    );
+  }, [lead]);
 
   const needle = q.trim().toLowerCase();
   const matches = (m: CircleMember) =>
@@ -128,7 +152,7 @@ export default function CrowdView({
                   can read; four hundred is a smear. */}
               {seat.band === leadBand && labelLead && (
                 <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap text-[10.5px] font-semibold">
-                  {seat.member.name.split(" ")[0]}
+                  {labelOf.get(seat.member.id) ?? seat.member.name.split(" ")[0]}
                 </span>
               )}
 

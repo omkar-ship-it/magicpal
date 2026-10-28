@@ -264,6 +264,9 @@ function band3(lead: Band, mid: Band, rest: CircleMember[]): Band[] {
 
 export type Seat = { member: CircleMember; x: number; y: number; size: number; band: string };
 
+/** Above this many, the headline band stops carrying names — see CrowdView. */
+export const LABEL_CAP = 8;
+
 /**
  * Everybody on concentric rings, the people who matter nearest the middle.
  *
@@ -281,39 +284,94 @@ export function seatCrowd(bands: Band[], width: number, height: number): Seat[] 
   // Nudged down, because the controls sit at top-centre and the innermost
   // rings were reaching up behind them.
   const cy = height / 2 + 26;
+
+  const leadBand = bands.find((b) => b.lead);
+  const labelled = (leadBand?.members.length ?? 0) <= LABEL_CAP;
   const ordered = bands.flatMap((b) =>
     b.members.map((member) => ({ member, band: b.id, lead: Boolean(b.lead) }))
   );
 
+  const inner = Math.max(96, Math.min(width, height) * 0.14);
+  const radiusOf = (ring: number) => inner + (ring === 0 ? 0 : 22 + ring * 52);
+  const sizeOf = (ring: number) => (ring === 0 ? 46 : ring === 1 ? 36 : ring < 4 ? 28 : 22);
+  const capacityOf = (ring: number) =>
+    Math.max(1, Math.floor((2 * Math.PI * radiusOf(ring)) / (sizeOf(ring) + 12)));
+
   const seats: Seat[] = [];
   let index = 0;
   let ring = 0;
-  const inner = Math.max(96, Math.min(width, height) * 0.14);
 
-  while (index < ordered.length) {
-    // The first gap is wider than the rest: the headline band is the only
-    // one that carries names, and they need somewhere to sit that isn't on
-    // top of the ring behind it.
-    const radius = inner + (ring === 0 ? 0 : 22 + ring * 52);
-    const size = ring === 0 ? 46 : ring === 1 ? 36 : ring < 4 ? 28 : 22;
-    const capacity = Math.max(1, Math.floor((2 * Math.PI * radius) / (size + 12)));
-    const take = Math.min(capacity, ordered.length - index);
-    // Each ring starts a little further round than the last, so the rings
-    // don't line up into visible spokes.
-    const offset = ring * 0.6;
-    for (let i = 0; i < take; i++) {
-      const a = offset + (i / take) * Math.PI * 2;
-      const entry = ordered[index + i];
+  /**
+   * The headline band gets the innermost ring to itself.
+   *
+   * Packed in with the band behind it, six names at the ring's natural
+   * spacing sat about fifty pixels apart and every label ran into its
+   * neighbour — "Siddharth" collided with "Ananya", and one disappeared
+   * behind the face next to it entirely. Alone on the ring they are sixty
+   * degrees apart, which is room for any name, and the design reads better
+   * for it: a distinct inner circle of people, then the room.
+   */
+  if (labelled && leadBand && leadBand.members.length > 0) {
+    const n = leadBand.members.length;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.PI / 2;
       seats.push({
-        member: entry.member,
-        x: cx + Math.cos(a) * radius,
-        y: cy + Math.sin(a) * radius * 0.78, // squashed: screens are wider than tall
-        size: entry.lead ? Math.max(size, 44) : size,
-        band: entry.band,
+        member: leadBand.members[i],
+        x: cx + Math.cos(a) * inner,
+        y: cy + Math.sin(a) * inner * 0.78,
+        size: 46,
+        band: leadBand.id,
       });
     }
-    index += take;
-    ring++;
+    index = n;
+    ring = 1;
   }
+
+  /**
+   * Everyone else spread so that every ring is equally full.
+   *
+   * Filling each ring to capacity and letting the last one take whatever
+   * is left stranded three or four people alone on an enormous outer
+   * circle — a lonely dot at the top of the screen and another at the
+   * bottom, which reads as a bug rather than as a crowd. Sharing the
+   * remainder across the rings in proportion to their circumference keeps
+   * the field evenly dense all the way out.
+   */
+  const remaining = ordered.length - index;
+  if (remaining > 0) {
+    const caps: number[] = [];
+    let total = 0;
+    for (let r = ring; total < remaining; r++) {
+      const c = capacityOf(r);
+      caps.push(c);
+      total += c;
+    }
+    const sum = caps.reduce((a, b) => a + b, 0);
+    let placed = 0;
+    for (let k = 0; k < caps.length; k++) {
+      const last = k === caps.length - 1;
+      const take = last ? remaining - placed : Math.round((remaining * caps[k]) / sum);
+      const r = ring + k;
+      const radius = radiusOf(r);
+      const size = sizeOf(r);
+      // Each ring starts a little further round than the last, so the rings
+      // don't line up into visible spokes.
+      const offset = r * 0.6;
+      for (let i = 0; i < take; i++) {
+        const a = offset + (i / Math.max(take, 1)) * Math.PI * 2;
+        const entry = ordered[index + placed + i];
+        if (!entry) break;
+        seats.push({
+          member: entry.member,
+          x: cx + Math.cos(a) * radius,
+          y: cy + Math.sin(a) * radius * 0.78,
+          size: entry.lead ? Math.max(size, 44) : size,
+          band: entry.band,
+        });
+      }
+      placed += take;
+    }
+  }
+
   return seats;
 }
