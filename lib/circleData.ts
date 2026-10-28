@@ -470,6 +470,25 @@ const WORKSPACE_SEATS = 520;
   for (const m of seated) m.entityIds = [...m.entityIds, WORKSPACE_ENTITY_ID];
 })();
 
+/**
+ * 2gethr, seeded the same way and for the same reason.
+ *
+ * Bengaluru-first, because a co-working space is a local population. Three
+ * hundred and eighty is the size an operator actually runs — large enough
+ * that nobody can know the room, small enough that everybody could
+ * plausibly have met, which is precisely the band where introductions are
+ * worth making and browsing has already stopped working.
+ */
+export const SPACE_ENTITY_ID = "sp-2gethr";
+(() => {
+  const rank = (m: CircleMember) =>
+    m.cityId === "blr" ? 0 : cityById(m.cityId)?.region === "south-asia" ? 1 : 2;
+  const seated = [...CIRCLE_MEMBERS]
+    .sort((a, b) => rank(a) - rank(b) || (rnd(`2g-seat-${a.id}`) % 1000) - (rnd(`2g-seat-${b.id}`) % 1000))
+    .slice(0, 380);
+  for (const m of seated) m.entityIds = [...m.entityIds, SPACE_ENTITY_ID];
+})();
+
 const MEMBER_BY_ID = new Map(CIRCLE_MEMBERS.map((m) => [m.id, m]));
 export const memberById = (id: string): CircleMember | undefined => MEMBER_BY_ID.get(id);
 

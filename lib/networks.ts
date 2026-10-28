@@ -328,6 +328,27 @@ const WORKSPACES: MockEntity[] = [
   ),
 ];
 
+/**
+ * Co-working spaces, which are workspaces with a different front door.
+ *
+ * Deliberately *not* in WORKSPACES, and so not in WORKSPACE_IDS: a space
+ * does not want the building view, it wants the matched-introduction
+ * experience at /2gethr. Being an ordinary entity keeps it in the switcher,
+ * the feed and the people list without the map trying to draw its geometry.
+ */
+const SPACES: MockEntity[] = [
+  node(
+    "sp-2gethr",
+    "2gethr",
+    null,
+    "Space",
+    "\u2615",
+    380,
+    "A members' club in Bengaluru for people who work for themselves, and for each other.",
+    { place: { city: "Bengaluru", lat: 12.9279, lng: 77.6271 }, kind: "workspace" }
+  ),
+];
+
 const CLUBS: MockEntity[] = [
   node("club-hikers", "Weekend Hikers", null, "Club", "⛺", 320, "Trail-first, work-second — a standing Saturday hike."),
   node("club-bookclub", "Founders' Book Club", null, "Club", "⛺", 150, "One business book a month, one dinner to argue about it."),
@@ -342,6 +363,7 @@ export const ALL_ENTITIES: MockEntity[] = [
   ...STANFORD_TREE,
   ...FLAT_NETWORKS,
   ...WORKSPACES,
+  ...SPACES,
   ...CLUBS,
 ];
 
