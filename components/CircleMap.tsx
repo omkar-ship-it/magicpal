@@ -83,7 +83,7 @@ const PRECISE_ZOOM = 9;
  * interest community is open by nature, and making people hunt for a link
  * to join one is friction with nothing on the other side of it.
  */
-const JOINABLE = ["climate", "blr-founders", "women-product", "yc"];
+const JOINABLE = ["ws-galaxy", "climate", "blr-founders", "women-product", "yc"];
 
 /** Openers, so a cold thread has something in it. Deterministic per member. */
 function seedThread(m: CircleMember, communityName: string): MockMessage[] {

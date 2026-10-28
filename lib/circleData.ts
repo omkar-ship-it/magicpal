@@ -835,6 +835,16 @@ export type CircleInvite = {
  */
 export const CIRCLE_INVITES: CircleInvite[] = [
   {
+    // The one to hand to a co-working operator: it lands on the floor with
+    // four hundred people already in it, which is the only state in which
+    // the crowd control means anything.
+    code: "galaxy",
+    entityId: "ws-galaxy",
+    adminName: "Nandini Rao",
+    adminRole: "Community manager, WeWork Galaxy",
+    note: "Everyone with a desk here. Four floors, and you've met about six of them — this is the rest.",
+  },
+  {
     code: "pgp19",
     entityId: "isb-pgp-2019",
     adminName: "Priya Raman",
