@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { CircleMember } from "@/lib/circleData";
 import type { CircleMe } from "@/lib/circleMe";
-import { LABEL_CAP, LENSES, bandsFor, seatCrowd, type Lens } from "@/lib/crowd";
+import { LABEL_CAP, LENSES, bandsFor, layoutCrowd, tierOfBand, type Lens } from "@/lib/crowd";
 import { floorsFor, type Desk } from "@/lib/floorData";
 import FloatingPage, { type PageSize } from "./FloatingPage";
 import FloorView from "./FloorView";
@@ -17,11 +17,12 @@ import Avatar from "./Avatar";
  * crowd and start reading a spreadsheet, and the feeling of the crowd is
  * most of why anybody opened a map of people.
  *
- * So the default keeps every face on screen and *changes what distance
- * means*. You are in the middle, the people who answer what you came in for
- * sit on their own ring around you, and the rest of the room recedes
- * outward — smaller, quieter, entirely there. Near still means matters, so
- * there is no second visual language to learn.
+ * So the default keeps every face on screen and draws the room as *groups*
+ * — one island per band, sized by how many are in it, named on the island
+ * itself, with the one that answers what you came for placed beside you.
+ * That is the thing a person actually reads in a crowded room: not a rank
+ * order, but a knot of people by the window and three around the coffee.
+ * Nobody is dropped — the last island is always the rest of the room.
  *
  * The list is the other half, not a fallback: it is the view for reading
  * and comparing, and some people will live in it. Both show the same bands
@@ -98,10 +99,9 @@ export default function CrowdView({
   };
 
   const { bands, why } = useMemo(() => bandsFor(lens, me, crowd), [lens, me, crowd]);
-  const field = useMemo(() => seatCrowd(bands, area.w, area.h), [bands, area]);
+  const field = useMemo(() => layoutCrowd(bands, area.w, area.h), [bands, area]);
 
   const lead = bands.find((b) => b.lead);
-  const leadBand = lead?.id ?? null;
   const labelLead = (lead?.members.length ?? 0) <= LABEL_CAP;
 
   /**
@@ -114,8 +114,7 @@ export default function CrowdView({
   const tierOf = useMemo(() => {
     const t = new Map<string, "lead" | "mid" | "rest">();
     bands.forEach((b, i) => {
-      const tier: "lead" | "mid" | "rest" =
-        b.lead || i === 0 ? "lead" : b.id === "rest" || b.id === "quiet" ? "rest" : "mid";
+      const tier = tierOfBand(b, i);
       for (const x of b.members) t.set(x.id, tier);
     });
     return (id: string) => t.get(id) ?? "rest";
@@ -129,17 +128,34 @@ export default function CrowdView({
    */
   const labelOf = useMemo(() => {
     const names = lead?.members ?? [];
-    const firstCount = new Map<string, number>();
-    for (const m of names) {
-      const f = m.name.split(" ")[0];
-      firstCount.set(f, (firstCount.get(f) ?? 0) + 1);
-    }
+    const first = (m: CircleMember) => m.name.split(" ")[0];
+    const initialled = (m: CircleMember) => {
+      const [f, ...rest] = m.name.split(" ");
+      return rest[0] ? `${f} ${rest[0][0]}.` : f;
+    };
+    const tally = (fn: (m: CircleMember) => string) => {
+      const c = new Map<string, number>();
+      for (const m of names) c.set(fn(m), (c.get(fn(m)) ?? 0) + 1);
+      return c;
+    };
+    const byFirst = tally(first);
+    const byInitial = tally(initialled);
+    /**
+     * As much name as it takes to tell two people apart, and no more.
+     *
+     * "Vikram" and "Vikram" became "Vikram V." and "Vikram V." — the same
+     * collision one letter longer. Falling through to the full name when the
+     * initial still clashes is the only form guaranteed to be unambiguous.
+     */
     return new Map(
-      names.map((m) => {
-        const [first, ...rest] = m.name.split(" ");
-        const initial = rest[0]?.[0];
-        return [m.id, (firstCount.get(first) ?? 0) > 1 && initial ? `${first} ${initial}.` : first];
-      })
+      names.map((m) => [
+        m.id,
+        (byFirst.get(first(m)) ?? 0) === 1
+          ? first(m)
+          : (byInitial.get(initialled(m)) ?? 0) === 1
+            ? initialled(m)
+            : m.name,
+      ])
     );
   }, [lead]);
 
@@ -245,65 +261,53 @@ export default function CrowdView({
           />
         ) : mode === "field" ? (
           <div ref={measure} className="relative min-h-0 flex-1 overflow-hidden">
-            {/* The structure, drawn. Faint rings make the field read as
-                designed rather than scattered, and a line from you to each
-                of the six makes "worth crossing the room for" literal. */}
+            {/* The islands, drawn. This is the layer that used to be a set of
+                concentric rings and told you nothing: a shape per group,
+                sized by how many are in it, so the picture carries what the
+                legend was carrying on its own. */}
             <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
-              {field.rings.map((r, i) => (
-                <ellipse
-                  key={i}
-                  cx={field.cx}
-                  cy={field.cy}
-                  rx={r}
-                  ry={r * field.squash}
-                  fill="none"
-                  stroke="var(--line)"
+              {field.islands.map((is) => (
+                <circle
+                  key={is.id}
+                  cx={is.x}
+                  cy={is.y}
+                  r={is.r + 12}
+                  fill={
+                    is.tier === "lead"
+                      ? "color-mix(in srgb, var(--brand) 8%, transparent)"
+                      : "color-mix(in srgb, var(--ink) 4%, transparent)"
+                  }
+                  stroke={is.tier === "lead" ? "var(--brand)" : "var(--line)"}
                   strokeWidth={1}
-                  opacity={0.55}
+                  opacity={is.tier === "lead" ? 0.55 : 0.8}
                 />
               ))}
-              {labelLead &&
-                field.seats
-                  .filter((s) => s.band === leadBand)
-                  .map((s) => (
-                    <line
-                      key={s.member.id}
-                      x1={field.cx}
-                      y1={field.cy}
-                      x2={s.x}
-                      y2={s.y}
-                      stroke="var(--brand)"
-                      strokeWidth={1.5}
-                      opacity={0.3}
-                    />
-                  ))}
+              {/* One line, to the one island that answers what you came for. */}
+              {field.islands[0] && (
+                <line
+                  x1={field.cx}
+                  y1={field.cy}
+                  x2={field.islands[0].x}
+                  y2={field.islands[0].y}
+                  stroke="var(--brand)"
+                  strokeWidth={1.5}
+                  strokeDasharray="5 5"
+                  opacity={0.4}
+                />
+              )}
             </svg>
 
             {field.seats.map((seat) => {
               const from = origin.get(seat.member.id);
               const dim = needle !== "" ? !matches(seat.member) : band != null && seat.band !== band;
-              const isLead = seat.band === leadBand;
-              /**
-               * The rest of the room is drawn as texture, not as four hundred
-               * name badges.
-               *
-               * Every seat used to be an initialled disc of near-identical
-               * size, which made the view unusable for the one thing it is
-               * for: four hundred labels nobody can read is not information,
-               * it is confetti, and the six faces that matter drowned in it.
-               * They are still every one of them here, hoverable and
-               * clickable — they are just drawn as a crowd, which is what
-               * they are.
-               */
-              const tier = tierOf(seat.member.id);
-              const dot = Math.max(8, Math.round(seat.size * 0.36));
+              const named = seat.tier === "lead" && labelLead;
               return (
                 <button
                   key={seat.member.id}
                   type="button"
                   onClick={() => onOpenMember(seat.member.id)}
                   className="crowd-seat absolute"
-                  title={`${seat.member.name} — ${seat.member.headline}`}
+                  title={`${seat.member.name} — ${seat.member.headline}, ${seat.member.company}`}
                   style={
                     {
                       left: seat.x,
@@ -312,47 +316,44 @@ export default function CrowdView({
                       height: seat.size,
                       marginLeft: -seat.size / 2,
                       marginTop: -seat.size / 2,
-                      opacity: dim ? 0.16 : 1,
-                      zIndex: isLead ? 3 : 1,
-                      // The flight, cascading outward ring by ring: the crowd
-                      // assembles around you rather than appearing fully
-                      // formed, which is the half-second that explains what
-                      // this view is.
-                      animationDelay: `${Math.min(seat.ring, 9) * 55}ms`,
+                      opacity: dim ? 0.14 : 1,
+                      zIndex: seat.tier === "lead" ? 4 : seat.tier === "mid" ? 2 : 1,
+                      // Island by island, and within an island from the
+                      // middle out: the room assembles in the order you are
+                      // meant to read it.
+                      animationDelay: `${Math.min(seat.island * 90 + Math.min(seat.order, 24) * 10, 1100)}ms`,
                       "--fx": `${(from?.x ?? field.cx) - seat.x}px`,
                       "--fy": `${(from?.y ?? field.cy) - seat.y}px`,
                     } as React.CSSProperties
                   }
                 >
-                  {tier === "rest" ? (
+                  {seat.tier === "rest" ? (
                     <span
-                      className="block rounded-full"
-                      style={{
-                        width: dot,
-                        height: dot,
-                        margin: `${(seat.size - dot) / 2}px auto`,
-                        background: "color-mix(in srgb, var(--ink) 30%, transparent)",
-                      }}
+                      className="block h-full w-full rounded-full"
+                      style={{ background: "color-mix(in srgb, var(--ink) 32%, transparent)" }}
                     />
                   ) : (
                     <span
                       className="relative block rounded-full"
-                      style={isLead ? { boxShadow: "0 0 0 3px var(--brand)" } : undefined}
+                      // Ringed only where the island is small enough to carry names.
+                      // Fifty people each ringed in brand colour is not emphasis,
+                      // it is a red blob.
+                      style={seat.tier === "lead" && labelLead ? { boxShadow: "0 0 0 3px var(--brand)" } : undefined}
                     >
-                      <Avatar name={seat.member.name} size={seat.size} ring={isLead ? 3 : 2} local />
+                      <Avatar name={seat.member.name} size={seat.size} ring={seat.tier === "lead" && labelLead ? 3 : 2} local />
                     </span>
                   )}
 
-                  {isLead && labelLead && (
+                  {named && (
                     <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap text-[10.5px] font-semibold">
                       {labelOf.get(seat.member.id) ?? seat.member.name.split(" ")[0]}
                     </span>
                   )}
 
-                  {/* Only where there's something to say. The rest of the room
+                  {/* Only where there's something to say. The sea of dots
                       carries a native tooltip instead, which also keeps four
                       hundred absolutely-positioned cards out of the DOM. */}
-                  {tier !== "rest" && (
+                  {seat.tier !== "rest" && (
                     <span
                       className={`crowd-card pointer-events-none absolute left-1/2 z-30 w-[220px] -translate-x-1/2 rounded-xl border p-2.5 text-left ${
                         seat.y > area.h * 0.62 ? "bottom-full mb-2" : "top-full mt-2"
@@ -374,10 +375,41 @@ export default function CrowdView({
               );
             })}
 
+            {/* Every island says its own name, on the island. The legend
+                becomes a filter rather than the only place the groups are
+                written down. */}
+            {field.islands.map((is) => {
+              // Above the island, unless that would land it on top of you —
+              // then below. A label sitting on the "You" badge reads as a
+              // layout bug and hides the one fixed point in the view.
+              const above = is.y - is.r - 16;
+              const clash = Math.hypot(is.x - field.cx, above - field.cy) < 76;
+              return (
+              <button
+                key={`lbl-${is.id}`}
+                type="button"
+                onClick={() => setBand(band === is.id ? null : is.id)}
+                className="crowd-chip absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-semibold"
+                style={{
+                  left: is.x,
+                  top: clash ? is.y + is.r + 16 : above,
+                  zIndex: 6,
+                  background: "var(--card)",
+                  borderColor: is.tier === "lead" ? "var(--brand)" : "var(--line)",
+                  color: is.tier === "lead" ? "var(--brand)" : "var(--ink)",
+                  boxShadow: "var(--shadow-lift)",
+                  opacity: band != null && band !== is.id ? 0.45 : 1,
+                }}
+              >
+                {is.label} <span className="mono opacity-60">{is.count}</span>
+              </button>
+              );
+            })}
+
             {/* You, at the centre, because every distance here is from you. */}
             <span
               className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
-              style={{ left: field.cx, top: field.cy, zIndex: 5 }}
+              style={{ left: field.cx, top: field.cy, zIndex: 8 }}
             >
               <span className="relative block">
                 <span className="crowd-you" />
@@ -390,32 +422,6 @@ export default function CrowdView({
                 </span>
               </span>
             </span>
-
-            {/* The bands, as a legend you can point at. */}
-            <div
-              className="absolute bottom-2 right-2 z-20 flex max-w-[240px] flex-col gap-0.5 rounded-2xl border p-1.5"
-              style={{
-                background: "color-mix(in srgb, var(--card) 94%, transparent)",
-                borderColor: "var(--line)",
-                backdropFilter: "blur(8px)",
-              }}
-            >
-              {bands.map((b) => (
-                <button
-                  key={b.id}
-                  type="button"
-                  onClick={() => setBand(band === b.id ? null : b.id)}
-                  className="flex items-center justify-between gap-3 rounded-xl px-2 py-1 text-left"
-                  style={band === b.id ? { background: "var(--sunk)" } : undefined}
-                >
-                  <span className="min-w-0 truncate text-[11.5px] font-semibold">
-                    {b.lead && <span style={{ color: "var(--brand)" }}>● </span>}
-                    {b.label}
-                  </span>
-                  <span className="mono flex-none text-[11px] text-[var(--ink-soft)]">{b.members.length}</span>
-                </button>
-              ))}
-            </div>
           </div>
         ) : (
           /* ----------------------------------------------------- the list */

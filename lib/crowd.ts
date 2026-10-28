@@ -171,17 +171,52 @@ function knownBands(me: CircleMe | null, crowd: CircleMember[]): Band[] {
    */
   const mine = new Set(expandMembership(me?.entityIds ?? []));
   const direct = crowd.filter((m) => connected.has(m.id));
-  const shared = crowd.filter(
-    (m) =>
-      !connected.has(m.id) &&
-      [...expandMembership(m.entityIds)].some((id) => mine.has(id) && !isHereForEveryone(id, crowd))
-  );
-  const taken = new Set([...direct, ...shared].map((m) => m.id));
-  return band3(
-    { id: "direct", label: "You know them", members: direct, lead: true },
-    { id: "shared", label: "One community away", members: shared },
-    crowd.filter((m) => !taken.has(m.id))
-  );
+  const seen = new Set(direct.map((m) => m.id));
+
+  /**
+   * Grouped by *which* community, not lumped into one "one community away".
+   *
+   * Eighty-three people under a single heading is a heading that has told
+   * you nothing — and drawn, it was one undifferentiated blob. Split by the
+   * community you actually share, it becomes "Also in ISB, 40" next to
+   * "Also in Weekend Hikers, 12", which is both a better picture and a
+   * better opening line.
+   */
+  const groups = new Map<string, CircleMember[]>();
+  for (const m of crowd) {
+    if (seen.has(m.id)) continue;
+    const shared = [...expandMembership(m.entityIds)].find(
+      (id) => mine.has(id) && !isHereForEveryone(id, crowd)
+    );
+    if (!shared) continue;
+    const list = groups.get(shared) ?? [];
+    list.push(m);
+    groups.set(shared, list);
+    seen.add(m.id);
+  }
+  const byShared = [...groups.entries()]
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([id, members]) => ({
+      id: `sh-${id}`,
+      label: `Also in ${entityById(id)?.name ?? "a community you're in"}`,
+      members,
+    }));
+
+  if (direct.length === 0 && byShared.length === 0) {
+    return [{ id: "none", label: "Nobody here you already know", members: crowd }];
+  }
+
+  const out: Band[] = [];
+  if (direct.length > 0) out.push({ id: "direct", label: "You know them", members: direct, lead: true });
+  out.push(...byShared.slice(0, 4));
+  const spill = byShared.slice(4).flatMap((b) => b.members);
+  if (spill.length > 0) out.push({ id: "shared-other", label: "Other shared communities", members: spill });
+  const rest = crowd.filter((m) => !seen.has(m.id));
+  if (rest.length > 0) out.push({ id: "rest", label: "Everyone else here", members: rest });
+
+  if (out.length === 0) return [{ id: "all", label: "Everyone here", members: crowd }];
+  if (!out.some((b) => b.lead)) out[0] = { ...out[0], lead: true };
+  return out;
 }
 
 /** True when an entity is simply "the room" — shared by nearly everybody here. */
@@ -262,158 +297,238 @@ function band3(lead: Band, mid: Band, rest: CircleMember[]): Band[] {
 
 /* ------------------------------------------------------------- layout */
 
+/**
+ * Islands, not rings.
+ *
+ * The first draft of this view put everybody on concentric rings ordered by
+ * rank: you in the middle, the best match nearest, four hundred people
+ * spiralling outward. It was wrong, and the way it was wrong is worth
+ * writing down. Rank is a total order, and a total order drawn as a picture
+ * is a dartboard — four hundred discs at near-identical size, no two of them
+ * distinguishable, and every word of actual information sitting in the
+ * legend off to one side. You could not point at it and say anything true.
+ *
+ * What people actually do in a crowded room is read *groups*: a knot of
+ * people by the window, three around the coffee, the loud table. The bands
+ * are already groups — "worth crossing the room for", "hiring", "also in
+ * ISB" — so the fix is to let the geometry carry what the legend was
+ * carrying. One island per band, sized by how many are in it, packed so
+ * every island looks equally full, placed around you with the one that
+ * matters nearest. Now the picture says it: a tight bright cluster of six
+ * beside you, and a quiet grey sea of three hundred and ninety-six.
+ */
+
+export type Tier = "lead" | "mid" | "rest";
+
+/** The weight a band is drawn at — one answer, read by every view. */
+export function tierOfBand(band: Band, index: number): Tier {
+  /**
+   * The rest of the room is never the headline, even when it is the only
+   * band there is.
+   *
+   * band3 marks the first surviving band as the lead so a lens always has
+   * somewhere to start. With no connections and no shared community, the
+   * only band left is everybody — and promoting it drew four hundred and
+   * twenty people at headline weight, every one of them ringed in brand
+   * colour: a solid red disc that said "all of these matter enormously",
+   * which is the exact opposite of what the lens had just worked out.
+   */
+  if (band.id === "rest" || band.id === "quiet" || band.id === "none") return "rest";
+  if (band.lead || index === 0) return "lead";
+  return "mid";
+}
+
+export type Island = {
+  id: string;
+  label: string;
+  count: number;
+  tier: Tier;
+  x: number;
+  y: number;
+  r: number;
+};
+
 export type Seat = {
   member: CircleMember;
   x: number;
   y: number;
   size: number;
   band: string;
-  /** Which ring out from the centre — drives the cascade and the depth. */
-  ring: number;
+  tier: Tier;
+  /** Rank inside the island — drives the cascade, and who gets a name. */
+  order: number;
+  island: number;
 };
 
-/** The field, not just its occupants: the rings are drawn, so they're returned. */
-export type Field = { seats: Seat[]; rings: number[]; cx: number; cy: number; squash: number };
+export type Field = { seats: Seat[]; islands: Island[]; cx: number; cy: number };
 
-/** Above this many, the headline band stops carrying names — see CrowdView. */
+/** Above this many in the headline island, the names come off. */
 export const LABEL_CAP = 8;
 
-/** Rings are ellipses, because screens are wider than they are tall. */
-const SQUASH = 0.78;
+/** Screens are wider than they are tall, so the islands spread elliptically. */
+const SQUASH = 0.8;
+
+/** The golden angle. Phyllotaxis packs a disc evenly with no seams or spokes. */
+const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+
+/** How big one person is drawn, by the weight of the group they are in. */
+function sizeFor(tier: Tier, n: number): number {
+  if (tier === "rest") return 9;
+  if (tier === "lead") return n <= LABEL_CAP ? 46 : n <= 16 ? 34 : 24;
+  return n <= 24 ? 26 : 18;
+}
 
 /**
- * Everybody on concentric rings, the people who matter nearest the middle.
+ * How a group of n arranges itself, and how wide that makes it.
  *
- * The same reading as the map — *near means matters* — so nobody has to
- * learn a second visual language. The only thing that changed is what
- * distance measures, which is why the ground underneath must stop looking
- * like a street map or the view is lying about where people are.
- *
- * Ring capacity grows with circumference, so four hundred people fill
- * outward instead of overlapping: the crowd stays a crowd, and stays
- * entirely on screen.
+ * Two regimes, because one formula cannot serve both ends. Up to ten, a
+ * single ring with the spacing worked out from the chord — six faces at 46px
+ * need a radius of 58 to clear each other, and phyllotaxis, which assumes
+ * dimensionless points, happily stacked the first one almost on top of the
+ * second and ran two names into each other. Past ten, the golden angle packs
+ * a disc evenly with no seams and no spokes, and the point-approximation is
+ * close enough that nothing collides.
  */
-export function seatCrowd(bands: Band[], width: number, height: number): Field {
+function packFor(n: number, size: number): { r: number; at: (k: number) => [number, number] } {
+  // Faces big enough to carry a name need room for the name, not the face.
+  const gap = size >= 40 ? size * 0.55 : Math.max(5, size * 0.26);
+  if (n <= 1) return { r: size * 0.8, at: () => [0, 0] };
+  if (n <= 10) {
+    const rr = Math.max(size * 0.85, (size + gap) / (2 * Math.sin(Math.PI / n)));
+    return {
+      r: rr + size / 2 + 4,
+      at: (k) => {
+        const a = (k / n) * Math.PI * 2 - Math.PI / 2;
+        return [Math.cos(a) * rr, Math.sin(a) * rr];
+      },
+    };
+  }
+  const rr = Math.sqrt(n) * (size + gap) * 0.56;
+  return {
+    r: rr,
+    at: (k) => {
+      const a = k * GOLDEN;
+      const rad = rr * Math.sqrt((k + 0.5) / n) * 0.92;
+      return [Math.cos(a) * rad, Math.sin(a) * rad];
+    },
+  };
+}
+
+type Disc = { x: number; y: number; r: number };
+
+/**
+ * The first spot this island fits, searching outward from its own heading.
+ *
+ * Islands are laid out in band order, so the headline band asks first and
+ * gets the closest seat to you; everything after it fits around what is
+ * already placed. Greedy and deterministic — the same crowd lands in the
+ * same arrangement every time, which matters, because a room that
+ * rearranges itself on every render is a room nobody can learn.
+ */
+function place(r: number, base: number, taken: Disc[], cx: number, cy: number): Disc {
+  /**
+   * Angle outside, distance inside — and the order is the whole thing.
+   *
+   * Scanning distance first looked equivalent and wasn't: the field is
+   * squashed vertically, so at any given distance the horizontal candidates
+   * clear their neighbours before the vertical ones do, and every island
+   * slid sideways into a row along the top. Holding the heading and pushing
+   * outward until it fits keeps each island roughly where it was sent.
+   */
+  const start = r + 72;
+  for (let k = 0; k <= 30; k++) {
+    for (const sign of k === 0 ? [1] : [1, -1]) {
+      const a = base + sign * k * (Math.PI / 20);
+      for (let d = start; d < start + 2400; d += 10) {
+        const x = cx + Math.cos(a) * d;
+        const y = cy + Math.sin(a) * d * SQUASH;
+        if (taken.every((o) => Math.hypot(x - o.x, y - o.y) >= r + o.r + 18)) return { x, y, r };
+      }
+    }
+  }
+  return { x: cx, y: cy - start, r };
+}
+
+export function layoutCrowd(bands: Band[], width: number, height: number): Field {
   const cx = width / 2;
-  // Dead centre: the controls moved into the panel header, so the canvas is
-  // the canvas and nothing is sitting on top of it any more.
   const cy = height / 2;
 
-  const leadBand = bands.find((b) => b.lead);
-  const labelled = (leadBand?.members.length ?? 0) <= LABEL_CAP;
-  const ordered = bands.flatMap((b) =>
-    b.members.map((member) => ({ member, band: b.id, lead: Boolean(b.lead) }))
-  );
-
-  const inner = Math.max(96, Math.min(width, height) * 0.14);
-  const radiusOf = (ring: number) => inner + (ring === 0 ? 0 : 22 + ring * 52);
-  const sizeOf = (ring: number) => (ring === 0 ? 46 : ring === 1 ? 36 : ring < 4 ? 28 : 22);
-  const capacityOf = (ring: number) =>
-    Math.max(1, Math.floor((2 * Math.PI * radiusOf(ring)) / (sizeOf(ring) + 12)));
-
+  /** Your own disc, so no island is placed on top of you. */
+  const taken: Disc[] = [{ x: cx, y: cy, r: 54 }];
+  const islands: Island[] = [];
   const seats: Seat[] = [];
-  const rings: number[] = [];
-  let index = 0;
-  let ring = 0;
 
-  /**
-   * The headline band gets the innermost ring to itself.
-   *
-   * Packed in with the band behind it, six names at the ring's natural
-   * spacing sat about fifty pixels apart and every label ran into its
-   * neighbour — "Siddharth" collided with "Ananya", and one disappeared
-   * behind the face next to it entirely. Alone on the ring they are sixty
-   * degrees apart, which is room for any name, and the design reads better
-   * for it: a distinct inner circle of people, then the room.
-   */
-  if (labelled && leadBand && leadBand.members.length > 0) {
-    const n = leadBand.members.length;
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2 + Math.PI / 2;
+  bands.forEach((b, i) => {
+    const n = b.members.length;
+    if (n === 0) return;
+    const tier = tierOfBand(b, i);
+    const size = sizeFor(tier, n);
+    const pack = packFor(n, size);
+    /**
+     * Headings spread evenly around you rather than by golden angle.
+     *
+     * The golden angle is the right answer for hundreds of points and the
+     * wrong one for three: it piled all three islands into the top-left and
+     * left half the panel empty. Even spacing puts the headline island above
+     * you and the rest around, and the greedy distance search still pushes
+     * the big quiet ones further out on its own.
+     */
+    const base = -Math.PI / 2 + (i * 2 * Math.PI) / Math.max(bands.length, 3);
+    const at = place(pack.r, base, taken, cx, cy);
+    taken.push(at);
+    islands.push({ id: b.id, label: b.label, count: n, tier, x: at.x, y: at.y, r: pack.r });
+
+    b.members.forEach((member, k) => {
+      const [dx, dy] = pack.at(k);
       seats.push({
-        member: leadBand.members[i],
-        x: cx + Math.cos(a) * inner,
-        y: cy + Math.sin(a) * inner * SQUASH,
-        size: 46,
-        band: leadBand.id,
-        ring: 0,
+        member,
+        band: b.id,
+        tier,
+        order: k,
+        island: islands.length - 1,
+        size,
+        x: at.x + dx,
+        y: at.y + dy,
       });
-    }
-    rings.push(inner);
-    index = n;
-    ring = 1;
-  }
+    });
+  });
 
   /**
-   * Everyone else spread so that every ring is equally full.
+   * Shrink the arrangement until it fits the canvas.
    *
-   * Filling each ring to capacity and letting the last one take whatever
-   * is left stranded three or four people alone on an enormous outer
-   * circle — a lonely dot at the top of the screen and another at the
-   * bottom, which reads as a bug rather than as a crowd. Sharing the
-   * remainder across the rings in proportion to their circumference keeps
-   * the field evenly dense all the way out.
+   * Islands grow with the head-count and the panel doesn't. Positions scale
+   * linearly; the faces scale by the square root of the same factor, so a
+   * crowded room compresses the sea of dots rather than shrinking the six
+   * people the view exists to show.
    */
-  const remaining = ordered.length - index;
-  if (remaining > 0) {
-    const caps: number[] = [];
-    let total = 0;
-    for (let r = ring; total < remaining; r++) {
-      const c = capacityOf(r);
-      caps.push(c);
-      total += c;
-    }
-    const sum = caps.reduce((a, b) => a + b, 0);
-    let placed = 0;
-    for (let k = 0; k < caps.length; k++) {
-      const last = k === caps.length - 1;
-      const take = last ? remaining - placed : Math.round((remaining * caps[k]) / sum);
-      const r = ring + k;
-      const radius = radiusOf(r);
-      if (take > 0) rings.push(radius);
-      const size = sizeOf(r);
-      // Each ring starts a little further round than the last, so the rings
-      // don't line up into visible spokes.
-      const offset = r * 0.6;
-      for (let i = 0; i < take; i++) {
-        const a = offset + (i / Math.max(take, 1)) * Math.PI * 2;
-        const entry = ordered[index + placed + i];
-        if (!entry) break;
-        seats.push({
-          member: entry.member,
-          x: cx + Math.cos(a) * radius,
-          y: cy + Math.sin(a) * radius * SQUASH,
-          size: entry.lead ? Math.max(size, 44) : size,
-          band: entry.band,
-          ring: r,
-        });
-      }
-      placed += take;
-    }
+  let maxX = 0;
+  let maxY = 0;
+  for (const is of islands) {
+    maxX = Math.max(maxX, Math.abs(is.x - cx) + is.r);
+    maxY = Math.max(maxY, Math.abs(is.y - cy) + is.r + 18);
   }
-
   /**
-   * Shrink the whole field until it fits the canvas.
-   *
-   * Ring radii grow with the head-count and the canvas doesn't, so four
-   * hundred people needed seven rings reaching 480px from the centre in a
-   * panel 690px tall — and `overflow: hidden` quietly ate most of the room.
-   * What was left looked like a bug: two stray dots on the left, an arc on
-   * the right, three hundred people nowhere. Scaling about the centre keeps
-   * the ordering and the spacing exactly as computed and simply draws it
-   * smaller, which is the one adjustment that costs the layout nothing.
+   * Capped at 1.3 in both directions. A crowded room has to shrink to fit;
+   * a thin one was sitting in a puddle in the middle of a large panel with
+   * the frame empty all round it, which reads as a rendering accident
+   * rather than as a small room.
    */
-  const maxR = rings.length > 0 ? Math.max(...rings) : inner;
-  const across = (Math.min(cx, width - cx) - 24) / maxR;
-  const down = (Math.min(cy, height - cy) - 24) / (maxR * SQUASH);
-  const fit = Math.min(1, across, down);
-  if (fit < 1 && fit > 0) {
+  // The dock floats over the bottom of the panel; leave it room.
+  const vertical = Math.min(cy - 22, height - cy - 56);
+  const k = Math.min(1.3, (width / 2 - 18) / Math.max(maxX, 1), vertical / Math.max(maxY, 1));
+  if (k !== 1 && k > 0) {
+    const f = Math.sqrt(k);
     for (const s of seats) {
-      s.x = cx + (s.x - cx) * fit;
-      s.y = cy + (s.y - cy) * fit;
+      s.x = cx + (s.x - cx) * k;
+      s.y = cy + (s.y - cy) * k;
+      s.size = Math.max(5, Math.min(58, s.size * f));
     }
-    for (let i = 0; i < rings.length; i++) rings[i] *= fit;
+    for (const is of islands) {
+      is.x = cx + (is.x - cx) * k;
+      is.y = cy + (is.y - cy) * k;
+      is.r *= k;
+    }
   }
 
-  return { seats, rings, cx, cy, squash: SQUASH };
+  return { seats, islands, cx, cy };
 }

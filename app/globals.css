@@ -934,3 +934,10 @@ h1, h2, h3 {
   .bld-pin, .plan-pin-dot { animation: none; }
   .bld-floor:hover .bld-slab { transform: none; }
 }
+
+/* An island's name sits on the island, and lifts when you reach for it. */
+.crowd-chip { transition: transform 120ms ease, opacity 120ms ease; }
+.crowd-chip:hover { transform: translate(-50%, -50%) scale(1.06); }
+@media (prefers-reduced-motion: reduce) {
+  .crowd-chip:hover { transform: translate(-50%, -50%); }
+}
