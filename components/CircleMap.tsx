@@ -15,6 +15,8 @@ import Mentorship from "./Mentorship";
 import SearchBar, { NO_FACETS, matchesFacets, matchesQuery, type Facets } from "./SearchBar";
 import { entityById, isAlumniNetwork, isWorkspace } from "@/lib/networks";
 import { WORKSPACE_IN_TODAY, WORKSPACE_VENUE, workspacePoint } from "@/lib/workspaceData";
+import { densestCrowd, type Crowd, type ScreenPoint } from "@/lib/crowd";
+import CrowdView from "./CrowdView";
 import {
   ALL_CIRCLE_EVENTS,
   attendeesOf,
@@ -139,6 +141,26 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
   const [query, setQuery] = useState("");
   const [cityFilter, setCityFilter] = useState<string | null>(null);
   const [pinned, setPinned] = useState<string | null>(null);
+  /**
+   * The densest clump of faces on screen, if there is one, and whether the
+   * reader has opened it.
+   *
+   * Measured in screen pixels rather than metres, and recomputed whenever
+   * the camera settles — which is what makes it general. It fires for four
+   * hundred people in a building, for a conference hall, and for the open
+   * map zoomed out over a city, without knowing which of those it is.
+   */
+  const [crowd, setCrowd] = useState<Crowd | null>(null);
+  const [crowdOpen, setCrowdOpen] = useState(false);
+  /**
+   * Where each face was standing on the map at the moment the view opened.
+   *
+   * Captured on the click rather than read during render — the map ref is
+   * out of bounds there — and it is what lets every face fly from its own
+   * pin instead of fading in from nowhere. That flight is the whole
+   * explanation of the view: same people, rearranged around you.
+   */
+  const [crowdOrigin, setCrowdOrigin] = useState<Map<string, { x: number; y: number }>>(new Map());
   const [switcherOpen, setSwitcherOpen] = useState(false);
   /** Drives the two map layers below — see PRECISE_ZOOM. */
   const [zoom, setZoom] = useState(1.6);
@@ -285,6 +307,37 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
    */
   const venueBeacons = inWorkspace ? WORKSPACE_IN_TODAY : beaconsAt(venueEvent);
 
+  /**
+   * Where a member is drawn right now, whichever layer is on.
+   *
+   * Was duplicated at three call sites and about to be at a fourth; the
+   * density scan has to agree exactly with what is on screen or it will
+   * measure a crowd that isn't there.
+   */
+  // Plain functions, not useCallback: the compiler refuses to preserve a
+  // manual memo whose dependency it believes may be mutated, and skipping
+  // optimisation for the whole component is a far worse trade than letting
+  // it memoise these two itself.
+  const pointFor = (m: CircleMember): [number, number] | null =>
+    venueEvent ? (inWorkspace ? workspacePoint(m) : beaconPoint(venueEvent, m)) : pointOf(m);
+
+  /** Re-measure the pile-up once the camera has settled. */
+  const scanCrowd = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    const pool = venueEvent ? venueBeacons : members;
+    const points: ScreenPoint[] = [];
+    for (const m of pool) {
+      const pt = pointFor(m);
+      if (!pt) continue;
+      const p = map.project([pt[0], pt[1]]);
+      // Off-screen people aren't occluding anything the reader can see.
+      if (p.x < -80 || p.y < -80 || p.x > window.innerWidth + 80 || p.y > window.innerHeight + 80) continue;
+      points.push({ member: m, x: p.x, y: p.y });
+    }
+    setCrowd(densestCrowd(points));
+  };
+
   const flyToVenue = useCallback((e: CircleEvent) => {
     if (e.lat == null || e.lng == null) return;
     mapRef.current?.flyTo({ center: [e.lng, e.lat], zoom: 16.5, duration: 1600 });
@@ -427,7 +480,11 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
         }
         onClick={() => setPinned(null)}
         onMove={(e) => setZoom(e.viewState.zoom)}
-        onLoad={() => setMapReady(true)}
+        onLoad={() => {
+          setMapReady(true);
+          scanCrowd();
+        }}
+        onIdle={scanCrowd}
         style={{ width: "100%", height: "100%" }}
       >
         <NavigationControl position="bottom-right" showCompass={false} />
@@ -510,7 +567,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
         {/* Venue view: everyone beaconing, metres apart. */}
         {venueEvent &&
           venueBeacons.map((m) => {
-            const pt = inWorkspace ? workspacePoint(m) : beaconPoint(venueEvent, m);
+            const pt = pointFor(m);
             if (!pt) return null;
             return (
               <Marker key={m.id} longitude={pt[0]} latitude={pt[1]} anchor="center">
@@ -588,11 +645,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
           (() => {
             const m = memberById(pinned);
             if (!m) return null;
-            const pt = venueEvent
-              ? inWorkspace
-                ? workspacePoint(m)
-                : beaconPoint(venueEvent, m)
-              : pointOf(m);
+            const pt = pointFor(m);
             if (!pt) return null;
             return (
               <Popup longitude={pt[0]} latitude={pt[1]} anchor="top" offset={20} closeButton={false} closeOnClick={false} maxWidth="280px">
@@ -601,6 +654,58 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
             );
           })()}
       </MapGL>
+
+      {/* ── the crowd control ──
+          Anchored to the pile itself rather than parked in the chrome: it
+          is an answer to a condition on this part of this screen, and it
+          should appear where the problem is and nowhere else. */}
+      {crowd && !crowdOpen && stack.length === 0 && !pinned && (
+        <button
+          type="button"
+          onClick={() => {
+            const map = mapRef.current;
+            const from = new Map<string, { x: number; y: number }>();
+            if (map) {
+              for (const m of crowd.members) {
+                const pt = pointFor(m);
+                if (!pt) continue;
+                const p = map.project([pt[0], pt[1]]);
+                from.set(m.id, { x: p.x, y: p.y });
+              }
+            }
+            setCrowdOrigin(from);
+            setCrowdOpen(true);
+          }}
+          className="float-in fixed z-[1250] -translate-x-1/2 rounded-full border px-3 py-2 text-left"
+          style={{
+            left: crowd.x,
+            top: crowd.y,
+            background: "var(--card)",
+            borderColor: "var(--brand)",
+            boxShadow: "var(--shadow-lift)",
+          }}
+        >
+          <span className="block text-[12.5px] font-semibold leading-tight">
+            {crowd.members.length} people here
+          </span>
+          <span className="block text-[11px] leading-tight" style={{ color: "var(--brand)" }}>
+            Too many to read — make sense of this →
+          </span>
+        </button>
+      )}
+
+      {crowdOpen && crowd && (
+        <CrowdView
+          crowd={crowd.members}
+          me={me ?? null}
+          origin={crowdOrigin}
+          onOpenMember={(id) => {
+            setCrowdOpen(false);
+            push(`member:${id}`);
+          }}
+          onClose={() => setCrowdOpen(false)}
+        />
+      )}
 
       {/* ── top: what the map is scoped to ── */}
       <div className="float-in pointer-events-none fixed inset-x-0 top-3 z-[1200] flex flex-col items-center gap-1.5 px-3 sm:top-5">
