@@ -628,3 +628,22 @@ h1, h2, h3 {
 .crowd-seat:hover {
   z-index: 40 !important;
 }
+
+/* A slow breath under "You" — the one moving thing on a still field, so the
+   centre reads as alive rather than as a label. */
+.crowd-you {
+  position: absolute;
+  inset: -10px;
+  border-radius: 999px;
+  border: 2px solid var(--brand);
+  opacity: 0;
+  animation: crowd-pulse 3.2s ease-out infinite;
+}
+@keyframes crowd-pulse {
+  0% { transform: scale(0.82); opacity: 0.5; }
+  70% { transform: scale(1.25); opacity: 0; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .crowd-you { animation: none; }
+}

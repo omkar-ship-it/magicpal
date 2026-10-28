@@ -262,10 +262,24 @@ function band3(lead: Band, mid: Band, rest: CircleMember[]): Band[] {
 
 /* ------------------------------------------------------------- layout */
 
-export type Seat = { member: CircleMember; x: number; y: number; size: number; band: string };
+export type Seat = {
+  member: CircleMember;
+  x: number;
+  y: number;
+  size: number;
+  band: string;
+  /** Which ring out from the centre — drives the cascade and the depth. */
+  ring: number;
+};
+
+/** The field, not just its occupants: the rings are drawn, so they're returned. */
+export type Field = { seats: Seat[]; rings: number[]; cx: number; cy: number; squash: number };
 
 /** Above this many, the headline band stops carrying names — see CrowdView. */
 export const LABEL_CAP = 8;
+
+/** Rings are ellipses, because screens are wider than they are tall. */
+const SQUASH = 0.78;
 
 /**
  * Everybody on concentric rings, the people who matter nearest the middle.
@@ -279,7 +293,7 @@ export const LABEL_CAP = 8;
  * outward instead of overlapping: the crowd stays a crowd, and stays
  * entirely on screen.
  */
-export function seatCrowd(bands: Band[], width: number, height: number): Seat[] {
+export function seatCrowd(bands: Band[], width: number, height: number): Field {
   const cx = width / 2;
   // Nudged down, because the controls sit at top-centre and the innermost
   // rings were reaching up behind them.
@@ -298,6 +312,7 @@ export function seatCrowd(bands: Band[], width: number, height: number): Seat[] 
     Math.max(1, Math.floor((2 * Math.PI * radiusOf(ring)) / (sizeOf(ring) + 12)));
 
   const seats: Seat[] = [];
+  const rings: number[] = [];
   let index = 0;
   let ring = 0;
 
@@ -318,11 +333,13 @@ export function seatCrowd(bands: Band[], width: number, height: number): Seat[] 
       seats.push({
         member: leadBand.members[i],
         x: cx + Math.cos(a) * inner,
-        y: cy + Math.sin(a) * inner * 0.78,
+        y: cy + Math.sin(a) * inner * SQUASH,
         size: 46,
         band: leadBand.id,
+        ring: 0,
       });
     }
+    rings.push(inner);
     index = n;
     ring = 1;
   }
@@ -353,6 +370,7 @@ export function seatCrowd(bands: Band[], width: number, height: number): Seat[] 
       const take = last ? remaining - placed : Math.round((remaining * caps[k]) / sum);
       const r = ring + k;
       const radius = radiusOf(r);
+      if (take > 0) rings.push(radius);
       const size = sizeOf(r);
       // Each ring starts a little further round than the last, so the rings
       // don't line up into visible spokes.
@@ -364,14 +382,15 @@ export function seatCrowd(bands: Band[], width: number, height: number): Seat[] 
         seats.push({
           member: entry.member,
           x: cx + Math.cos(a) * radius,
-          y: cy + Math.sin(a) * radius * 0.78,
+          y: cy + Math.sin(a) * radius * SQUASH,
           size: entry.lead ? Math.max(size, 44) : size,
           band: entry.band,
+          ring: r,
         });
       }
       placed += take;
     }
   }
 
-  return seats;
+  return { seats, rings, cx, cy, squash: SQUASH };
 }

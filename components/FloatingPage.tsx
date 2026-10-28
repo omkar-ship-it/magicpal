@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconX } from "./Icons";
 
 export type PageSize = "side" | "wide" | "full";
@@ -19,6 +19,7 @@ export default function FloatingPage({
   onClose,
   onMinimise,
   onSize,
+  padded = true,
   children,
 }: {
   title: string;
@@ -30,6 +31,8 @@ export default function FloatingPage({
   /** Stands the page down while leaving its scope on the map. Absent = no minimise affordance. */
   onMinimise?: () => void;
   onSize: (s: PageSize) => void;
+  /** Off for a page that paints its own canvas edge to edge. */
+  padded?: boolean;
   children: ReactNode;
 }) {
   useEffect(() => {
@@ -39,6 +42,74 @@ export default function FloatingPage({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  /**
+   * Dragged and resized, on top of the size presets.
+   *
+   * A panel you can only snap to three widths is furniture; one you can
+   * put where you want is a window, and a product whose panels behave like
+   * windows is one people arrange to suit the thing they are doing. The
+   * presets stay — they are the fast path — and a drag simply offsets from
+   * wherever the preset put it.
+   *
+   * Desktop only. On a phone this is a bottom sheet and dragging it
+   * sideways would be answering a question nobody asked with a gesture
+   * that fights the scroll.
+   */
+  const grab = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
+  const stretch = useRef<{ px: number; py: number; w: number; h: number } | null>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Both are stamped with the preset they were made under, and read back
+   * only while that preset still applies.
+   *
+   * A new preset is a fresh intent — it should land where the preset says,
+   * not where the last drag left it — and the obvious way to do that is to
+   * clear the offsets in an effect when `size` changes, which the React
+   * Compiler refuses because it cascades a second render. Deriving it needs
+   * no effect and cannot get out of step.
+   */
+  const [dragged, setDragged] = useState<{ at: PageSize; x: number; y: number } | null>(null);
+  const [boxed, setBoxed] = useState<{ at: PageSize; w: number; h: number } | null>(null);
+  const drag = dragged?.at === size ? dragged : { x: 0, y: 0 };
+  const box = boxed?.at === size ? boxed : null;
+
+  function startDrag(e: React.PointerEvent) {
+    if (window.matchMedia("(max-width: 639px)").matches) return;
+    if ((e.target as HTMLElement).closest("button")) return;
+    grab.current = { px: e.clientX, py: e.clientY, x: drag.x, y: drag.y };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function onDrag(e: React.PointerEvent) {
+    const g = grab.current;
+    if (!g) return;
+    setDragged({ at: size, x: g.x + (e.clientX - g.px), y: g.y + (e.clientY - g.py) });
+  }
+  function endDrag() {
+    grab.current = null;
+    stretch.current = null;
+  }
+
+  function startResize(e: React.PointerEvent) {
+    const el = frameRef.current;
+    if (!el) return;
+    e.stopPropagation();
+    const r = el.getBoundingClientRect();
+    stretch.current = { px: e.clientX, py: e.clientY, w: r.width, h: r.height };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function onResize(e: React.PointerEvent) {
+    const st = stretch.current;
+    if (!st) return;
+    setBoxed({
+      at: size,
+      // The panel is anchored to its right edge, so dragging the grip left
+      // has to grow it rather than shrink it.
+      w: Math.max(320, st.w - (e.clientX - st.px)),
+      h: Math.max(240, st.h + (e.clientY - st.py)),
+    });
+  }
 
   /**
    * On a phone this is a bottom sheet, not a floating card: it rises from the
@@ -55,15 +126,37 @@ export default function FloatingPage({
 
   return (
     <div
+      ref={frameRef}
       className={`panel-enter fixed z-[1300] flex flex-col overflow-hidden rounded-3xl border border-[var(--line)] ${frame}`}
-      style={{ background: "color-mix(in srgb, var(--card) 97%, transparent)", backdropFilter: "blur(16px)", boxShadow: "var(--shadow-lift)" }}
+      style={{
+        background: "color-mix(in srgb, var(--card) 97%, transparent)",
+        backdropFilter: "blur(16px)",
+        boxShadow: "var(--shadow-lift)",
+        /**
+         * `translate`, not `transform`.
+         *
+         * `.panel-enter` animates `transform` with `both`, so the final
+         * keyframe keeps applying it forever and an inline `transform`
+         * never wins — the panel simply refused to move. The independent
+         * `translate` property composes with the animation instead of
+         * fighting it.
+         */
+        translate: drag.x || drag.y ? `${drag.x}px ${drag.y}px` : undefined,
+        ...(box ? { width: box.w, height: box.h, top: undefined } : null),
+      }}
     >
       {/* Grab handle — the affordance that tells a thumb this is a sheet. */}
       <div className="flex-none pt-2 sm:hidden">
         <span className="mx-auto block h-1 w-9 rounded-full" style={{ background: "var(--line)" }} />
       </div>
 
-      <div className="flex flex-none items-center gap-1.5 border-b border-[var(--line)] px-3 py-2.5 sm:px-4">
+      <div
+        onPointerDown={startDrag}
+        onPointerMove={onDrag}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        className="flex flex-none cursor-grab items-center gap-1.5 border-b border-[var(--line)] px-3 py-2.5 active:cursor-grabbing sm:px-4"
+      >
         {canGoBack && (
           <button onClick={onBack} className="win-btn flex-none" title="Back" aria-label="Back">
             <IconChevronLeft size={15} />
@@ -102,7 +195,30 @@ export default function FloatingPage({
         </div>
       </div>
 
-      <div className={`flex-1 overflow-y-auto p-4 pb-[88px] sm:pb-4 ${size === "full" ? "mx-auto w-full max-w-3xl" : ""}`}>{children}</div>
+      <div
+        className={`min-h-0 flex-1 ${padded ? "overflow-y-auto p-4 pb-[88px] sm:pb-4" : "overflow-hidden"} ${
+          padded && size === "full" ? "mx-auto w-full max-w-3xl" : ""
+        }`}
+      >
+        {children}
+      </div>
+
+      {/* The grip. Bottom-left, because the panel hangs off the right edge
+          and a corner that runs off the screen is a corner nobody can grab. */}
+      <button
+        type="button"
+        onPointerDown={startResize}
+        onPointerMove={onResize}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        aria-label="Resize"
+        className="absolute bottom-0 left-0 hidden h-5 w-5 cursor-nesw-resize sm:block"
+        style={{ touchAction: "none" }}
+      >
+        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" style={{ color: "var(--line)" }}>
+          <path d="M3 17h14M3 17v-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+        </svg>
+      </button>
     </div>
   );
 }

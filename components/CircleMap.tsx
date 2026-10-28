@@ -161,6 +161,9 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
    * explanation of the view: same people, rearranged around you.
    */
   const [crowdOrigin, setCrowdOrigin] = useState<Map<string, { x: number; y: number }>>(new Map());
+  // Opens full, because a constellation of four hundred needs the room;
+  // from there it is the reader's to narrow, drag and resize.
+  const [crowdSize, setCrowdSize] = useState<PageSize>("full");
   const [switcherOpen, setSwitcherOpen] = useState(false);
   /** Drives the two map layers below — see PRECISE_ZOOM. */
   const [zoom, setZoom] = useState(1.6);
@@ -699,10 +702,16 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
           crowd={crowd.members}
           me={me ?? null}
           origin={crowdOrigin}
+          size={crowdSize}
+          onSize={setCrowdSize}
           onOpenMember={(id) => {
             setCrowdOpen(false);
             push(`member:${id}`);
           }}
+          // Minimise leaves the crowd on the map and the control with it,
+          // which is the whole point of the affordance: put the panel down
+          // without losing what you were looking at.
+          onMinimise={() => setCrowdOpen(false)}
           onClose={() => setCrowdOpen(false)}
         />
       )}

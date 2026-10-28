@@ -1,71 +1,98 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { CircleMember } from "@/lib/circleData";
 import type { CircleMe } from "@/lib/circleMe";
 import { LABEL_CAP, LENSES, bandsFor, seatCrowd, type Lens } from "@/lib/crowd";
+import FloatingPage, { type PageSize } from "./FloatingPage";
 import Avatar from "./Avatar";
 
 /**
- * A crowd, re-arranged around you.
+ * A crowd, re-arranged around you — in a window like every other section.
  *
- * The obvious answer to four hundred overlapping pins is a list, and it is
- * the wrong one for a specific reason: a list destroys the room. You stop
- * standing in a crowd and start reading a spreadsheet, and the feeling of
- * the crowd is most of why anybody opened the map.
+ * The obvious answer to four hundred overlapping pins is a list, and on its
+ * own it is the wrong one: a list destroys the room. You stop standing in a
+ * crowd and start reading a spreadsheet, and the feeling of the crowd is
+ * most of why anybody opened a map of people.
  *
- * So every face stays on screen and *distance changes meaning*. You are in
- * the middle; the people who answer what you came in for are large and
- * near; the rest of the room recedes outward, smaller and quieter, still
- * entirely there and one search away. The reading is the same as the map —
- * near means matters — so there is no second visual language to learn.
+ * So the default keeps every face on screen and *changes what distance
+ * means*. You are in the middle, the people who answer what you came in for
+ * sit on their own ring around you, and the rest of the room recedes
+ * outward — smaller, quieter, entirely there. Near still means matters, so
+ * there is no second visual language to learn.
  *
- * Two rules this must not break. The ground stops looking like a street
- * map the moment it opens, because these positions are not geography and
- * pretending otherwise is a lie. And no lens ever drops anybody: the last
- * band is always the rest of the room.
+ * The list is the other half, not a fallback: it is the view for reading
+ * and comparing, and some people will live in it. Both show the same bands
+ * in the same order, so switching never loses your place.
  */
+type Mode = "field" | "list";
+
 export default function CrowdView({
   crowd,
   me,
   origin,
+  size,
+  onSize,
   onOpenMember,
+  onMinimise,
   onClose,
 }: {
   crowd: CircleMember[];
   me: CircleMe | null;
-  /** Where each face starts, in screen pixels — their pin on the map. */
+  /** Where each face starts, in panel pixels — their pin on the map. */
   origin: Map<string, { x: number; y: number }>;
+  size: PageSize;
+  onSize: (s: PageSize) => void;
   onOpenMember: (id: string) => void;
+  onMinimise: () => void;
   onClose: () => void;
 }) {
   const [lens, setLens] = useState<Lens>("worth");
+  const [mode, setMode] = useState<Mode>("field");
   const [q, setQ] = useState("");
   const [band, setBand] = useState<string | null>(null);
-  const [size, setSize] = useState<{ w: number; h: number }>(() =>
-    typeof window === "undefined" ? { w: 1200, h: 800 } : { w: window.innerWidth, h: window.innerHeight }
-  );
+
+  /**
+   * The canvas measures itself rather than the window: it lives in a panel
+   * now, and that panel can be dragged, widened and resized under it.
+   */
+  const [area, setArea] = useState({ w: 900, h: 600 });
+  const observed = useRef<ResizeObserver | null>(null);
+  const measure = (el: HTMLDivElement | null) => {
+    observed.current?.disconnect();
+    if (!el) return;
+    const read = () => {
+      const r = el.getBoundingClientRect();
+      const w = Math.round(r.width);
+      const h = Math.round(r.height);
+      if (w <= 0 || h <= 0) return;
+      /**
+       * Returning the previous object when nothing moved is what stops this
+       * spinning: the ref callback runs on every render, which rebuilds the
+       * observer, which reads immediately — and a fresh `{w, h}` each time
+       * is a new value to React however identical it is, so the component
+       * re-rendered itself to death. Rounded for the same reason, since a
+       * fractional width can oscillate by a hundredth of a pixel forever.
+       */
+      setArea((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
+    };
+    read();
+    observed.current = new ResizeObserver(read);
+    observed.current.observe(el);
+  };
 
   const { bands, why } = useMemo(() => bandsFor(lens, me, crowd), [lens, me, crowd]);
-  const seats = useMemo(() => seatCrowd(bands, size.w, size.h), [bands, size]);
+  const field = useMemo(() => seatCrowd(bands, area.w, area.h), [bands, area]);
+
   const lead = bands.find((b) => b.lead);
   const leadBand = lead?.id ?? null;
-  /**
-   * Names are drawn on the headline band only while it is small enough to
-   * read. Six names is a set; the "what's being asked" lens can put fifty
-   * people in that band, and fifty labels is a smear across the rings with
-   * less information in it than none. The ring colour and the legend carry
-   * the meaning at that size.
-   */
   const labelLead = (lead?.members.length ?? 0) <= LABEL_CAP;
 
   /**
    * First names, with a surname initial only where one wouldn't be enough.
    *
-   * Two of the six were both "Vikram", which makes a label that exists to
-   * identify somebody do the opposite. Adding the initial to everybody
-   * would be noise; adding it only where the name repeats is the smallest
-   * thing that makes each one unambiguous.
+   * Two of the six were both "Vikram", which makes a label whose whole job
+   * is identifying somebody do the opposite.
    */
   const labelOf = useMemo(() => {
     const names = lead?.members ?? [];
@@ -90,137 +117,24 @@ export default function CrowdView({
       .join(" ")
       .toLowerCase()
       .includes(needle);
-
   const found = needle ? crowd.filter(matches).length : 0;
 
   return (
-    <div
-      className="fixed inset-0 z-[1400]"
-      // Opaque, not a scrim: the street map underneath has to go, because
-      // nothing on this screen is where it says it is any more.
-      style={{ background: "var(--bg)" }}
-      onKeyDown={(e) => e.key === "Escape" && onClose()}
-      ref={(el) => {
-        if (!el) return;
-        const w = el.clientWidth;
-        const h = el.clientHeight;
-        if (w !== size.w || h !== size.h) setSize({ w, h });
-      }}
+    <FloatingPage
+      title={`${crowd.length} people here`}
+      emoji="✦"
+      canGoBack={false}
+      onBack={() => {}}
+      size={size}
+      onSize={onSize}
+      onMinimise={onMinimise}
+      onClose={onClose}
+      padded={false}
     >
-      {/* The field. Every person in the crowd, none of them dropped. */}
-      <div className="absolute inset-0">
-        {seats.map((seat) => {
-          const from = origin.get(seat.member.id);
-          const dim = needle !== "" ? !matches(seat.member) : band != null && seat.band !== band;
-          return (
-            <button
-              key={seat.member.id}
-              type="button"
-              onClick={() => onOpenMember(seat.member.id)}
-              className="crowd-seat absolute"
-              title={`${seat.member.name} — ${seat.member.headline}`}
-              style={
-                {
-                  left: seat.x,
-                  top: seat.y,
-                  width: seat.size,
-                  height: seat.size,
-                  marginLeft: -seat.size / 2,
-                  marginTop: -seat.size / 2,
-                  opacity: dim ? 0.18 : 1,
-                  zIndex: seat.size > 40 ? 3 : 1,
-                  // The flight: each face starts at its own pin and lands on
-                  // its seat. One animation that teaches the whole idea —
-                  // same people, rearranged around you.
-                  "--fx": `${(from?.x ?? size.w / 2) - seat.x}px`,
-                  "--fy": `${(from?.y ?? size.h / 2) - seat.y}px`,
-                } as React.CSSProperties
-              }
-            >
-              <span
-                className="relative block rounded-full"
-                style={
-                  seat.band === leadBand
-                    ? { boxShadow: "0 0 0 3px var(--brand)", borderRadius: 999 }
-                    : undefined
-                }
-              >
-                <Avatar name={seat.member.name} size={seat.size} ring={seat.size > 40 ? 3 : 2} local />
-              </span>
-
-              {/* Only the headline band is labelled. Six names is a set you
-                  can read; four hundred is a smear. */}
-              {seat.band === leadBand && labelLead && (
-                <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap text-[10.5px] font-semibold">
-                  {labelOf.get(seat.member.id) ?? seat.member.name.split(" ")[0]}
-                </span>
-              )}
-
-              {/* Everybody gets a card on hover — the outer rings are the
-                  people this view must not make harder to find. */}
-              <span
-                className={`crowd-card pointer-events-none absolute left-1/2 z-30 w-[220px] -translate-x-1/2 rounded-xl border p-2.5 text-left ${
-                  // Flipped above for the lower half of the field, where a
-                  // card hung underneath runs off the bottom of the screen.
-                  seat.y > size.h * 0.62 ? "bottom-full mb-2" : "top-full mt-2"
-                }`}
-                style={{ background: "var(--card)", borderColor: "var(--line)", boxShadow: "var(--shadow-lift)" }}
-              >
-                <span className="block truncate text-[12px] font-semibold">{seat.member.name}</span>
-                <span className="block truncate text-[11px] text-[var(--ink-soft)]">
-                  {seat.member.headline} · {seat.member.company}
-                </span>
-                {why.get(seat.member.id) && (
-                  <span className="mt-1 block text-[11px] leading-[1.4]" style={{ color: "var(--brand)" }}>
-                    {why.get(seat.member.id)}
-                  </span>
-                )}
-              </span>
-            </button>
-          );
-        })}
-
-        {/* You, at the centre, because every distance here is measured from you. */}
-        <span
-          className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
-          style={{ left: size.w / 2, top: size.h / 2, zIndex: 5 }}
-        >
-          <span className="relative block">
-            <Avatar name={me?.name ?? "You"} size={54} ring={4} local />
-            <span
-              className="absolute -bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-2 py-0.5 text-[10.5px] font-bold text-white"
-              style={{ background: "var(--brand)" }}
-            >
-              You
-            </span>
-          </span>
-        </span>
-      </div>
-
-      {/* ------------------------------------------------- the controls */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center p-3">
-        <div
-          className="pointer-events-auto w-full max-w-md rounded-2xl border p-3"
-          style={{ background: "var(--card)", borderColor: "var(--line)", boxShadow: "var(--shadow-lift)" }}
-        >
-          <div className="flex items-start gap-2">
-            <div className="min-w-0 flex-1">
-              <p className="text-[13.5px] font-semibold leading-tight">{crowd.length} people here</p>
-              <p className="text-[11.5px] leading-tight text-[var(--ink-soft)]">
-                {LENSES.find((l) => l.id === lens)?.blurb}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-none rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
-              style={{ background: "var(--sunk)", color: "var(--ink-soft)" }}
-            >
-              Back to map
-            </button>
-          </div>
-
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
+      <div className="flex h-full min-h-0 flex-col">
+        {/* ------------------------------------------------- the controls */}
+        <div className="flex-none border-b border-[var(--line)] px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {LENSES.map((l) => (
               <button
                 key={l.id}
@@ -239,10 +153,29 @@ export default function CrowdView({
                 {l.label}
               </button>
             ))}
+
+            {/* Two ways to read the same crowd — same bands, same order. */}
+            <span
+              className="ml-auto flex items-center gap-0.5 rounded-full p-0.5"
+              style={{ background: "var(--sunk)" }}
+            >
+              {(["field", "list"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMode(m)}
+                  className="rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                  style={
+                    mode === m ? { background: "var(--card)", color: "var(--ink)" } : { color: "var(--ink-soft)" }
+                  }
+                  title={m === "field" ? "The room, arranged around you" : "A list, for reading"}
+                >
+                  {m === "field" ? "Room" : "List"}
+                </button>
+              ))}
+            </span>
           </div>
 
-          {/* Discovering anybody must stay one field away. The lenses
-              organise the crowd; they are not allowed to bury it. */}
           <input
             className="input mt-2 py-1.5 text-[12.5px]"
             value={q}
@@ -250,38 +183,201 @@ export default function CrowdView({
             placeholder={`Search all ${crowd.length} — name, company, what they're after…`}
             aria-label="Search everyone here"
           />
-          {needle !== "" && (
-            <p className="mt-1.5 text-[11.5px] text-[var(--ink-soft)]">
-              {found} of {crowd.length} match. Everyone else is dimmed, not hidden.
-            </p>
-          )}
+          <p className="mt-1.5 text-[11px] text-[var(--ink-soft)]">
+            {needle !== ""
+              ? `${found} of ${crowd.length} match. Everyone else is dimmed, not hidden.`
+              : LENSES.find((l) => l.id === lens)?.blurb}
+          </p>
         </div>
-      </div>
 
-      {/* The bands, as a legend you can point at. Tapping one lifts those
-          faces out of the crowd rather than removing the others. */}
-      <div className="pointer-events-none absolute bottom-0 right-0 z-20 p-3">
-        <div
-          className="pointer-events-auto flex max-w-[260px] flex-col gap-1 rounded-2xl border p-2"
-          style={{ background: "var(--card)", borderColor: "var(--line)", boxShadow: "var(--shadow-lift)" }}
-        >
-          {bands.map((b) => (
-            <button
-              key={b.id}
-              type="button"
-              onClick={() => setBand(band === b.id ? null : b.id)}
-              className="flex items-center justify-between gap-3 rounded-xl px-2 py-1.5 text-left"
-              style={band === b.id ? { background: "var(--sunk)" } : undefined}
+        {mode === "field" ? (
+          <div ref={measure} className="relative min-h-0 flex-1 overflow-hidden">
+            {/* The structure, drawn. Faint rings make the field read as
+                designed rather than scattered, and a line from you to each
+                of the six makes "worth crossing the room for" literal. */}
+            <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
+              {field.rings.map((r, i) => (
+                <ellipse
+                  key={i}
+                  cx={field.cx}
+                  cy={field.cy}
+                  rx={r}
+                  ry={r * field.squash}
+                  fill="none"
+                  stroke="var(--line)"
+                  strokeWidth={1}
+                  opacity={0.55}
+                />
+              ))}
+              {labelLead &&
+                field.seats
+                  .filter((s) => s.band === leadBand)
+                  .map((s) => (
+                    <line
+                      key={s.member.id}
+                      x1={field.cx}
+                      y1={field.cy}
+                      x2={s.x}
+                      y2={s.y}
+                      stroke="var(--brand)"
+                      strokeWidth={1.5}
+                      opacity={0.3}
+                    />
+                  ))}
+            </svg>
+
+            {field.seats.map((seat) => {
+              const from = origin.get(seat.member.id);
+              const dim = needle !== "" ? !matches(seat.member) : band != null && seat.band !== band;
+              const isLead = seat.band === leadBand;
+              return (
+                <button
+                  key={seat.member.id}
+                  type="button"
+                  onClick={() => onOpenMember(seat.member.id)}
+                  className="crowd-seat absolute"
+                  title={`${seat.member.name} — ${seat.member.headline}`}
+                  style={
+                    {
+                      left: seat.x,
+                      top: seat.y,
+                      width: seat.size,
+                      height: seat.size,
+                      marginLeft: -seat.size / 2,
+                      marginTop: -seat.size / 2,
+                      opacity: dim ? 0.16 : 1,
+                      zIndex: isLead ? 3 : 1,
+                      // The flight, cascading outward ring by ring: the crowd
+                      // assembles around you rather than appearing fully
+                      // formed, which is the half-second that explains what
+                      // this view is.
+                      animationDelay: `${Math.min(seat.ring, 9) * 55}ms`,
+                      "--fx": `${(from?.x ?? field.cx) - seat.x}px`,
+                      "--fy": `${(from?.y ?? field.cy) - seat.y}px`,
+                    } as React.CSSProperties
+                  }
+                >
+                  <span
+                    className="relative block rounded-full"
+                    style={isLead ? { boxShadow: "0 0 0 3px var(--brand)" } : undefined}
+                  >
+                    <Avatar name={seat.member.name} size={seat.size} ring={isLead ? 3 : 2} local />
+                  </span>
+
+                  {isLead && labelLead && (
+                    <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap text-[10.5px] font-semibold">
+                      {labelOf.get(seat.member.id) ?? seat.member.name.split(" ")[0]}
+                    </span>
+                  )}
+
+                  <span
+                    className={`crowd-card pointer-events-none absolute left-1/2 z-30 w-[220px] -translate-x-1/2 rounded-xl border p-2.5 text-left ${
+                      seat.y > area.h * 0.62 ? "bottom-full mb-2" : "top-full mt-2"
+                    }`}
+                    style={{ background: "var(--card)", borderColor: "var(--line)", boxShadow: "var(--shadow-lift)" }}
+                  >
+                    <span className="block truncate text-[12px] font-semibold">{seat.member.name}</span>
+                    <span className="block truncate text-[11px] text-[var(--ink-soft)]">
+                      {seat.member.headline} · {seat.member.company}
+                    </span>
+                    {why.get(seat.member.id) && (
+                      <span className="mt-1 block text-[11px] leading-[1.4]" style={{ color: "var(--brand)" }}>
+                        {why.get(seat.member.id)}
+                      </span>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+
+            {/* You, at the centre, because every distance here is from you. */}
+            <span
+              className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
+              style={{ left: field.cx, top: field.cy, zIndex: 5 }}
             >
-              <span className="min-w-0 truncate text-[12px] font-semibold">
-                {b.lead && <span style={{ color: "var(--brand)" }}>● </span>}
-                {b.label}
+              <span className="relative block">
+                <span className="crowd-you" />
+                <Avatar name={me?.name ?? "You"} size={54} ring={4} local />
+                <span
+                  className="absolute -bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-2 py-0.5 text-[10.5px] font-bold text-white"
+                  style={{ background: "var(--brand)" }}
+                >
+                  You
+                </span>
               </span>
-              <span className="mono flex-none text-[11.5px] text-[var(--ink-soft)]">{b.members.length}</span>
-            </button>
-          ))}
-        </div>
+            </span>
+
+            {/* The bands, as a legend you can point at. */}
+            <div
+              className="absolute bottom-2 right-2 z-20 flex max-w-[240px] flex-col gap-0.5 rounded-2xl border p-1.5"
+              style={{
+                background: "color-mix(in srgb, var(--card) 94%, transparent)",
+                borderColor: "var(--line)",
+                backdropFilter: "blur(8px)",
+              }}
+            >
+              {bands.map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => setBand(band === b.id ? null : b.id)}
+                  className="flex items-center justify-between gap-3 rounded-xl px-2 py-1 text-left"
+                  style={band === b.id ? { background: "var(--sunk)" } : undefined}
+                >
+                  <span className="min-w-0 truncate text-[11.5px] font-semibold">
+                    {b.lead && <span style={{ color: "var(--brand)" }}>● </span>}
+                    {b.label}
+                  </span>
+                  <span className="mono flex-none text-[11px] text-[var(--ink-soft)]">{b.members.length}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          /* ----------------------------------------------------- the list */
+          <div className="scroll-clean min-h-0 flex-1 overflow-y-auto p-3">
+            {bands.map((b) => {
+              const rows = b.members.filter((m) => !needle || matches(m));
+              if (rows.length === 0) return null;
+              return (
+                <section key={b.id} className="mb-4 last:mb-0">
+                  <p className="mb-1.5 flex items-baseline justify-between gap-2">
+                    <span className="text-[12px] font-semibold">
+                      {b.lead && <span style={{ color: "var(--brand)" }}>● </span>}
+                      {b.label}
+                    </span>
+                    <span className="mono text-[11px] text-[var(--ink-soft)]">{rows.length}</span>
+                  </p>
+                  <ul className="flex flex-col">
+                    {rows.map((m) => (
+                      <li key={m.id}>
+                        <button
+                          type="button"
+                          onClick={() => onOpenMember(m.id)}
+                          className="tap flex w-full items-start gap-2.5 rounded-xl p-1.5 text-left hover:bg-[var(--sunk)]"
+                        >
+                          <Avatar name={m.name} size={32} local />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[12.5px] font-semibold">{m.name}</span>
+                            <span className="block truncate text-[11.5px] text-[var(--ink-soft)]">
+                              {m.headline} · {m.company}
+                            </span>
+                            {why.get(m.id) && (
+                              <span className="mt-0.5 block text-[11px] leading-[1.4]" style={{ color: "var(--brand)" }}>
+                                {why.get(m.id)}
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              );
+            })}
+          </div>
+        )}
       </div>
-    </div>
+    </FloatingPage>
   );
 }
