@@ -295,240 +295,94 @@ function band3(lead: Band, mid: Band, rest: CircleMember[]): Band[] {
   return out;
 }
 
-/* ------------------------------------------------------------- layout */
+/* ----------------------------------------------------- directory facets */
 
 /**
- * Islands, not rings.
+ * The crowd as filters on a list, which is where this should have started.
  *
- * The first draft of this view put everybody on concentric rings ordered by
- * rank: you in the middle, the best match nearest, four hundred people
- * spiralling outward. It was wrong, and the way it was wrong is worth
- * writing down. Rank is a total order, and a total order drawn as a picture
- * is a dartboard — four hundred discs at near-identical size, no two of them
- * distinguishable, and every word of actual information sitting in the
- * legend off to one side. You could not point at it and say anything true.
+ * Four drawings of one room were built before this: a circle field, a floor
+ * plan, an island map, a ranked list. Every one of them was the same idea —
+ * render four hundred people and let the reader pick somebody out — and
+ * inside one building that idea cannot work, because position carries no
+ * information when everybody is at the same point.
  *
- * What people actually do in a crowded room is read *groups*: a knot of
- * people by the window, three around the coffee, the loud table. The bands
- * are already groups — "worth crossing the room for", "hiring", "also in
- * ISB" — so the fix is to let the geometry carry what the legend was
- * carrying. One island per band, sized by how many are in it, packed so
- * every island looks equally full, placed around you with the one that
- * matters nearest. Now the picture says it: a tight bright cluster of six
- * beside you, and a quiet grey sea of three hundred and ninety-six.
+ * The directory already existed and already worked. Its only problem was
+ * that it filtered by *city*, which is the one axis that means nothing when
+ * the whole list is standing in one building: "Bengaluru 380" is not a
+ * filter. Swap the axis for what people are offering, what they're after,
+ * and who you already know, and the same component answers the density
+ * question without a new surface, a new visual language, or a new thing to
+ * learn.
+ *
+ * The facets come out of the lenses rather than being computed fresh, so a
+ * chip and the reason printed under a name can never disagree.
  */
-
-export type Tier = "lead" | "mid" | "rest";
-
-/** The weight a band is drawn at — one answer, read by every view. */
-export function tierOfBand(band: Band, index: number): Tier {
-  /**
-   * The rest of the room is never the headline, even when it is the only
-   * band there is.
-   *
-   * band3 marks the first surviving band as the lead so a lens always has
-   * somewhere to start. With no connections and no shared community, the
-   * only band left is everybody — and promoting it drew four hundred and
-   * twenty people at headline weight, every one of them ringed in brand
-   * colour: a solid red disc that said "all of these matter enormously",
-   * which is the exact opposite of what the lens had just worked out.
-   */
-  if (band.id === "rest" || band.id === "quiet" || band.id === "none") return "rest";
-  if (band.lead || index === 0) return "lead";
-  return "mid";
-}
-
-export type Island = {
+export type Facet = {
   id: string;
+  group: "all" | "worth" | "known" | "offer" | "need";
   label: string;
   count: number;
-  tier: Tier;
-  x: number;
-  y: number;
-  r: number;
+  /** Membership, precomputed — the list filters with a set lookup. */
+  ids: Set<string>;
 };
 
-export type Seat = {
-  member: CircleMember;
-  x: number;
-  y: number;
-  size: number;
-  band: string;
-  tier: Tier;
-  /** Rank inside the island — drives the cascade, and who gets a name. */
-  order: number;
-  island: number;
-};
+/** Enough to be useful, few enough to stay one scrolling row. */
+const MAX_PER_GROUP = 6;
 
-export type Field = { seats: Seat[]; islands: Island[]; cx: number; cy: number };
+export function directoryFacets(pool: CircleMember[], me: CircleMe | null): Facet[] {
+  const out: Facet[] = [
+    { id: "all", group: "all", label: "Everyone", count: pool.length, ids: new Set(pool.map((m) => m.id)) },
+  ];
 
-/** Above this many in the headline island, the names come off. */
-export const LABEL_CAP = 8;
-
-/** Screens are wider than they are tall, so the islands spread elliptically. */
-const SQUASH = 0.8;
-
-/** The golden angle. Phyllotaxis packs a disc evenly with no seams or spokes. */
-const GOLDEN = Math.PI * (3 - Math.sqrt(5));
-
-/** How big one person is drawn, by the weight of the group they are in. */
-function sizeFor(tier: Tier, n: number): number {
-  if (tier === "rest") return 9;
-  if (tier === "lead") return n <= LABEL_CAP ? 46 : n <= 16 ? 34 : 24;
-  return n <= 24 ? 26 : 18;
-}
-
-/**
- * How a group of n arranges itself, and how wide that makes it.
- *
- * Two regimes, because one formula cannot serve both ends. Up to ten, a
- * single ring with the spacing worked out from the chord — six faces at 46px
- * need a radius of 58 to clear each other, and phyllotaxis, which assumes
- * dimensionless points, happily stacked the first one almost on top of the
- * second and ran two names into each other. Past ten, the golden angle packs
- * a disc evenly with no seams and no spokes, and the point-approximation is
- * close enough that nothing collides.
- */
-function packFor(n: number, size: number): { r: number; at: (k: number) => [number, number] } {
-  // Faces big enough to carry a name need room for the name, not the face.
-  const gap = size >= 40 ? size * 0.55 : Math.max(5, size * 0.26);
-  if (n <= 1) return { r: size * 0.8, at: () => [0, 0] };
-  if (n <= 10) {
-    const rr = Math.max(size * 0.85, (size + gap) / (2 * Math.sin(Math.PI / n)));
-    return {
-      r: rr + size / 2 + 4,
-      at: (k) => {
-        const a = (k / n) * Math.PI * 2 - Math.PI / 2;
-        return [Math.cos(a) * rr, Math.sin(a) * rr];
-      },
-    };
-  }
-  const rr = Math.sqrt(n) * (size + gap) * 0.56;
-  return {
-    r: rr,
-    at: (k) => {
-      const a = k * GOLDEN;
-      const rad = rr * Math.sqrt((k + 0.5) / n) * 0.92;
-      return [Math.cos(a) * rad, Math.sin(a) * rad];
-    },
-  };
-}
-
-type Disc = { x: number; y: number; r: number };
-
-/**
- * The first spot this island fits, searching outward from its own heading.
- *
- * Islands are laid out in band order, so the headline band asks first and
- * gets the closest seat to you; everything after it fits around what is
- * already placed. Greedy and deterministic — the same crowd lands in the
- * same arrangement every time, which matters, because a room that
- * rearranges itself on every render is a room nobody can learn.
- */
-function place(r: number, base: number, taken: Disc[], cx: number, cy: number): Disc {
-  /**
-   * Angle outside, distance inside — and the order is the whole thing.
-   *
-   * Scanning distance first looked equivalent and wasn't: the field is
-   * squashed vertically, so at any given distance the horizontal candidates
-   * clear their neighbours before the vertical ones do, and every island
-   * slid sideways into a row along the top. Holding the heading and pushing
-   * outward until it fits keeps each island roughly where it was sent.
-   */
-  const start = r + 72;
-  for (let k = 0; k <= 30; k++) {
-    for (const sign of k === 0 ? [1] : [1, -1]) {
-      const a = base + sign * k * (Math.PI / 20);
-      for (let d = start; d < start + 2400; d += 10) {
-        const x = cx + Math.cos(a) * d;
-        const y = cy + Math.sin(a) * d * SQUASH;
-        if (taken.every((o) => Math.hypot(x - o.x, y - o.y) >= r + o.r + 18)) return { x, y, r };
-      }
-    }
-  }
-  return { x: cx, y: cy - start, r };
-}
-
-export function layoutCrowd(bands: Band[], width: number, height: number): Field {
-  const cx = width / 2;
-  const cy = height / 2;
-
-  /** Your own disc, so no island is placed on top of you. */
-  const taken: Disc[] = [{ x: cx, y: cy, r: 54 }];
-  const islands: Island[] = [];
-  const seats: Seat[] = [];
-
-  bands.forEach((b, i) => {
-    const n = b.members.length;
-    if (n === 0) return;
-    const tier = tierOfBand(b, i);
-    const size = sizeFor(tier, n);
-    const pack = packFor(n, size);
-    /**
-     * Headings spread evenly around you rather than by golden angle.
-     *
-     * The golden angle is the right answer for hundreds of points and the
-     * wrong one for three: it piled all three islands into the top-left and
-     * left half the panel empty. Even spacing puts the headline island above
-     * you and the rest around, and the greedy distance search still pushes
-     * the big quiet ones further out on its own.
-     */
-    const base = -Math.PI / 2 + (i * 2 * Math.PI) / Math.max(bands.length, 3);
-    const at = place(pack.r, base, taken, cx, cy);
-    taken.push(at);
-    islands.push({ id: b.id, label: b.label, count: n, tier, x: at.x, y: at.y, r: pack.r });
-
-    b.members.forEach((member, k) => {
-      const [dx, dy] = pack.at(k);
-      seats.push({
-        member,
-        band: b.id,
-        tier,
-        order: k,
-        island: islands.length - 1,
-        size,
-        x: at.x + dx,
-        y: at.y + dy,
+  if (me) {
+    const ranked = matchesFor(me, pool, { limit: 24 });
+    if (ranked.length > 0) {
+      out.push({
+        id: "worth",
+        group: "worth",
+        label: "Worth meeting",
+        count: ranked.length,
+        ids: new Set(ranked.map((r) => r.member.id)),
       });
-    });
-  });
-
-  /**
-   * Shrink the arrangement until it fits the canvas.
-   *
-   * Islands grow with the head-count and the panel doesn't. Positions scale
-   * linearly; the faces scale by the square root of the same factor, so a
-   * crowded room compresses the sea of dots rather than shrinking the six
-   * people the view exists to show.
-   */
-  let maxX = 0;
-  let maxY = 0;
-  for (const is of islands) {
-    maxX = Math.max(maxX, Math.abs(is.x - cx) + is.r);
-    maxY = Math.max(maxY, Math.abs(is.y - cy) + is.r + 18);
-  }
-  /**
-   * Capped at 1.3 in both directions. A crowded room has to shrink to fit;
-   * a thin one was sitting in a puddle in the middle of a large panel with
-   * the frame empty all round it, which reads as a rendering accident
-   * rather than as a small room.
-   */
-  // The dock floats over the bottom of the panel; leave it room.
-  const vertical = Math.min(cy - 22, height - cy - 56);
-  const k = Math.min(1.3, (width / 2 - 18) / Math.max(maxX, 1), vertical / Math.max(maxY, 1));
-  if (k !== 1 && k > 0) {
-    const f = Math.sqrt(k);
-    for (const s of seats) {
-      s.x = cx + (s.x - cx) * k;
-      s.y = cy + (s.y - cy) * k;
-      s.size = Math.max(5, Math.min(58, s.size * f));
     }
-    for (const is of islands) {
-      is.x = cx + (is.x - cx) * k;
-      is.y = cy + (is.y - cy) * k;
-      is.r *= k;
+
+    const connected = new Set(me.connectedIds ?? []);
+    const mine = new Set(expandMembership(me.entityIds ?? []));
+    const known = pool.filter(
+      (m) =>
+        connected.has(m.id) ||
+        [...expandMembership(m.entityIds)].some((id) => mine.has(id) && !isHereForEveryone(id, pool))
+    );
+    if (known.length > 0) {
+      out.push({ id: "known", group: "known", label: "People you know", count: known.length, ids: new Set(known.map((m) => m.id)) });
     }
   }
 
-  return { seats, islands, cx, cy };
+  /** What the room will answer questions about. */
+  const offers = new Map<string, Set<string>>();
+  for (const m of pool) {
+    for (const h of m.helpWith) {
+      const set = offers.get(h) ?? new Set<string>();
+      set.add(m.id);
+      offers.set(h, set);
+    }
+  }
+  for (const [label, ids] of [...offers.entries()].sort((a, b) => b[1].size - a[1].size).slice(0, MAX_PER_GROUP)) {
+    out.push({ id: `offer-${label}`, group: "offer", label, count: ids.size, ids });
+  }
+
+  /** And what it's stuck on. */
+  const needs = new Map<string, Set<string>>();
+  for (const m of pool) {
+    if (!m.lookingFor) continue;
+    const topic = topicOf(m.lookingFor);
+    const set = needs.get(topic) ?? new Set<string>();
+    set.add(m.id);
+    needs.set(topic, set);
+  }
+  for (const [label, ids] of [...needs.entries()].sort((a, b) => b[1].size - a[1].size).slice(0, MAX_PER_GROUP)) {
+    out.push({ id: `need-${label}`, group: "need", label, count: ids.size, ids });
+  }
+
+  return out;
 }

@@ -15,8 +15,7 @@ import Mentorship from "./Mentorship";
 import SearchBar, { NO_FACETS, matchesFacets, matchesQuery, type Facets } from "./SearchBar";
 import { entityById, isAlumniNetwork, isWorkspace } from "@/lib/networks";
 import { WORKSPACE_IN_TODAY, WORKSPACE_VENUE, workspacePoint } from "@/lib/workspaceData";
-import { densestCrowd, type Crowd, type ScreenPoint } from "@/lib/crowd";
-import CrowdView from "./CrowdView";
+import { densestCrowd, directoryFacets, type Crowd, type Facet, type ScreenPoint } from "@/lib/crowd";
 import {
   ALL_CIRCLE_EVENTS,
   attendeesOf,
@@ -151,19 +150,15 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
    * map zoomed out over a city, without knowing which of those it is.
    */
   const [crowd, setCrowd] = useState<Crowd | null>(null);
-  const [crowdOpen, setCrowdOpen] = useState(false);
   /**
-   * Where each face was standing on the map at the moment the view opened.
+   * The pile the directory is currently pointed at.
    *
-   * Captured on the click rather than read during render — the map ref is
-   * out of bounds there — and it is what lets every face fly from its own
-   * pin instead of fading in from nowhere. That flight is the whole
-   * explanation of the view: same people, rearranged around you.
+   * Set when somebody opens a crowd, cleared when they leave the panel.
+   * The whole of the density answer is this one list plus a different set
+   * of filter chips — there is no second surface any more.
    */
-  const [crowdOrigin, setCrowdOrigin] = useState<Map<string, { x: number; y: number }>>(new Map());
-  // Opens full, because a constellation of four hundred needs the room;
-  // from there it is the reader's to narrow, drag and resize.
-  const [crowdSize, setCrowdSize] = useState<PageSize>("full");
+  const [crowdPool, setCrowdPool] = useState<CircleMember[] | null>(null);
+  const [intent, setIntent] = useState<string | null>(null);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   /** Drives the two map layers below — see PRECISE_ZOOM. */
   const [zoom, setZoom] = useState(1.6);
@@ -293,18 +288,6 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
    * wearing this one's colours.
    */
   const inWorkspace = isWorkspace(activeEntityId);
-  /**
-   * Your desk here, if this board asked for one and you answered.
-   *
-   * Read off the board-scoped layer rather than the profile proper: a floor
-   * number is meaningless in an alumni network, and a field that follows you
-   * into boards that can't use it is how a profile turns into a junk drawer.
-   */
-  const declaredDesk = me?.boardProfile?.[activeEntityId];
-  const myDesk =
-    declaredDesk?.floorId && declaredDesk.zoneId
-      ? { floorId: declaredDesk.floorId, zoneId: declaredDesk.zoneId }
-      : null;
   const venueEvent =
     (inWorkspace
       ? WORKSPACE_VENUE
@@ -335,6 +318,26 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
   // it memoise these two itself.
   const pointFor = (m: CircleMember): [number, number] | null =>
     venueEvent ? (inWorkspace ? workspacePoint(m) : beaconPoint(venueEvent, m)) : pointOf(m);
+
+  /**
+   * The people panel, pointed at one place instead of the whole community.
+   *
+   * A venue — a live event, or a workspace, which is a venue that is live
+   * every weekday — is already a pile: everybody in it shares one point, so
+   * the city filter above the list is dead weight and the intent filters
+   * take its place.
+   */
+  const densePool: CircleMember[] | null = crowdPool ?? (venueEvent ? venueBeacons : null);
+  // Plain call, not a manual memo: the compiler refuses to preserve a memo
+  // whose dependency it believes may be mutated, and it memoises this
+  // itself — same trade already made for pointFor and scanCrowd above.
+  const intents: Facet[] = densePool ? directoryFacets(densePool, me ?? null) : [];
+  const activeIntent = intents.find((f) => f.id === intent) ?? null;
+  const peopleRows = densePool
+    ? densePool.filter((m) => (activeIntent ? activeIntent.ids.has(m.id) : true) && matchesQuery(m, q))
+    : isOpen && me
+      ? [...matching].sort((a, b) => relevance(me, b) - relevance(me, a))
+      : matching;
 
   /** Re-measure the pile-up once the camera has settled. */
   const scanCrowd = () => {
@@ -674,22 +677,14 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
           Anchored to the pile itself rather than parked in the chrome: it
           is an answer to a condition on this part of this screen, and it
           should appear where the problem is and nowhere else. */}
-      {crowd && !crowdOpen && stack.length === 0 && !pinned && (
+      {crowd && stack.length === 0 && !pinned && (
         <button
           type="button"
           onClick={() => {
-            const map = mapRef.current;
-            const from = new Map<string, { x: number; y: number }>();
-            if (map) {
-              for (const m of crowd.members) {
-                const pt = pointFor(m);
-                if (!pt) continue;
-                const p = map.project([pt[0], pt[1]]);
-                from.set(m.id, { x: p.x, y: p.y });
-              }
-            }
-            setCrowdOrigin(from);
-            setCrowdOpen(true);
+            setCrowdPool(crowd.members);
+            setIntent(null);
+            setQuery("");
+            open("people");
           }}
           className="float-in fixed z-[1250] -translate-x-1/2 rounded-full border px-3 py-2 text-left"
           style={{
@@ -704,35 +699,9 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
             {crowd.members.length} people here
           </span>
           <span className="block text-[11px] leading-tight" style={{ color: "var(--brand)" }}>
-            Too many to read — make sense of this →
+            Open the directory →
           </span>
         </button>
-      )}
-
-      {crowdOpen && crowd && (
-        <CrowdView
-          crowd={crowd.members}
-          me={me ?? null}
-          origin={crowdOrigin}
-          size={crowdSize}
-          onSize={setCrowdSize}
-          onOpenMember={(id) => {
-            setCrowdOpen(false);
-            push(`member:${id}`);
-          }}
-          // Minimise leaves the crowd on the map and the control with it,
-          // which is the whole point of the affordance: put the panel down
-          // without losing what you were looking at.
-          onMinimise={() => setCrowdOpen(false)}
-          onClose={() => setCrowdOpen(false)}
-          // Only the board knows whether it has a building; the crowd view
-          // asks lib/floorData and offers the extra mode if the answer is yes.
-          entityId={activeEntityId}
-          myDesk={myDesk}
-          onSetDesk={(d) =>
-            update({ boardProfile: { ...(me?.boardProfile ?? {}), [activeEntityId]: d } })
-          }
-        />
       )}
 
       {/* ── top: what the map is scoped to ── */}
@@ -956,17 +925,26 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
           canGoBack={stack.length > 1}
           size={panelSize}
           onBack={pop}
-          onClose={() => setStack([])}
+          onClose={() => {
+            setStack([]);
+            setCrowdPool(null);
+            setIntent(null);
+          }}
           onSize={setPanelSize}
         >
           {view === "people" && (
             <PeopleList
-              members={isOpen && me ? [...matching].sort((a, b) => relevance(me, b) - relevance(me, a)) : matching}
-              total={members.length}
-              offMapCount={offMapCount}
+              members={peopleRows}
+              total={densePool ? densePool.length : members.length}
+              offMapCount={densePool ? 0 : offMapCount}
               query={query}
               cityFilter={cityFilter}
               cityGroups={cityGroups}
+              /* In a pile, the city filter is dead weight — every one of
+                 them is in the same building. These replace it. */
+              intents={intents}
+              intent={intent}
+              onIntent={setIntent}
               onQuery={setQuery}
               onCity={(id) => {
                 setCityFilter(id);
@@ -1232,6 +1210,9 @@ function PeopleList({
   query,
   cityFilter,
   cityGroups,
+  intents,
+  intent,
+  onIntent,
   onQuery,
   onCity,
   onOpen,
@@ -1243,18 +1224,26 @@ function PeopleList({
   query: string;
   cityFilter: string | null;
   cityGroups: Array<{ city: { id: string; name: string }; members: CircleMember[] }>;
+  /** Present only when the list is pointed at one place. See directoryFacets. */
+  intents?: Facet[];
+  intent?: string | null;
+  onIntent?: (id: string | null) => void;
   onQuery: (q: string) => void;
   onCity: (id: string | null) => void;
   onOpen: (id: string) => void;
   /** Open network only: why each stranger might matter. */
   commonFor?: (m: CircleMember) => string | null;
 }) {
+  /** Pointed at one place: swap the axis, and print the tags. */
+  const dense = (intents?.length ?? 0) > 0;
   return (
     <div>
       <input
         value={query}
         onChange={(e) => onQuery(e.target.value)}
-        placeholder={`Search ${total} members by name, role or city…`}
+        placeholder={
+          dense ? `Search ${total} here — name, role, what they do…` : `Search ${total} members by name, role or city…`
+        }
         className="w-full rounded-xl border border-[var(--line)] bg-transparent px-3 py-2 text-[12.5px] outline-none focus:border-[var(--brand)]"
       />
 
@@ -1262,11 +1251,32 @@ function PeopleList({
           chips were taking four rows and pushing every actual person below
           the fold. */}
       <div className="-mx-1 mt-2 flex gap-1 overflow-x-auto px-1 pb-1" style={{ scrollbarWidth: "none" }}>
-        <CityChip label="Everywhere" on={cityFilter === null} onClick={() => onCity(null)} />
-        {cityGroups.slice(0, 12).map((g) => (
-          <CityChip key={g.city.id} label={g.city.name} count={g.members.length} on={cityFilter === g.city.id} onClick={() => onCity(g.city.id)} />
-        ))}
+        {dense ? (
+          intents!.map((f) => (
+            <CityChip
+              key={f.id}
+              label={f.group === "offer" ? `Offers ${f.label}` : f.group === "need" ? `Needs ${f.label}` : f.label}
+              count={f.id === "all" ? undefined : f.count}
+              on={f.id === "all" ? !intent : intent === f.id}
+              onClick={() => onIntent?.(f.id === "all" ? null : f.id)}
+            />
+          ))
+        ) : (
+          <>
+            <CityChip label="Everywhere" on={cityFilter === null} onClick={() => onCity(null)} />
+            {cityGroups.slice(0, 12).map((g) => (
+              <CityChip key={g.city.id} label={g.city.name} count={g.members.length} on={cityFilter === g.city.id} onClick={() => onCity(g.city.id)} />
+            ))}
+          </>
+        )}
       </div>
+
+      {dense && (
+        <p className="mt-2 text-[11.5px] text-[var(--ink-soft)]">
+          All {total} are in the same place, so the filters are what they can help with and what they&rsquo;re
+          after — not where they are.
+        </p>
+      )}
 
       {offMapCount > 0 && (
         <p className="mt-2 text-[11.5px] text-[var(--ink-soft)]">
@@ -1289,6 +1299,19 @@ function PeopleList({
               {commonFor?.(m) && (
                 <span className="block truncate text-[11px] font-semibold" style={{ color: "var(--brand)" }}>
                   {commonFor(m)}
+                </span>
+              )}
+              {/* The tags are the point of this list: two things they will
+                  answer, and the one thing they need. Without them a
+                  directory of four hundred is four hundred job titles. */}
+              {dense && m.helpWith.length > 0 && (
+                <span className="mt-0.5 block truncate text-[11px] text-[var(--ink-soft)]">
+                  Offers {m.helpWith.slice(0, 2).join(" · ")}
+                </span>
+              )}
+              {dense && m.lookingFor && (
+                <span className="block truncate text-[11px]" style={{ color: "var(--brand)" }}>
+                  Needs {m.lookingFor}
                 </span>
               )}
             </span>
