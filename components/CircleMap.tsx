@@ -65,6 +65,7 @@ import {
   IconSparkle,
   IconPin,
   IconPlus,
+  IconX,
 } from "./Icons";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
@@ -694,27 +695,19 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
             — is the same fact at every zoom level. */}
         {tree && (
           <Marker longitude={tree.lng} latitude={tree.lat} anchor="bottom">
+            {/*
+             * No pool of night under it any more.
+             *
+             * Dimming a circle of the basemap made the glow sing and made
+             * the tree an overlay *on* a map rather than a thing standing
+             * *in* one — a spotlight announcing a feature. Drawn straight
+             * onto the streets it is lighter in every sense, and you can
+             * read the block it is rooted in without squinting through a
+             * scrim. The colours and the trunk were re-cut for the pale
+             * ground that came with that; see DISCIPLINES and trunkFor.
+             */}
             <div className="relative" style={{ width: "min(88vw, 720px)" }}>
-              {/* The building, lit. The glow needs somewhere dark to be a
-                  glow, and dimming a circle of the map rather than the
-                  whole screen keeps the streets around it readable — you
-                  can still see which block you're looking at. */}
-              <div
-                className="pointer-events-none absolute"
-                style={{
-                  // Taller than it is wide and lifted off the base, so the
-                  // pool sits around the canopy rather than puddling under
-                  // the roots where there is nothing to light.
-                  top: "-46%",
-                  bottom: "-14%",
-                  left: "-30%",
-                  right: "-30%",
-                  background:
-                    "radial-gradient(closest-side, rgba(7,11,26,0.95), rgba(7,11,26,0.88) 42%, rgba(7,11,26,0.45) 68%, rgba(7,11,26,0) 86%)",
-                }}
-              />
               <GrowingTree
-                className="relative"
                 people={tree.people}
                 rank={treeRank}
                 highlight={treeBranch}
@@ -892,19 +885,32 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
             >
               List all
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setTree(null);
-                setTreeBranch(null);
-              }}
-              className="tap rounded-xl px-2.5 py-1.5 text-[11.5px] font-semibold"
-              style={{ color: "var(--ink-soft)" }}
-            >
-              Close
-            </button>
           </div>
         </div>
+      )}
+
+      {/* Leaving goes in the corner every window puts it in, rather than
+          reading as a third option beside the two that do something. */}
+      {tree && (
+        <button
+          type="button"
+          onClick={() => {
+            setTree(null);
+            setTreeBranch(null);
+          }}
+          className="float-in tap fixed right-3 top-3 z-[1300] grid h-9 w-9 place-items-center rounded-full border sm:right-5 sm:top-5"
+          style={{
+            background: "color-mix(in srgb, var(--card) 94%, transparent)",
+            borderColor: "var(--line)",
+            color: "var(--ink-soft)",
+            backdropFilter: "blur(12px)",
+            boxShadow: "var(--shadow-lift)",
+          }}
+          title="Close the tree"
+          aria-label="Close the tree"
+        >
+          <IconX size={16} />
+        </button>
       )}
 
       {/* ── top: what the map is scoped to ── */}

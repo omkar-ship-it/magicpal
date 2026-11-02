@@ -37,13 +37,22 @@ export type Discipline = {
  * roughly how many kinds of person a working floor actually contains. A
  * seventh branch costs more than the precision it buys.
  */
+/**
+ * Hues chosen to survive a near-white basemap.
+ *
+ * The first set was picked against a dark pool dimmed into the map
+ * underneath. With that gone the tree is drawn straight onto Mapbox
+ * light-v11, where a neon mint and a pastel lime are a smudge — so every
+ * hue here is deep enough to hold its own line on paper, and still bright
+ * enough to carry a glow on the dark standalone page.
+ */
 export const DISCIPLINES: Discipline[] = [
-  { id: "eng", label: "Engineering", hue: "#a78bfa", icon: "</>" },
-  { id: "product", label: "Product", hue: "#fb9b3c", icon: "◆" },
-  { id: "design", label: "Design", hue: "#7ed957", icon: "✺" },
-  { id: "data", label: "AI & Data", hue: "#4ea3ff", icon: "✦" },
-  { id: "growth", label: "Marketing", hue: "#f472b6", icon: "◈" },
-  { id: "business", label: "Business", hue: "#2dd4bf", icon: "▤" },
+  { id: "eng", label: "Engineering", hue: "#7c5cf5", icon: "</>" },
+  { id: "product", label: "Product", hue: "#ef8b22", icon: "◆" },
+  { id: "design", label: "Design", hue: "#3aa94c", icon: "✺" },
+  { id: "data", label: "AI & Data", hue: "#1f83e8", icon: "✦" },
+  { id: "growth", label: "Marketing", hue: "#e8468f", icon: "◈" },
+  { id: "business", label: "Business", hue: "#0f9f97", icon: "▤" },
 ];
 
 export function disciplineById(id: string): Discipline {
@@ -292,6 +301,12 @@ export type Trunk = {
  * reason the branches look like they grew out of something. It stops at
  * the highest fork — carried past it, it is a spike standing alone over the
  * canopy with nothing growing off it.
+ *
+ * Kept as slight as it can be and still hold the canopy up. Drawn on a
+ * dark pool it could afford to be a heavy gold column; drawn straight onto
+ * a street map it has to behave like the rest of the map's ink, and the
+ * people are what the picture is about — a thick trunk makes the tree the
+ * subject and the room the decoration.
  */
 export function trunkFor(branches: Branch[], w: number, h: number): Trunk {
   const cx = w / 2;
@@ -300,10 +315,11 @@ export function trunkFor(branches: Branch[], w: number, h: number): Trunk {
 
   const spine: Cubic = [cx, base, cx - w * 0.009, h * 0.78, cx + w * 0.007, h * 0.56, cx, top];
 
-  // Offset copies of the spine, which is what makes it read as a bundle of
-  // fibres lit from inside rather than one moulded cone.
-  const strands = [-0.62, -0.24, 0.24, 0.62].map((o) =>
-    ribbon(shift(spine, o * w * 0.021), 7 - Math.abs(o) * 3.4, 0.8, 26, 1.7)
+  // Two offset copies of the spine, which is what keeps it reading as a
+  // bundle of fibres lit from inside rather than one moulded cone. Four of
+  // them at this width is just a thicker trunk with lines on it.
+  const strands = [-0.5, 0.5].map((o) =>
+    ribbon(shift(spine, o * w * 0.008), 2.6, 0.6, 26, 1.7)
   );
 
   /**
@@ -316,14 +332,17 @@ export function trunkFor(branches: Branch[], w: number, h: number): Trunk {
    */
   const roots = [-1, 1].flatMap((side) =>
     [
-      { out: 0.21, drop: 0.055, wide: 17 },
-      { out: 0.125, drop: 0.028, wide: 11 },
+      // Short enough to stay under the canopy. Reaching a fifth of the
+      // canvas each way they stopped reading as roots and started reading
+      // as legs, sprawling out across streets the tree is nowhere near.
+      { out: 0.145, drop: 0.055, wide: 7 },
+      { out: 0.085, drop: 0.028, wide: 4.5 },
     ].map((r) =>
       ribbon(
         [
-          cx + side * 6,
+          cx + side * 4,
           h * 0.84,
-          cx + side * w * 0.022,
+          cx + side * w * 0.016,
           h * 0.93,
           cx + side * w * r.out * 0.45,
           base - h * r.drop * 0.12,
@@ -331,12 +350,12 @@ export function trunkFor(branches: Branch[], w: number, h: number): Trunk {
           base + h * 0.002,
         ],
         r.wide,
-        1.2
+        0.9
       )
     )
   );
 
-  return { body: ribbon(spine, w * 0.072, w * 0.018, 34, 1.7), strands, roots, glowY: base };
+  return { body: ribbon(spine, w * 0.032, w * 0.009, 34, 1.7), strands, roots, glowY: base };
 }
 
 /* ───────────────────────────────────────────────────── curves, as shapes */

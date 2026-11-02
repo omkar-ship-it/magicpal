@@ -126,9 +126,12 @@ function TreeView({
         </span>
       </div>
 
+      {/* Light ground, and no `overflow-hidden`: the hues and the trunk are
+          cut for the pale basemap the tree actually lives on now, and a
+          clipping container would eat the hover card off the top row. */}
       <GrowingTree
-        className="mt-3 w-full overflow-hidden rounded-3xl"
-        style={{ background: "#0d1326" }}
+        className="mt-3 w-full rounded-3xl"
+        style={{ background: "#f3f5fa" }}
         people={people}
         highlight={only}
         onBranch={(id) => onOnly(only === id ? null : id)}

@@ -615,18 +615,29 @@ h1, h2, h3 {
   70%  { transform: translate(-50%, -50%) scale(1.08); }
   to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
-.tree-face {
-  /* The translate lives in the keyframes rather than in a class, because
-     an animation on `transform` overrides one, and a face centred by
-     -translate-x-1/2 would snap to its corner the moment it ran. */
+
+/* The seat a face sits in. It owns the position and the arrival; the
+   button inside owns the lift on hover — scaling this would scale the
+   hover card hanging off it too.
+
+   The translate lives in the keyframes rather than in a class, because an
+   animation on `transform` overrides one, and a face centred by
+   -translate-x-1/2 would snap to its corner the moment it ran. */
+.tree-leaf {
   transform: translate(-50%, -50%);
   animation: tree-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
-  transition: transform 140ms ease-out;
 }
-.tree-face:hover,
+/* A hovered face, and its card, come out above its neighbours. */
+.tree-leaf:hover,
+.tree-leaf:focus-within {
+  z-index: 40;
+}
+.tree-face {
+  transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.tree-leaf:hover > .tree-face,
 .tree-face:focus-visible {
-  transform: translate(-50%, -50%) scale(1.16);
-  z-index: 5;
+  transform: scale(1.18);
 }
 
 @keyframes tree-pill {
@@ -650,16 +661,16 @@ h1, h2, h3 {
 @media (prefers-reduced-motion: reduce) {
   .tree-limb,
   .tree-pill,
-  .tree-breathe {
+  .tree-breathe,
+  .tree-leaf {
     animation: none !important;
   }
   .tree-face {
-    animation: none !important;
     transition: none !important;
   }
-  .tree-face:hover,
+  .tree-leaf:hover > .tree-face,
   .tree-face:focus-visible {
-    transform: translate(-50%, -50%);
+    transform: none;
   }
 }
 
