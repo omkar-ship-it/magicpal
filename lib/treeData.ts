@@ -1,7 +1,7 @@
 import type { CircleMember } from "./circleData";
 
 /**
- * A crowded room, drawn as a tree.
+ * A crowded room, drawn as a tree — all of it.
  *
  * The directory answers a dense place correctly and looks like a database
  * while it does it. Nobody screenshots a filtered list, and for a
@@ -9,20 +9,29 @@ import type { CircleMember } from "./circleData";
  * a member's group chat — is a picture of the room that somebody wants to
  * send.
  *
- * So: one trunk, a branch per discipline, a face for every person hanging
- * off the branch they belong to. It reads in a second, it is obviously
- * *this* room and not a stock graphic, and the information it carries is
- * the one a person actually wants on walking in — what kind of people are
- * here, and how many of each.
+ * Every person in the room is a leaf. Not a sample with the rest behind a
+ * count: four hundred and twenty people make four hundred and twenty
+ * leaves, and the size of the crown is the size of the room. That is the
+ * whole claim the picture makes, and sampling it would have made the claim
+ * false while looking identical.
+ *
+ * What changes with how big the thing is drawn is not *how many* people
+ * are on it but *how much of each one you can see*. Far out they are
+ * coloured foliage; as it grows, the leaves nearest you resolve into
+ * faces; drawn large enough, every one is a face. See `faceBudget`.
  *
  * It is not a replacement for the list. A tree is the answer to "what is
  * this room", a list is the answer to "find me a backend engineer", and
- * pretending either does both is how the last four attempts went wrong.
+ * pretending either does both is how the first four attempts went wrong.
  *
  * Everything below is geometry only, in abstract canvas units, so the same
  * numbers drive the tree growing out of a building on the map and the tree
  * on its own page. Two layouts would have drifted within a week.
  */
+
+/** The canvas everything is laid out against. Square: a full crown is. */
+export const W = 1000;
+export const H = 1000;
 
 export type Discipline = {
   id: string;
@@ -32,11 +41,6 @@ export type Discipline = {
   icon: string;
 };
 
-/**
- * Six, because the tree has to stay readable at a glance and because six is
- * roughly how many kinds of person a working floor actually contains. A
- * seventh branch costs more than the precision it buys.
- */
 /**
  * Hues chosen to survive a near-white basemap.
  *
@@ -86,23 +90,24 @@ export function disciplineOf(m: CircleMember): string {
 export type Branch = {
   discipline: Discipline;
   people: CircleMember[];
-  /** Which side of the trunk, and how far up it. */
+  /** Which half of the crown, for label alignment. */
   side: -1 | 1;
-  tier: number;
+  /** 0 is the outermost, lowest bough on its side. */
+  depth: number;
 };
 
 /**
- * Branches, biggest nearest the ground.
+ * Branches, biggest lowest, and the two sides kept level.
  *
- * A real tree is thickest where it is oldest, and the eye reads bottom-up
- * on something trunk-shaped — so the discipline with the most people is the
- * lowest and longest, which puts the room's centre of gravity where the
- * picture is heaviest. Sides alternate so the thing stays balanced however
- * lopsided the room is.
+ * A real tree is heaviest where it is oldest and the eye reads bottom-up on
+ * something trunk-shaped, so the discipline with the most people takes the
+ * lowest, outermost bough. Sides are filled by giving each new branch to
+ * whichever side is currently carrying fewer people — alternating strictly
+ * put 252 of 420 on the left and left the tree leaning.
  *
  * `rank` optionally orders the people within a branch — on the map it is
- * relevance to the reader, which is what makes the tree *yours* rather than
- * a chart of the building that is identical on every screen.
+ * relevance to the reader, which is what decides whose face resolves first
+ * as the tree grows, and so what makes the tree *yours*.
  */
 export function branchesFor(
   people: CircleMember[],
@@ -116,181 +121,310 @@ export function branchesFor(
     byId.set(id, list);
   }
 
-  return DISCIPLINES.map((d) => ({
+  const sorted = DISCIPLINES.map((d) => ({
     discipline: d,
     people: rank ? [...(byId.get(d.id) ?? [])].sort(rank) : (byId.get(d.id) ?? []),
   }))
     .filter((b) => b.people.length > 0)
-    .sort((a, b) => b.people.length - a.people.length)
-    .map((b, i) => ({
-      ...b,
-      side: (i % 2 === 0 ? -1 : 1) as -1 | 1,
-      tier: Math.floor(i / 2),
-    }));
-}
+    .sort((a, b) => b.people.length - a.people.length);
 
-/**
- * Faces drawn on a branch before the rest become a count.
- *
- * Four, arrived at by measurement rather than taste. A branch reaches
- * about a third of the canvas; a face is about a twentieth of it; faces
- * need roughly a quarter of their own width between them to read as
- * separate. That arithmetic allows four. Six and then five both put
- * overlapping discs on a branch — which is the pile-up this whole picture
- * exists to answer, reproduced inside the answer.
- *
- * The other hundred and twenty-one engineers are not hidden; they are the
- * number on the branch label, one tap from the list.
- *
- * On a phone it is three, for the same arithmetic against a narrower
- * canvas — see `leavesFor`.
- */
-export const LEAVES = 4;
-
-/**
- * How many faces a branch can hold at a given drawn width.
- *
- * A face has to stay tappable, so below about 560px it stops shrinking
- * with the picture — and a face that is no longer shrinking takes up more
- * of the branch, so one of them has to go. Three faces and a readable
- * count beats four faces that overlap.
- */
-export function leavesFor(drawnWidth: number): number {
-  return drawnWidth < 560 ? 3 : LEAVES;
-}
-
-/**
- * A face and the point it hangs from.
- *
- * Both, because the stem between them is what makes the picture read as a
- * tree rather than as avatars scattered near a curve — and the glowing dot
- * at the anchor is what says "this one belongs to this branch".
- */
-export type Leaf = { member: CircleMember; x: number; y: number; ax: number; ay: number };
-
-export type Drawn = {
-  branch: Branch;
-  /** The branch as a filled, tapering shape — see `ribbon`. */
-  body: string;
-  /** The same curve as a bare stroke, for the bright core down its middle. */
-  spine: string;
-  /** Where the label sits, just above the outer end. */
-  tip: { x: number; y: number };
-  leaves: Leaf[];
-  hidden: number;
-};
-
-type Cubic = [number, number, number, number, number, number, number, number];
-
-/**
- * Where each pair of branches leaves the trunk.
- *
- * The highest one is also where the trunk stops: the top pair *is* the
- * crown splitting, which is the shape every drawn tree has and the thing
- * the first draft was missing when it ran a bare spike up past the canopy.
- */
-function forkY(h: number, tier: number) {
-  return h * (0.845 - tier * 0.235);
-}
-
-/**
- * The geometry, in one place and in canvas units.
- *
- * Laid out against a fixed viewBox and scaled by the SVG rather than
- * measured from the DOM: the picture has to be identical in a screenshot,
- * on a phone, and in whatever somebody pastes it into.
- */
-export function layout(branches: Branch[], w: number, h: number, perBranch = LEAVES): Drawn[] {
-  const cx = w / 2;
-
-  return branches.map((b) => {
-    /**
-     * Lowest branch is the longest, and every branch rises.
-     *
-     * The first draft forked them all from one point and ran them sideways,
-     * which drew six power lines off two chopsticks. A branch leaves the
-     * trunk at its own height and ends *above* where it started — that one
-     * property is most of what makes a shape read as a tree.
-     */
-    const fy = forkY(h, b.tier);
-    const reach = w * (0.315 - b.tier * 0.028);
-    const tipX = cx + b.side * reach;
-    /**
-     * A branch goes out about three times as far as it goes up.
-     *
-     * Two drafts bracketed this. At a twentieth of the canvas they were
-     * six eyebrows; at a third they all left the trunk at the same angle
-     * and drew a wheat sheaf. A branch reaching outward with a modest
-     * crest is both what a tree looks like and what opens the wedge of
-     * space underneath — and that wedge is where the faces go, so the
-     * number is load-bearing twice over.
-     */
-    const tipY = fy - h * (0.125 + b.tier * 0.01);
-
-    const c: Cubic = [
-      cx + b.side * 10,
-      fy + h * 0.015,
-      // Up and out of the trunk before it turns — but not so steeply that
-      // six of them converge into a fan at the crown.
-      cx + b.side * w * 0.1,
-      fy - h * 0.055,
-      // Pulled above the tip so the curve crests before it lands, which is
-      // what gives a branch its droop at the end instead of a ramp.
-      cx + b.side * reach * 0.7,
-      tipY - h * 0.035,
-      tipX,
-      tipY,
-    ];
-
-    /**
-     * Faces spread by distance along the branch, not by the curve's own
-     * parameter.
-     *
-     * A cubic is not travelled at a constant rate: an even spread of `t`
-     * put four of the five faces in the outer third, piled against the
-     * label, with the whole inner half of the branch bare. Walking the arc
-     * length is the difference between a decorated curve and a branch with
-     * things growing evenly off it.
-     */
-    const tbl = arcTable(c);
-    const shown = b.people.slice(0, perBranch);
-    const leaves = shown.map((member, i) => {
-      // Clear of the trunk at one end, short of the label at the other.
-      const u = 0.34 + (i / Math.max(shown.length - 1, 1)) * 0.58;
-      const p = atLength(c, tbl, u);
-      /**
-       * Hung below the branch, on alternating stems.
-       *
-       * All at one depth they draw a row of discs under a line, which is a
-       * toolbar. The two lengths also have to differ by more than a face
-       * is tall — at a difference of less than that, neighbours that are
-       * close along the branch still overlap, which is what the shorter
-       * top branches were doing while the long bottom ones looked fine.
-       */
-      const stem = i % 2 === 0 ? h * 0.042 : h * 0.115;
-      return { member, x: p.x, y: p.y + stem, ax: p.x, ay: p.y };
-    });
-
-    return {
-      branch: b,
-      body: ribbon(c, 17 - b.tier * 2.5, 2.6),
-      spine: pathOf(c),
-      tip: { x: tipX, y: tipY - h * 0.05 },
-      leaves,
-      hidden: b.people.length - shown.length,
-    };
+  const load = { "-1": 0, "1": 0 } as Record<string, number>;
+  const depth = { "-1": 0, "1": 0 } as Record<string, number>;
+  return sorted.map((b) => {
+    const side: -1 | 1 = load["-1"] <= load["1"] ? -1 : 1;
+    load[side] += b.people.length;
+    return { ...b, side, depth: depth[side]++ };
   });
 }
 
+/** One person, and where in the crown they are. */
+export type Leaf = {
+  member: CircleMember;
+  x: number;
+  y: number;
+  /** Degrees to turn the leaf by, so foliage lies along the bough it grew on. */
+  tilt: number;
+  /**
+   * 0 is the first face to resolve as the tree grows.
+   *
+   * Ranks are scattered across the whole wedge rather than filling it from
+   * one end, so the faces that appear first are spread through the foliage
+   * instead of huddled on one twig.
+   */
+  rank: number;
+};
+
+export type Drawn = {
+  branch: Branch;
+  /** The bough, as a tapering filled shape from the trunk into the crown. */
+  limb: string;
+  /** Thin forks spreading through the foliage, so it has something to grow on. */
+  twigs: string[];
+  /** Where the label sits, just outside the canopy. */
+  tip: { x: number; y: number };
+  leaves: Leaf[];
+};
+
+export type Canopy = {
+  drawn: Drawn[];
+  /**
+   * Distance between neighbouring leaves, in canvas units.
+   *
+   * Set once for the whole tree from how many people are in it, and the
+   * single number that decides when a leaf has room to be a face.
+   */
+  spacing: number;
+};
+
+/* ─────────────────────────────────────────────────────── the crown's shape */
+
+/** Centre of the crown, and the ring of trunk it is hollow around. */
+const CC = { x: W / 2, y: H * 0.455 };
+const R_IN = H * 0.085;
+const R_OUT = H * 0.405;
+/**
+ * Half the arc the canopy wraps through, measured from straight up.
+ *
+ * Not a full circle: a tree is open at the bottom, which is where the
+ * trunk comes through. And not quite closed at the top either — the small
+ * keep-out is partly a notch real crowns have, and mostly somewhere for
+ * the two innermost labels to sit, which at a sealed crown were stacked
+ * off the top of the canvas.
+ */
+const ARC = (118 * Math.PI) / 180;
+const TOP_GAP = (10 * Math.PI) / 180;
+
+/** How far a leaf may wander from its slot, as a fraction of the spacing. */
+const JITTER = 0.2;
+
+const BASE_Y = H * 0.985;
+const TRUNK_TOP = H * 0.6;
+
+/**
+ * The whole canopy: every person placed, nothing sampled.
+ *
+ * Each branch gets a wedge of the crown with an angle proportional to how
+ * many people it holds, so the picture's proportions *are* the room's —
+ * and because leaf density is then the same everywhere, one spacing covers
+ * the tree and faces appear everywhere at once rather than branch by
+ * branch.
+ */
+export function layout(branches: Branch[]): Canopy {
+  const total = branches.reduce((n, b) => n + b.people.length, 0) || 1;
+
+  /**
+   * Leaf spacing, from the room's population and the crown's area.
+   *
+   * The crown does not grow; the leaves get finer. A tree whose canvas
+   * grew with its headcount would be the same picture at every size, and
+   * the thing worth seeing is that four hundred people make a denser
+   * canopy than forty.
+   */
+  const area = (ARC - TOP_GAP) * (R_OUT * R_OUT - R_IN * R_IN);
+  const spacing = clamp(Math.sqrt(area / (total * 1.3)), 13, 64);
+
+  // Each side's wedges run from the outside in, biggest first.
+  const bySide = {
+    [-1]: branches.filter((b) => b.side === -1).sort((a, b) => a.depth - b.depth),
+    [1]: branches.filter((b) => b.side === 1).sort((a, b) => a.depth - b.depth),
+  };
+  const span = new Map<Branch, [number, number]>();
+  /**
+   * A wedge's share of the sky, from the cube-ish root of its headcount.
+   *
+   * Straight proportion is the honest encoding and it drew a twenty-two
+   * person discipline as a twelve-degree splinter with its label lying
+   * across somebody else's foliage. The compression keeps the big
+   * branches visibly bigger and gives the small ones room to be read.
+   * Leaf *spacing* is global either way, so a roomier wedge simply reads
+   * as airier foliage rather than as a wrong count.
+   */
+  for (const sign of [-1, 1] as const) {
+    const group = bySide[sign];
+    const weights = group.map((b) => Math.pow(b.people.length, 0.78));
+    const held = weights.reduce((n, x) => n + x, 0) || 1;
+    // Each half of the arc is divided among its own branches, so neither
+    // side is left with a bald patch when the two carry different loads.
+    const usable = ARC - TOP_GAP;
+    let edge = sign * ARC;
+    group.forEach((b, i) => {
+      const width = (weights[i] / held) * usable * -sign;
+      span.set(b, [edge, edge + width]);
+      edge += width;
+    });
+  }
+
+  const drawn = branches.map((b) => {
+      const [a0, a1] = span.get(b)!;
+      const mid = (a0 + a1) / 2;
+      const sgn = b.side;
+
+      // Outer boughs leave the trunk lowest, which is the one property
+      // that keeps a radial crown reading as a tree and not a sunburst.
+      const forkY = TRUNK_TOP + H * (0.155 - b.depth * 0.05);
+      const reach = R_IN + (R_OUT - R_IN) * 0.48;
+      const end = polar(mid, reach);
+
+      const limbC: Cubic = [
+        CC.x + sgn * 9,
+        forkY,
+        CC.x + sgn * W * 0.1,
+        forkY - H * 0.05,
+        end.x - sgn * Math.abs(end.x - CC.x) * 0.3,
+        end.y + (forkY - end.y) * 0.22,
+        end.x,
+        end.y,
+      ];
+
+      // Three forks fanning across the wedge, so the foliage has something
+      // under it rather than floating in a cloud.
+      const twigs = [-0.32, 0, 0.32].map((f) => {
+        const at = mid + (a1 - a0) * f * 0.5;
+        const tip = polar(at, R_OUT * 0.9);
+        const from = onCubic(limbC, 0.72);
+        return ribbon(
+          [from.x, from.y, end.x, end.y, (end.x + tip.x) / 2, (end.y + tip.y) / 2, tip.x, tip.y],
+          5.5,
+          1.1,
+          18
+        );
+      });
+
+      const label = polar(mid, R_OUT + H * 0.038);
+
+      return {
+        branch: b,
+        // A bough's thickness is its share of the room. Six identical
+        // limbs made the headcount something you could only read off a
+        // label; this way the drawing itself carries it.
+        limb: ribbon(limbC, 9 + 32 * Math.sqrt(b.people.length / total), 4.5, 30),
+        twigs,
+        tip: { x: clamp(label.x, 96, W - 96), y: clamp(label.y, 30, H - 30) },
+        leaves: placeLeaves(b, a0, a1, spacing),
+      };
+  });
+
+  return { spacing, drawn: spreadLabels(drawn) };
+}
+
+/**
+ * Nudge labels apart where they would sit on top of one another.
+ *
+ * Each label wants to be at its wedge's mid-angle, just outside the
+ * canopy. That is right for the wide wedges and hopeless for the narrow
+ * ones at the crown, whose mid-angles are a few degrees apart — the three
+ * smallest disciplines landed in a heap on the skyline. One pass down the
+ * list by height, pushing any pair that is close in both axes apart
+ * vertically, is enough and keeps every label next to its own foliage.
+ */
+function spreadLabels(drawn: Drawn[]): Drawn[] {
+  const minY = H * 0.052;
+  const sameColumn = W * 0.21;
+  const order = [...drawn].sort((a, b) => a.tip.y - b.tip.y);
+  for (let i = 1; i < order.length; i++) {
+    for (let j = 0; j < i; j++) {
+      const above = order[j].tip;
+      const here = order[i].tip;
+      if (Math.abs(here.x - above.x) < sameColumn && here.y - above.y < minY) {
+        here.y = above.y + minY;
+      }
+    }
+  }
+  for (const d of drawn) d.tip.y = clamp(d.tip.y, 30, H - 30);
+  return drawn;
+}
+
+/**
+ * Every person in a wedge, on a jittered polar grid.
+ *
+ * Rings outward from the trunk, each holding as many leaves as its own arc
+ * length allows, so the spacing stays even as the wedge widens — the
+ * ordinary mistake here is an even *angular* step, which packs the inner
+ * rings and leaves the rim bare.
+ */
+function placeLeaves(b: Branch, a0: number, a1: number, spacing: number): Leaf[] {
+  const lo = Math.min(a0, a1);
+  const hi = Math.max(a0, a1);
+  const slots: Array<{ x: number; y: number; tilt: number }> = [];
+
+  for (let r = R_IN + spacing * 0.6; r < R_OUT; r += spacing * 0.9) {
+    const arc = (hi - lo) * r;
+    const per = Math.max(1, Math.floor(arc / spacing));
+    for (let i = 0; i < per; i++) {
+      const t = per === 1 ? 0.5 : (i + 0.5) / per;
+      const a = lo + (hi - lo) * t;
+      // Jitter, or the crown reads as a dartboard. Hashed off the ring and
+      // the slot so a refresh never reshuffles the tree.
+      // Kept small on purpose. Two neighbours each shoved a third of a
+      // gap toward one another close it by two thirds, and at the zoom
+      // where every leaf is a face that reads as two faces colliding —
+      // the pile-up this picture exists to answer, inside the answer.
+      const jr = ((rnd(`r${b.discipline.id}${r | 0}${i}`) % 100) / 100 - 0.5) * spacing * JITTER;
+      const ja = ((rnd(`a${b.discipline.id}${r | 0}${i}`) % 100) / 100 - 0.5) * (spacing * JITTER) / r;
+      const p = polar(a + ja, r + jr);
+      /**
+       * Leaves lie along the direction they grew out in, give or take.
+       *
+       * Drawn as circles the canopy is a dot plot with a tree underneath
+       * it; drawn as small ellipses turned to follow the bough it is
+       * foliage. It costs one number per person and it is the difference
+       * between a chart and a picture somebody sends to a friend.
+       */
+      const tilt =
+        (a * 180) / Math.PI + 90 + ((rnd(`t${b.discipline.id}${r | 0}${i}`) % 60) - 30);
+      slots.push({ ...p, tilt });
+    }
+  }
+
+  if (slots.length === 0) return [];
+
+  /**
+   * Rank r goes to slot (r · stride) mod n.
+   *
+   * Filling the slots in order would put the first faces to resolve in a
+   * huddle on the innermost ring. A coprime stride walks the whole wedge,
+   * so whatever fraction of the branch is showing faces is spread evenly
+   * through its foliage.
+   */
+  const n = slots.length;
+  const stride = coprimeNear(n, Math.round(n * 0.618));
+  return b.people.slice(0, n).map((member, rank) => {
+    const s = slots[(rank * stride) % n];
+    return { member, x: s.x, y: s.y, tilt: s.tilt, rank };
+  });
+}
+
+/**
+ * How many of a branch's leaves have room to be faces at this drawn size.
+ *
+ * A face is a fixed number of screen pixels wherever it is; the canvas is
+ * not. So the question is how many canvas units a face takes up at the
+ * size the tree is currently drawn, and how many leaves can be that far
+ * apart inside a wedge that holds `n` of them `spacing` apart.
+ *
+ * Showing `m` of `n` evenly scattered leaves leaves them about
+ * `spacing · √(n/m)` apart. Jitter takes a fixed bite out of that — two
+ * neighbours each wandering toward the other — so the room a face needs is
+ * `needed + 2·JITTER·spacing`, and
+ *
+ *     m ≤ n · (spacing / (needed + 2·JITTER·spacing))²
+ *
+ * which is why the tree resolves smoothly as it grows rather than flipping
+ * between two states. Charging the jitter as a *factor* instead was the
+ * near miss: it is negligible when six faces are scattered through a
+ * hundred leaves and decisive when all hundred are faces, and a factor
+ * gets both ends wrong at once.
+ */
+export function faceBudget(n: number, spacing: number, drawnWidth: number, facePx: number): number {
+  if (drawnWidth <= 0) return 0;
+  const needed = (facePx * 1.1 * W) / drawnWidth + 2 * JITTER * spacing;
+  return clamp(Math.floor(n * Math.pow(spacing / needed, 2)), 0, n);
+}
+
 export type Trunk = {
-  /** The trunk itself, as one tapering shape. */
   body: string;
-  /** Bright fibres running up inside it. */
   strands: string[];
-  /** What it flares into at the ground. */
   roots: string[];
-  /** The pool of light it stands in. */
-  glowY: number;
 };
 
 /**
@@ -298,9 +432,7 @@ export type Trunk = {
  *
  * Two strokes side by side look like chopsticks however well they are
  * coloured: a trunk is a solid that tapers, and the taper is the only
- * reason the branches look like they grew out of something. It stops at
- * the highest fork — carried past it, it is a spike standing alone over the
- * canopy with nothing growing off it.
+ * reason the branches look like they grew out of something.
  *
  * Kept as slight as it can be and still hold the canopy up. Drawn on a
  * dark pool it could afford to be a heavy gold column; drawn straight onto
@@ -308,46 +440,32 @@ export type Trunk = {
  * people are what the picture is about — a thick trunk makes the tree the
  * subject and the room the decoration.
  */
-export function trunkFor(branches: Branch[], w: number, h: number): Trunk {
-  const cx = w / 2;
-  const base = h * 0.985;
-  const top = forkY(h, branches.length ? Math.max(...branches.map((b) => b.tier)) : 0);
-
-  const spine: Cubic = [cx, base, cx - w * 0.009, h * 0.78, cx + w * 0.007, h * 0.56, cx, top];
+export function trunkFor(): Trunk {
+  const cx = W / 2;
+  const spine: Cubic = [cx, BASE_Y, cx - W * 0.009, H * 0.85, cx + W * 0.007, H * 0.68, cx, TRUNK_TOP];
 
   // Two offset copies of the spine, which is what keeps it reading as a
-  // bundle of fibres lit from inside rather than one moulded cone. Four of
-  // them at this width is just a thicker trunk with lines on it.
-  const strands = [-0.5, 0.5].map((o) =>
-    ribbon(shift(spine, o * w * 0.008), 2.6, 0.6, 26, 1.7)
-  );
+  // bundle of fibres lit from inside rather than one moulded cone.
+  const strands = [-0.5, 0.5].map((o) => ribbon(shift(spine, o * W * 0.008), 2.6, 0.6, 26, 1.7));
 
-  /**
-   * Two roots a side, not three.
-   *
-   * At three they fanned evenly off one point and drew a broom. Two of
-   * unequal length and curvature is what a trunk meeting the ground
-   * actually looks like, and the asymmetry is most of the reason the
-   * picture doesn't read as clip art.
-   */
   const roots = [-1, 1].flatMap((side) =>
+    // Short enough to stay under the canopy. Reaching a fifth of the
+    // canvas each way they stopped reading as roots and started reading
+    // as legs, sprawling out across streets the tree is nowhere near.
     [
-      // Short enough to stay under the canopy. Reaching a fifth of the
-      // canvas each way they stopped reading as roots and started reading
-      // as legs, sprawling out across streets the tree is nowhere near.
-      { out: 0.145, drop: 0.055, wide: 7 },
-      { out: 0.085, drop: 0.028, wide: 4.5 },
+      { out: 0.145, wide: 7 },
+      { out: 0.085, wide: 4.5 },
     ].map((r) =>
       ribbon(
         [
           cx + side * 4,
-          h * 0.84,
-          cx + side * w * 0.016,
-          h * 0.93,
-          cx + side * w * r.out * 0.45,
-          base - h * r.drop * 0.12,
-          cx + side * w * r.out,
-          base + h * 0.002,
+          H * 0.9,
+          cx + side * W * 0.016,
+          H * 0.955,
+          cx + side * W * r.out * 0.45,
+          BASE_Y - H * 0.004,
+          cx + side * W * r.out,
+          BASE_Y + H * 0.002,
         ],
         r.wide,
         0.9
@@ -355,44 +473,21 @@ export function trunkFor(branches: Branch[], w: number, h: number): Trunk {
     )
   );
 
-  return { body: ribbon(spine, w * 0.032, w * 0.009, 34, 1.7), strands, roots, glowY: base };
+  return { body: ribbon(spine, W * 0.032, W * 0.011, 34, 1.7), strands, roots };
 }
 
 /* ───────────────────────────────────────────────────── curves, as shapes */
 
-function at(c: Cubic, t: number) {
+type Cubic = [number, number, number, number, number, number, number, number];
+
+function polar(angle: number, r: number) {
+  return { x: CC.x + Math.sin(angle) * r, y: CC.y - Math.cos(angle) * r };
+}
+
+function onCubic(c: Cubic, t: number) {
   const u = 1 - t;
   const a = u * u * u, b = 3 * u * u * t, d = 3 * u * t * t, e = t * t * t;
   return { x: a * c[0] + b * c[2] + d * c[4] + e * c[6], y: a * c[1] + b * c[3] + d * c[5] + e * c[7] };
-}
-
-type Arc = { ts: number[]; ls: number[]; total: number };
-
-/** Distance travelled along the curve at each of 48 even steps of `t`. */
-function arcTable(c: Cubic, n = 48): Arc {
-  const ts = [0];
-  const ls = [0];
-  let prev = at(c, 0);
-  let total = 0;
-  for (let i = 1; i <= n; i++) {
-    const t = i / n;
-    const p = at(c, t);
-    total += Math.hypot(p.x - prev.x, p.y - prev.y);
-    ts.push(t);
-    ls.push(total);
-    prev = p;
-  }
-  return { ts, ls, total };
-}
-
-/** The point `u` of the way along the curve *by distance*. */
-function atLength(c: Cubic, tbl: Arc, u: number) {
-  const want = u * tbl.total;
-  let i = 1;
-  while (i < tbl.ls.length - 1 && tbl.ls[i] < want) i++;
-  const span = tbl.ls[i] - tbl.ls[i - 1];
-  const f = span === 0 ? 0 : (want - tbl.ls[i - 1]) / span;
-  return at(c, tbl.ts[i - 1] + (tbl.ts[i] - tbl.ts[i - 1]) * f);
 }
 
 /** The tangent, for the normal a tapering outline has to be offset along. */
@@ -407,10 +502,6 @@ function dir(c: Cubic, t: number) {
 
 function shift(c: Cubic, dx: number): Cubic {
   return [c[0] + dx, c[1], c[2] + dx, c[3], c[4] + dx, c[5], c[6] + dx, c[7]];
-}
-
-function pathOf(c: Cubic) {
-  return `M ${r(c[0])} ${r(c[1])} C ${r(c[2])} ${r(c[3])}, ${r(c[4])} ${r(c[5])}, ${r(c[6])} ${r(c[7])}`;
 }
 
 /**
@@ -433,15 +524,40 @@ function ribbon(c: Cubic, w0: number, w1: number, samples = 26, ease = 0.62): st
   const right: string[] = [];
   for (let i = 0; i <= samples; i++) {
     const t = i / samples;
-    const p = at(c, t);
+    const p = onCubic(c, t);
     const d = dir(c, t);
     const half = (w0 + (w1 - w0) * Math.pow(t, ease)) / 2;
-    left.push(`${r(p.x - d.y * half)} ${r(p.y + d.x * half)}`);
-    right.push(`${r(p.x + d.y * half)} ${r(p.y - d.x * half)}`);
+    left.push(`${r1(p.x - d.y * half)} ${r1(p.y + d.x * half)}`);
+    right.push(`${r1(p.x + d.y * half)} ${r1(p.y - d.x * half)}`);
   }
   return `M ${left[0]} L ${left.slice(1).join(" L ")} L ${right.reverse().join(" L ")} Z`;
 }
 
-function r(n: number) {
+function r1(n: number) {
   return Math.round(n * 10) / 10;
+}
+
+function clamp(n: number, lo: number, hi: number) {
+  return Math.min(hi, Math.max(lo, n));
+}
+
+/** The nearest number to `near` that shares no factor with `n`. */
+function coprimeNear(n: number, near: number) {
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  for (let d = 0; d < n; d++) {
+    for (const k of [near + d, near - d]) {
+      if (k > 0 && k < n && gcd(n, k) === 1) return k;
+    }
+  }
+  return 1;
+}
+
+/** Stable hash, so the same room draws the same tree on every screen. */
+function rnd(seed: string) {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h);
 }

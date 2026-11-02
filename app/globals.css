@@ -507,13 +507,18 @@ h1, h2, h3 {
   bottom: calc(100% + 10px);
   left: 50%;
   opacity: 0;
-  transform: translate(-50%, 4px);
+  /* --hover-k is 1 everywhere except inside the tree, which is grown with
+     a CSS transform and would otherwise magnify this card along with the
+     face it belongs to. Scaled about its bottom edge so the point where
+     it attaches to that face doesn't move. */
+  transform-origin: bottom center;
+  transform: translate(-50%, 4px) scale(var(--hover-k, 1));
   transition: opacity 140ms ease, transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .hover-host:hover > .hover-card,
 .hover-host:focus-within > .hover-card {
   opacity: 1;
-  transform: translate(-50%, 0);
+  transform: translate(-50%, 0) scale(var(--hover-k, 1));
 }
 @media (hover: none) {
   .hover-card {

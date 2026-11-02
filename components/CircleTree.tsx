@@ -23,6 +23,13 @@ import GrowingTree from "./GrowingTree";
  * attempts went wrong by trying to make one surface do both.
  */
 
+/** What "zoom in to see faces" means on a page with nothing to pinch. */
+const STEPS = [
+  { at: 1, label: "Whole tree" },
+  { at: 2.2, label: "Closer" },
+  { at: 4, label: "Everyone" },
+];
+
 const ROOMS = [
   { id: SPACE_ENTITY_ID, label: "2gethr" },
   { id: WORKSPACE_ENTITY_ID, label: "WeWork Galaxy" },
@@ -33,6 +40,7 @@ export default function CircleTree() {
   const [roomId, setRoomId] = useState(SPACE_ENTITY_ID);
   const [picked, setPicked] = useState<CircleMember | null>(null);
   const [only, setOnly] = useState<string | null>(null);
+  const [step, setStep] = useState(1);
 
   const people = useMemo(() => membersOf(roomId), [roomId]);
   const room = entityById(roomId);
@@ -72,6 +80,8 @@ export default function CircleTree() {
           onPick={setPicked}
           roomId={roomId}
           onRoom={setRoomId}
+          step={step}
+          onStep={setStep}
         />
       ) : (
         <WorldView />
@@ -92,6 +102,8 @@ function TreeView({
   onPick,
   roomId,
   onRoom,
+  step,
+  onStep,
 }: {
   people: CircleMember[];
   branchCount: number;
@@ -100,13 +112,15 @@ function TreeView({
   onPick: (m: CircleMember) => void;
   roomId: string;
   onRoom: (id: string) => void;
+  step: number;
+  onStep: (n: number) => void;
 }) {
   return (
     <div className="mx-auto max-w-[1100px] px-5 pb-16">
       <div className="mt-1 flex flex-wrap items-center gap-2">
         <p className="text-[13px] opacity-60">
-          <strong className="opacity-100">{people.length}</strong> people, on {branchCount} branches. Tap a
-          branch to hold it.
+          <strong className="opacity-100">{people.length}</strong> people, every one of them a leaf, on{" "}
+          {branchCount} branches. Tap a branch to hold it.
         </p>
         <span className="ml-auto flex gap-1">
           {ROOMS.map((r) => (
@@ -126,19 +140,44 @@ function TreeView({
         </span>
       </div>
 
-      {/* Light ground, and no `overflow-hidden`: the hues and the trunk are
-          cut for the pale basemap the tree actually lives on now, and a
-          clipping container would eat the hover card off the top row. */}
-      <GrowingTree
-        className="mt-3 w-full rounded-3xl"
-        style={{ background: "#f3f5fa" }}
-        people={people}
-        highlight={only}
-        onBranch={(id) => onOnly(only === id ? null : id)}
-        onPerson={onPick}
-      />
+      {/*
+       * On the map this is the map's own zoom, which is why no control
+       * exists there — pinching is the gesture everybody already has.
+       * A page has no such gesture to borrow, so it gets three steps,
+       * and the frame scrolls once the tree outgrows it.
+       */}
+      <div
+        className="mt-3 w-full overflow-auto rounded-3xl"
+        style={{ background: "#f3f5fa", maxHeight: "76vh", overscrollBehavior: "contain" }}
+      >
+        {/* Square, so at the first step it has to fit the frame's height
+            and not its width, or the trunk is below the fold. */}
+        <div style={{ width: `calc(min(100%, 74vh) * ${step})`, margin: "0 auto" }}>
+          <GrowingTree
+            className="w-full"
+            people={people}
+            highlight={only}
+            onBranch={(id) => onOnly(only === id ? null : id)}
+            onPerson={onPick}
+          />
+        </div>
+      </div>
 
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 flex items-center gap-0.5 rounded-full p-0.5" style={{ background: "#172038" }}>
+          {STEPS.map((s) => (
+            <button
+              key={s.at}
+              type="button"
+              onClick={() => onStep(s.at)}
+              className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
+              style={step === s.at ? { background: "#2b3a60", color: "#fff" } : { color: "#8da0c8" }}
+            >
+              {s.label}
+            </button>
+          ))}
+        </span>
+
         {DISCIPLINES.map((d) => (
           <button
             key={d.id}
@@ -157,9 +196,10 @@ function TreeView({
       </div>
 
       <p className="mt-3 text-[12px] leading-[1.5] opacity-55">
-        Four faces a branch, the rest counted in the label. The branch somebody hangs from is read off their
-        headline, so it is occasionally wrong — and visibly so, which is the point of putting it on a picture
-        rather than in a filter.
+        Nobody is behind a count: the crown is the room, and how many of the leaves are faces depends only on
+        how large the tree is drawn. The branch somebody hangs from is read off their headline, so it is
+        occasionally wrong — and visibly so, which is the point of putting it on a picture rather than in a
+        filter.
       </p>
     </div>
   );

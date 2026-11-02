@@ -68,6 +68,32 @@ import {
   IconX,
 } from "./Icons";
 
+/**
+ * How wide a room's tree is, before the map's zoom is applied.
+ *
+ * Sublinear in the headcount, the way a real canopy is: four hundred
+ * people make a tree about twice the span of forty, not ten times it.
+ * Everyone is on the tree either way — what grows is the room the crown
+ * has to hold them, so a big room is denser *and* bigger, which is what a
+ * glance should tell you before any label does.
+ */
+function treeBase(n: number): number {
+  return Math.round(Math.min(1500, 420 + Math.sqrt(n) * 34));
+}
+
+/**
+ * How much of that width is on screen right now.
+ *
+ * Planted fitted to the viewport, then tied to the map's own zoom so a
+ * pinch moves you through the canopy. Floored well below the fit so the
+ * tree never shrinks to a speck when somebody zooms out to find their
+ * bearings, and capped so it cannot run away.
+ */
+function treeScale(tree: { atZoom: number; fit: number }, zoom: number): number {
+  const k = tree.fit * Math.pow(2, (zoom - tree.atZoom) * 0.88);
+  return Math.min(Math.max(k, tree.fit * 0.42), 4.2);
+}
+
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 const MAP_STYLE = "mapbox://styles/mapbox/light-v11";
 /**
@@ -171,7 +197,15 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
    * a tree standing over the building is a thing somebody screenshots and
    * a tree on /tree is a chart.
    */
-  const [tree, setTree] = useState<{ lng: number; lat: number; people: CircleMember[]; where: string } | null>(null);
+  const [tree, setTree] = useState<{
+    lng: number;
+    lat: number;
+    people: CircleMember[];
+    where: string;
+    /** The map zoom it was planted at, and the size it was planted at. */
+    atZoom: number;
+    fit: number;
+  } | null>(null);
   /** A branch held open: the tree dims to it, and the list filters to it. */
   const [treeBranch, setTreeBranch] = useState<string | null>(null);
   const [intent, setIntent] = useState<string | null>(null);
@@ -404,6 +438,8 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
     const map = mapRef.current;
     if (!map) return;
     const at = map.unproject([c.x, c.y]);
+    const z = map.getZoom();
+    const side = treeBase(c.members.length);
     setTree({
       lng: at.lng,
       lat: at.lat,
@@ -411,6 +447,10 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
       // "WeWork Galaxy", not "WeWork Galaxy — today": the date is the
       // venue layer's business and this line is about the place.
       where: venueEvent?.name.replace(/\s+—\s+today$/i, "") ?? entity?.name ?? "this spot",
+      atZoom: z,
+      // Planted at whatever fraction of its own size fits the screen, so
+      // the first thing you see is the whole tree however big the room is.
+      fit: Math.min(1, (Math.min(window.innerWidth, window.innerHeight * 0.82) * 0.92) / side),
     });
     setTreeBranch(null);
     setStack([]);
@@ -424,7 +464,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
      */
     map.flyTo({
       center: [at.lng, at.lat],
-      offset: [0, (Math.min(window.innerWidth * 0.88, 720) * 0.7) / 2],
+      offset: [0, Math.min(window.innerWidth, window.innerHeight * 0.82) * 0.46],
       duration: 900,
     });
   };
@@ -706,10 +746,34 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
              * scrim. The colours and the trunk were re-cut for the pale
              * ground that came with that; see DISCIPLINES and trunkFor.
              */}
-            <div className="relative" style={{ width: "min(88vw, 720px)" }}>
+            {/*
+             * Two sizes, doing two different jobs.
+             *
+             * The tree's own width comes from how many people are in the
+             * room — four hundred of them make a bigger tree than forty,
+             * and that is the first thing the picture says. How much of
+             * that width you are looking at comes from the map's zoom, so
+             * pinching is how you move through the canopy: the gesture
+             * everybody already has on a map, which matters more than any
+             * control I could have added, because this is going to be
+             * looked at on a phone.
+             *
+             * Scaled from the bottom centre, because the bottom centre is
+             * where the trunk meets the building it is rooted in, and that
+             * point must not move.
+             */}
+            <div
+              style={{
+                width: treeBase(tree.people.length),
+                transform: `scale(${treeScale(tree, zoom)})`,
+                transformOrigin: "bottom center",
+                transition: "transform 90ms linear",
+              }}
+            >
               <GrowingTree
                 people={tree.people}
                 rank={treeRank}
+                scale={treeScale(tree, zoom)}
                 highlight={treeBranch}
                 /* The picture hands off to the list rather than trying to
                    become one: a branch is "what kind of people", the list
@@ -867,9 +931,18 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
               boxShadow: "var(--shadow-lift)",
             }}
           >
-            <span className="text-[12px] font-semibold">
+            {/* Every one of them is on the tree, so the count is a claim
+                about the picture and not a caption beside it. The second
+                line is the only instruction the view gets — without it
+                nobody discovers that the foliage is made of people. */}
+            <span className="text-[12px] font-semibold leading-tight">
               {tree.people.length}
               <span className="font-normal text-[var(--ink-soft)]"> at {tree.where}</span>
+              <span className="block text-[10.5px] font-normal text-[var(--ink-soft)]">
+                {treeScale(tree, zoom) < tree.fit * 1.6
+                  ? "Every leaf is a person — zoom in for faces"
+                  : "Zoom in further to see everyone"}
+              </span>
             </span>
             <button
               type="button"

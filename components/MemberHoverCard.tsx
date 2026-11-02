@@ -15,7 +15,16 @@ import { IconCity, IconHidden, IconPin } from "./Icons";
  * only: on a phone a tap already opens the real card, and a hover card that
  * fires on touch is just a card you can't dismiss.
  */
-export default function MemberHoverCard({ m, common }: { m: CircleMember; common?: string | null }) {
+export default function MemberHoverCard({
+  m,
+  common,
+  local = false,
+}: {
+  m: CircleMember;
+  common?: string | null;
+  /** Draw the face locally — see Avatar. Set where hundreds of these exist at once. */
+  local?: boolean;
+}) {
   const city = cityById(m.cityId);
   const mode =
     m.mode === "off"
@@ -35,7 +44,7 @@ export default function MemberHoverCard({ m, common }: { m: CircleMember; common
       role="tooltip"
     >
       <span className="flex items-center gap-2.5">
-        <Avatar name={m.name} size={38} />
+        <Avatar name={m.name} size={38} local={local} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1 text-[12.5px] font-semibold leading-tight">
             <span className="min-w-0 truncate">{m.name}</span>
