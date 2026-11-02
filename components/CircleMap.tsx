@@ -16,6 +16,8 @@ import SearchBar, { NO_FACETS, matchesFacets, matchesQuery, type Facets } from "
 import { entityById, isAlumniNetwork, isWorkspace } from "@/lib/networks";
 import { WORKSPACE_IN_TODAY, WORKSPACE_VENUE, workspacePoint } from "@/lib/workspaceData";
 import { densestCrowd, directoryFacets, type Crowd, type Facet, type ScreenPoint } from "@/lib/crowd";
+import { disciplineById, disciplineOf, type Discipline } from "@/lib/treeData";
+import GrowingTree from "./GrowingTree";
 import {
   ALL_CIRCLE_EVENTS,
   attendeesOf,
@@ -158,6 +160,19 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
    * of filter chips — there is no second surface any more.
    */
   const [crowdPool, setCrowdPool] = useState<CircleMember[] | null>(null);
+  /**
+   * The other answer to the same pile: the room drawn as a tree, growing
+   * out of the building it is actually in.
+   *
+   * A directory is right and nobody has ever forwarded one. This is the
+   * picture of the room — what kinds of people are in here and how many of
+   * each — and it is on the map rather than on a page of its own, because
+   * a tree standing over the building is a thing somebody screenshots and
+   * a tree on /tree is a chart.
+   */
+  const [tree, setTree] = useState<{ lng: number; lat: number; people: CircleMember[]; where: string } | null>(null);
+  /** A branch held open: the tree dims to it, and the list filters to it. */
+  const [treeBranch, setTreeBranch] = useState<string | null>(null);
   const [intent, setIntent] = useState<string | null>(null);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   /** Drives the two map layers below — see PRECISE_ZOOM. */
@@ -185,14 +200,17 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
    */
   const hasMentoring = !isOpen && isAlumniNetwork(activeEntityId);
 
-  const update = useCallback((patch: Partial<CircleMe>) => {
+  // Plain function, not useCallback — same trade as pointFor and scanCrowd
+  // below. It goes nowhere near a dependency array, and the compiler
+  // memoises it itself rather than refusing to preserve a hand-written memo.
+  const update = (patch: Partial<CircleMe>) => {
     setMeState((cur) => {
       if (!cur) return cur;
       const next = { ...cur, ...patch };
       setMe(next, variant);
       return next;
     });
-  }, [variant]);
+  };
 
   /**
    * Open network only. Seeded so the demo has all three states on screen
@@ -333,11 +351,28 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
   // itself — same trade already made for pointFor and scanCrowd above.
   const intents: Facet[] = densePool ? directoryFacets(densePool, me ?? null) : [];
   const activeIntent = intents.find((f) => f.id === intent) ?? null;
+  /** Set only by tapping a branch — the handoff from the picture to the list. */
+  const branchFilter: Discipline | null = densePool && treeBranch ? disciplineById(treeBranch) : null;
   const peopleRows = densePool
-    ? densePool.filter((m) => (activeIntent ? activeIntent.ids.has(m.id) : true) && matchesQuery(m, q))
+    ? densePool.filter(
+        (m) =>
+          (activeIntent ? activeIntent.ids.has(m.id) : true) &&
+          (branchFilter ? disciplineOf(m) === branchFilter.id : true) &&
+          matchesQuery(m, q)
+      )
     : isOpen && me
       ? [...matching].sort((a, b) => relevance(me, b) - relevance(me, a))
       : matching;
+
+  /**
+   * Who hangs where on the tree, nearest-to-you first.
+   *
+   * Five faces a branch out of four hundred people has to be a choice, and
+   * relevance is the only one worth making: it means your tree of this
+   * building is not my tree of this building, which is most of why anybody
+   * would send somebody theirs.
+   */
+  const treeRank = me ? (a: CircleMember, b: CircleMember) => relevance(me, b) - relevance(me, a) : undefined;
 
   /** Re-measure the pile-up once the camera has settled. */
   const scanCrowd = () => {
@@ -354,6 +389,43 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
       points.push({ member: m, x: p.x, y: p.y });
     }
     setCrowd(densestCrowd(points));
+  };
+
+  /**
+   * Plant the tree over the pile it is drawing.
+   *
+   * Anchored by unprojecting the crowd's own screen centre rather than by
+   * a venue record, so the same control works for a co-working floor, a
+   * conference hall and an unnamed clump of two hundred people on the open
+   * map — without the button having to know which of those it is.
+   */
+  const growTree = (c: Crowd) => {
+    const map = mapRef.current;
+    if (!map) return;
+    const at = map.unproject([c.x, c.y]);
+    setTree({
+      lng: at.lng,
+      lat: at.lat,
+      people: c.members,
+      // "WeWork Galaxy", not "WeWork Galaxy — today": the date is the
+      // venue layer's business and this line is about the place.
+      where: venueEvent?.name.replace(/\s+—\s+today$/i, "") ?? entity?.name ?? "this spot",
+    });
+    setTreeBranch(null);
+    setStack([]);
+    setPinned(null);
+    /**
+     * It grows upward off its anchor, so the anchor has to end up low in
+     * the frame — by half the tree's own height, which is the only number
+     * that centres it on a phone and on a laptop both. A fixed offset
+     * framed the desktop nicely and left a phone with the tree pinned to
+     * the dock under half a screen of empty map.
+     */
+    map.flyTo({
+      center: [at.lng, at.lat],
+      offset: [0, (Math.min(window.innerWidth * 0.88, 720) * 0.7) / 2],
+      duration: 900,
+    });
   };
 
   const flyToVenue = useCallback((e: CircleEvent) => {
@@ -582,8 +654,11 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
             );
           })}
 
-        {/* Venue view: everyone beaconing, metres apart. */}
+        {/* Venue view: everyone beaconing, metres apart — unless the tree is
+            up, in which case this is the exact pile it replaces and drawing
+            both would be the problem standing behind its own answer. */}
         {venueEvent &&
+          !tree &&
           venueBeacons.map((m) => {
             const pt = pointFor(m);
             if (!pt) return null;
@@ -606,6 +681,63 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
               </Marker>
             );
           })}
+
+        {/* ── the room, growing out of the room ──
+            A Marker rather than an overlay pinned to the chrome, so it is
+            genuinely planted: pan and the tree goes with its building,
+            zoom out and it stands over the city it's in. That is the whole
+            difference between this and a chart on another screen.
+
+            It keeps its own size through the zoom on purpose. A tree that
+            shrank to nothing at city zoom would be a second pile-up, and
+            the thing it is drawing — four hundred people in one footprint
+            — is the same fact at every zoom level. */}
+        {tree && (
+          <Marker longitude={tree.lng} latitude={tree.lat} anchor="bottom">
+            <div className="relative" style={{ width: "min(88vw, 720px)" }}>
+              {/* The building, lit. The glow needs somewhere dark to be a
+                  glow, and dimming a circle of the map rather than the
+                  whole screen keeps the streets around it readable — you
+                  can still see which block you're looking at. */}
+              <div
+                className="pointer-events-none absolute"
+                style={{
+                  // Taller than it is wide and lifted off the base, so the
+                  // pool sits around the canopy rather than puddling under
+                  // the roots where there is nothing to light.
+                  top: "-46%",
+                  bottom: "-14%",
+                  left: "-30%",
+                  right: "-30%",
+                  background:
+                    "radial-gradient(closest-side, rgba(7,11,26,0.95), rgba(7,11,26,0.88) 42%, rgba(7,11,26,0.45) 68%, rgba(7,11,26,0) 86%)",
+                }}
+              />
+              <GrowingTree
+                className="relative"
+                people={tree.people}
+                rank={treeRank}
+                highlight={treeBranch}
+                /* The picture hands off to the list rather than trying to
+                   become one: a branch is "what kind of people", the list
+                   under it is "which ones". */
+                onBranch={(id) => {
+                  if (id === treeBranch && view === "people") {
+                    setTreeBranch(null);
+                    setStack([]);
+                    return;
+                  }
+                  setTreeBranch(id);
+                  setCrowdPool(tree.people);
+                  setIntent(null);
+                  setQuery("");
+                  open("people");
+                }}
+                onPerson={(m) => setPinned(m.id)}
+              />
+            </div>
+          </Marker>
+        )}
 
         {/* Meetups and events with a place. A member-called meetup in a city
             is a different object from an institution's event, and reads as one. */}
@@ -677,16 +809,9 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
           Anchored to the pile itself rather than parked in the chrome: it
           is an answer to a condition on this part of this screen, and it
           should appear where the problem is and nowhere else. */}
-      {crowd && stack.length === 0 && !pinned && (
-        <button
-          type="button"
-          onClick={() => {
-            setCrowdPool(crowd.members);
-            setIntent(null);
-            setQuery("");
-            open("people");
-          }}
-          className="float-in fixed z-[1250] -translate-x-1/2 rounded-full border px-3 py-2 text-left"
+      {crowd && !tree && stack.length === 0 && !pinned && (
+        <div
+          className="float-in fixed z-[1250] w-[196px] -translate-x-1/2 rounded-2xl border p-1.5"
           style={{
             left: crowd.x,
             top: crowd.y,
@@ -695,13 +820,91 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
             boxShadow: "var(--shadow-lift)",
           }}
         >
-          <span className="block text-[12.5px] font-semibold leading-tight">
+          <p className="px-1 pb-1.5 text-[12.5px] font-semibold leading-tight">
             {crowd.members.length} people here
-          </span>
-          <span className="block text-[11px] leading-tight" style={{ color: "var(--brand)" }}>
-            Open the directory →
-          </span>
-        </button>
+          </p>
+          {/*
+           * Two doors onto the same pile, offered together rather than one
+           * behind the other.
+           *
+           * The list is the right answer to "find me a backend engineer"
+           * and will always be here. The tree is the answer to "what is
+           * this room" — and it is the one somebody sends to a friend,
+           * which is the only reason a room full of strangers ever fills
+           * up in the first place.
+           */}
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                setCrowdPool(crowd.members);
+                setIntent(null);
+                setTreeBranch(null);
+                setQuery("");
+                open("people");
+              }}
+              className="tap flex-1 rounded-xl py-1.5 text-[11.5px] font-semibold"
+              style={{ background: "var(--sunk)", color: "var(--ink)" }}
+            >
+              List them
+            </button>
+            <button
+              type="button"
+              onClick={() => growTree(crowd)}
+              className="tap flex-1 rounded-xl py-1.5 text-[11.5px] font-semibold text-white"
+              style={{ background: "var(--brand)" }}
+            >
+              🌳 Tree
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── the tree's own controls ──
+          The one piece of chrome it gets. Everything else about the view
+          is the picture itself, which is the point of the picture. */}
+      {tree && (
+        <div className="float-in pointer-events-none fixed inset-x-0 bottom-[74px] z-[1250] flex justify-center px-3 sm:bottom-[84px]">
+          <div
+            className="pointer-events-auto flex items-center gap-1 rounded-2xl border p-1 pl-3"
+            style={{
+              background: "color-mix(in srgb, var(--card) 94%, transparent)",
+              borderColor: "var(--line)",
+              backdropFilter: "blur(12px)",
+              boxShadow: "var(--shadow-lift)",
+            }}
+          >
+            <span className="text-[12px] font-semibold">
+              {tree.people.length}
+              <span className="font-normal text-[var(--ink-soft)]"> at {tree.where}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setCrowdPool(tree.people);
+                setTreeBranch(null);
+                setIntent(null);
+                setQuery("");
+                open("people");
+              }}
+              className="tap ml-1.5 rounded-xl px-2.5 py-1.5 text-[11.5px] font-semibold"
+              style={{ background: "var(--sunk)", color: "var(--ink)" }}
+            >
+              List all
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setTree(null);
+                setTreeBranch(null);
+              }}
+              className="tap rounded-xl px-2.5 py-1.5 text-[11.5px] font-semibold"
+              style={{ color: "var(--ink-soft)" }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
       )}
 
       {/* ── top: what the map is scoped to ── */}
@@ -749,6 +952,10 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
                       setCityFilter(null);
                       setSwitcherOpen(false);
                       setFeedLevel(EVERYTHING);
+                      // A tree is a picture of one room; it cannot follow
+                      // you into a different community.
+                      setTree(null);
+                      setTreeBranch(null);
                       // The module is gone for a community, so the open view
                       // has to go with it rather than render into nothing.
                       if (!isAlumniNetwork(id)) setStack((cur) => cur.filter((v) => v !== "mentoring"));
@@ -929,6 +1136,7 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
             setStack([]);
             setCrowdPool(null);
             setIntent(null);
+            setTreeBranch(null);
           }}
           onSize={setPanelSize}
         >
@@ -945,6 +1153,10 @@ export default function CircleMap({ variant = "circle" }: { variant?: Variant })
               intents={intents}
               intent={intent}
               onIntent={setIntent}
+              /* Set only by tapping a branch on the tree. It reads as a
+                 chip you can take off, not as a mode you got stuck in. */
+              branch={branchFilter}
+              onClearBranch={() => setTreeBranch(null)}
               onQuery={setQuery}
               onCity={(id) => {
                 setCityFilter(id);
@@ -1213,6 +1425,8 @@ function PeopleList({
   intents,
   intent,
   onIntent,
+  branch,
+  onClearBranch,
   onQuery,
   onCity,
   onOpen,
@@ -1228,6 +1442,9 @@ function PeopleList({
   intents?: Facet[];
   intent?: string | null;
   onIntent?: (id: string | null) => void;
+  /** The branch the reader arrived from, if they came in off the tree. */
+  branch?: Discipline | null;
+  onClearBranch?: () => void;
   onQuery: (q: string) => void;
   onCity: (id: string | null) => void;
   onOpen: (id: string) => void;
@@ -1238,6 +1455,19 @@ function PeopleList({
   const dense = (intents?.length ?? 0) > 0;
   return (
     <div>
+      {branch && (
+        <button
+          type="button"
+          onClick={onClearBranch}
+          className="tap mb-2 flex w-full items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11.5px] font-semibold"
+          style={{ background: `${branch.hue}1f`, color: branch.hue, border: `1px solid ${branch.hue}66` }}
+        >
+          <span className="opacity-70">{branch.icon}</span>
+          {branch.label}
+          <span className="ml-auto opacity-60">Showing {members.length} · clear ✕</span>
+        </button>
+      )}
+
       <input
         value={query}
         onChange={(e) => onQuery(e.target.value)}

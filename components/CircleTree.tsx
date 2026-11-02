@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SPACE_ENTITY_ID, WORKSPACE_ENTITY_ID, membersOf, type CircleMember } from "@/lib/circleData";
 import { entityById } from "@/lib/networks";
-import { branchesFor, layout, rootPaths, trunkPath, type Drawn } from "@/lib/treeData";
+import { branchesFor, DISCIPLINES } from "@/lib/treeData";
 import { HEROES, IMAGINED_TOTAL, projectPct, regionSplit, worldPins } from "@/lib/worldData";
 import Avatar from "./Avatar";
+import GrowingTree from "./GrowingTree";
 
 /**
  * Two pictures of the same problem, at opposite ends of the scale.
@@ -22,9 +23,6 @@ import Avatar from "./Avatar";
  * attempts went wrong by trying to make one surface do both.
  */
 
-const W = 1000;
-const H = 700;
-
 const ROOMS = [
   { id: SPACE_ENTITY_ID, label: "2gethr" },
   { id: WORKSPACE_ENTITY_ID, label: "WeWork Galaxy" },
@@ -38,8 +36,7 @@ export default function CircleTree() {
 
   const people = useMemo(() => membersOf(roomId), [roomId]);
   const room = entityById(roomId);
-  const drawn = useMemo(() => layout(branchesFor(people), W, H), [people]);
-  const shown = only ? drawn.filter((d) => d.branch.discipline.id === only) : drawn;
+  const branches = useMemo(() => branchesFor(people), [people]);
 
   return (
     <div className="min-h-dvh" style={{ background: "#0b1020", color: "#e9eef8" }}>
@@ -68,9 +65,8 @@ export default function CircleTree() {
 
       {view === "tree" ? (
         <TreeView
-          drawn={shown}
-          all={drawn}
-          total={people.length}
+          people={people}
+          branchCount={branches.length}
           only={only}
           onOnly={setOnly}
           onPick={setPicked}
@@ -89,18 +85,16 @@ export default function CircleTree() {
 /* ══════════════════════════════════════════════════════════════ the room */
 
 function TreeView({
-  drawn,
-  all,
-  total,
+  people,
+  branchCount,
   only,
   onOnly,
   onPick,
   roomId,
   onRoom,
 }: {
-  drawn: Drawn[];
-  all: Drawn[];
-  total: number;
+  people: CircleMember[];
+  branchCount: number;
   only: string | null;
   onOnly: (id: string | null) => void;
   onPick: (m: CircleMember) => void;
@@ -111,8 +105,8 @@ function TreeView({
     <div className="mx-auto max-w-[1100px] px-5 pb-16">
       <div className="mt-1 flex flex-wrap items-center gap-2">
         <p className="text-[13px] opacity-60">
-          <strong className="opacity-100">{total}</strong> people, on {all.length} branches. Tap a branch to
-          keep only that one.
+          <strong className="opacity-100">{people.length}</strong> people, on {branchCount} branches. Tap a
+          branch to hold it.
         </p>
         <span className="ml-auto flex gap-1">
           {ROOMS.map((r) => (
@@ -132,117 +126,37 @@ function TreeView({
         </span>
       </div>
 
-      <div className="relative mt-3 w-full overflow-hidden rounded-3xl" style={{ background: "#0d1326", aspectRatio: `${W} / ${H}` }}>
-        <svg viewBox={`0 0 ${W} ${H}`} className="absolute inset-0 h-full w-full" aria-hidden="true">
-          <defs>
-            <linearGradient id="trunk" x1="0" y1="1" x2="0" y2="0">
-              <stop offset="0" stopColor="#f6b46b" stopOpacity="0.95" />
-              <stop offset="1" stopColor="#ffd9a3" stopOpacity="0.5" />
-            </linearGradient>
-            <radialGradient id="ground">
-              <stop offset="0" stopColor="#f6b46b" stopOpacity="0.4" />
-              <stop offset="1" stopColor="#f6b46b" stopOpacity="0" />
-            </radialGradient>
-          </defs>
+      <GrowingTree
+        className="mt-3 w-full overflow-hidden rounded-3xl"
+        style={{ background: "#0d1326" }}
+        people={people}
+        highlight={only}
+        onBranch={(id) => onOnly(only === id ? null : id)}
+        onPerson={onPick}
+      />
 
-          {/* The light it stands in, so the trunk has somewhere to come from. */}
-          <ellipse cx={W / 2} cy={H * 0.965} rx={W * 0.3} ry={H * 0.035} fill="url(#ground)" />
-
-          {/* Roots first, so the trunk sits on top of where they meet. */}
-          {rootPaths(W, H).map((d, i) => (
-            <path key={i} d={d} stroke="url(#trunk)" strokeOpacity={0.5} strokeWidth={7} fill="none" strokeLinecap="round" />
-          ))}
-          <path d={trunkPath(W, H)} fill="url(#trunk)" />
-
-          {drawn.map((d) => (
-            <g key={d.branch.discipline.id}>
-              {/* Drawn twice: a wide, faint pass for the glow and a crisp one
-                  over it. A filter would be prettier and costs a raster pass
-                  per branch on every resize. */}
-              <path d={d.path} stroke={d.branch.discipline.hue} strokeOpacity={0.22} strokeWidth={10} fill="none" strokeLinecap="round" />
-              <path d={d.path} stroke={d.branch.discipline.hue} strokeOpacity={0.95} strokeWidth={2.4} fill="none" strokeLinecap="round" />
-              {d.leaves.map((l) => (
-                <g key={l.member.id}>
-                  <line x1={l.ax} y1={l.ay} x2={l.x} y2={l.y} stroke={d.branch.discipline.hue} strokeOpacity={0.5} strokeWidth={1.6} />
-                  <circle cx={l.ax} cy={l.ay} r={4.5} fill={d.branch.discipline.hue} fillOpacity={0.25} />
-                  <circle cx={l.ax} cy={l.ay} r={2.2} fill={d.branch.discipline.hue} />
-                </g>
-              ))}
-            </g>
-          ))}
-        </svg>
-
-        {/* Faces and labels as HTML over the drawing: the avatars are the
-            product's own component, with its photo and initials fallbacks,
-            and re-implementing that inside SVG would be a second one to
-            keep in step. Positioned in percentages off the same viewBox,
-            so the two layers cannot drift apart. */}
-        {drawn.map((d) => (
-          <div key={d.branch.discipline.id}>
-            <button
-              type="button"
-              onClick={() => onOnly(only === d.branch.discipline.id ? null : d.branch.discipline.id)}
-              className="absolute -translate-y-1/2 whitespace-nowrap rounded-full px-3 py-1.5 text-[12px] font-semibold"
-              style={{
-                left: `${(d.tip.x / W) * 100}%`,
-                top: `${(d.tip.y / H) * 100}%`,
-                transform: `translate(${d.branch.side < 0 ? "-100%" : "0"}, -50%)`,
-                marginLeft: d.branch.side < 0 ? -14 : 14,
-                background: "#111a30",
-                color: d.branch.discipline.hue,
-                border: `1px solid ${d.branch.discipline.hue}`,
-                boxShadow: `0 0 18px ${d.branch.discipline.hue}40`,
-              }}
-            >
-              <span className="mono mr-1.5 opacity-70">{d.branch.discipline.icon}</span>
-              {d.branch.discipline.label}
-              <span className="ml-1.5 opacity-60">{d.branch.people.length}</span>
-            </button>
-
-            {d.leaves.map((l) => (
-              <button
-                key={l.member.id}
-                type="button"
-                onClick={() => onPick(l.member)}
-                title={`${l.member.name} — ${l.member.headline}`}
-                className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full transition-transform hover:scale-110"
-                style={{
-                  left: `${(l.x / W) * 100}%`,
-                  top: `${(l.y / H) * 100}%`,
-                  boxShadow: `0 0 0 2px ${d.branch.discipline.hue}, 0 0 22px ${d.branch.discipline.hue}66`,
-                  borderRadius: 999,
-                }}
-              >
-                <Avatar name={l.member.name} size={40} />
-              </button>
-            ))}
-
-            {d.hidden > 0 && (
-              <span
-                className="absolute whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-semibold"
-                style={{
-                  left: `${(d.tip.x / W) * 100}%`,
-                  top: `${((d.tip.y + 40) / H) * 100}%`,
-                  // Under its own label and on the same side, rather than
-                  // dropped straight down onto whichever face is below.
-                  transform: `translate(${d.branch.side < 0 ? "-100%" : "0"}, -50%)`,
-                  marginLeft: d.branch.side < 0 ? -14 : 14,
-                  background: "#111a30",
-                  color: d.branch.discipline.hue,
-                  border: `1px solid ${d.branch.discipline.hue}55`,
-                }}
-              >
-                +{d.hidden} more
-              </span>
-            )}
-          </div>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {DISCIPLINES.map((d) => (
+          <button
+            key={d.id}
+            type="button"
+            onClick={() => onOnly(only === d.id ? null : d.id)}
+            className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
+            style={
+              only === d.id
+                ? { background: `${d.hue}26`, color: d.hue, border: `1px solid ${d.hue}` }
+                : { background: "#141c33", color: "#8da0c8", border: "1px solid transparent" }
+            }
+          >
+            {d.label}
+          </button>
         ))}
       </div>
 
       <p className="mt-3 text-[12px] leading-[1.5] opacity-55">
-        Six faces a branch, the rest counted. The branch somebody hangs from is read off their headline, so
-        it is occasionally wrong — and visibly so, which is the point of putting it on a picture rather than
-        in a filter.
+        Four faces a branch, the rest counted in the label. The branch somebody hangs from is read off their
+        headline, so it is occasionally wrong — and visibly so, which is the point of putting it on a picture
+        rather than in a filter.
       </p>
     </div>
   );

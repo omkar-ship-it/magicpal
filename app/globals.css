@@ -595,4 +595,72 @@ h1, h2, h3 {
    four hundred of them cost one style recalculation and no re-render —
    and so the React Compiler never sees a setState inside an effect. */
 
+/* ── the tree ─────────────────────────────────────────────────────────
+   It grows. The branches arrive lowest-first and the faces pop on after
+   the limb they hang from, which is about 900ms of the thing drawing
+   itself — the part that makes somebody hold the phone up to show
+   whoever is sitting next to them, which is the entire reason this view
+   exists rather than another filter. All delays are set inline per
+   element, so adding a branch needs no new rule here. */
+@keyframes tree-limb {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.tree-limb {
+  animation: tree-limb 520ms ease-out both;
+}
+
+@keyframes tree-pop {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.2); }
+  70%  { transform: translate(-50%, -50%) scale(1.08); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+.tree-face {
+  /* The translate lives in the keyframes rather than in a class, because
+     an animation on `transform` overrides one, and a face centred by
+     -translate-x-1/2 would snap to its corner the moment it ran. */
+  transform: translate(-50%, -50%);
+  animation: tree-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  transition: transform 140ms ease-out;
+}
+.tree-face:hover,
+.tree-face:focus-visible {
+  transform: translate(-50%, -50%) scale(1.16);
+  z-index: 5;
+}
+
+@keyframes tree-pill {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.86); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+.tree-pill {
+  animation: tree-pill 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* The pool of light at the base, very slowly. A still tree reads as a
+   diagram; one thing moving reads as alive. */
+@keyframes tree-breathe {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+.tree-breathe {
+  animation: tree-breathe 5200ms ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tree-limb,
+  .tree-pill,
+  .tree-breathe {
+    animation: none !important;
+  }
+  .tree-face {
+    animation: none !important;
+    transition: none !important;
+  }
+  .tree-face:hover,
+  .tree-face:focus-visible {
+    transform: translate(-50%, -50%);
+  }
+}
+
 
