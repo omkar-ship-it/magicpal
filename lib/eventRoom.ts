@@ -420,3 +420,46 @@ export const FEED: FeedItem[] = POSTS.map((text, i) => ({
   text,
   ago: `${2 + i * 7}m`,
 }));
+
+// ─────────────────────────────────────────────────────────────── chats
+
+export type Line = { from: "them" | "me"; text: string; ago: string };
+
+/**
+ * Conversations already in flight, because an empty inbox is the worst
+ * thing to show somebody you are trying to persuade.
+ *
+ * Each one is an hour of an evening compressed: an opener built from the
+ * two stated facts, a reply, and the thing that actually matters — a
+ * time and a place inside the venue. That last line is the whole pitch
+ * in miniature, because it is the step a badge wall never reaches.
+ */
+export const THREADS: Array<{ withId: string; lines: Line[]; unread: boolean }> = [
+  {
+    withId: "a-3",
+    unread: true,
+    lines: [
+      { from: "me", text: "Hi — you mentioned interview loops that don't waste a week. That's exactly what I'm stuck on. Could I borrow ten minutes before this wraps up?", ago: "24m" },
+      { from: "them", text: "Yes — happy to. We cut ours from five rounds to two and hired faster. I'm by the coffee bar for the next twenty minutes if that works?", ago: "18m" },
+      { from: "me", text: "On my way over. Tall, grey jacket.", ago: "17m" },
+      { from: "them", text: "Found you. 👋", ago: "16m" },
+    ],
+  },
+  {
+    withId: "a-11",
+    unread: true,
+    lines: [
+      { from: "them", text: "Hi — saw you're looking for a technical co-founder with ML. I'm not available but I ran a team doing exactly that at my last company, and I know two people here tonight who might be.", ago: "9m" },
+      { from: "me", text: "That would be enormously useful. Are either of them still in the room?", ago: "6m" },
+      { from: "them", text: "One is — she's in the workshop room. I'll walk you over.", ago: "4m" },
+    ],
+  },
+  {
+    withId: "a-22",
+    unread: false,
+    lines: [
+      { from: "me", text: "Hi — you're after your first three enterprise logos. I've done that twice in India and the second one is a very different sale to the first. Worth a chat?", ago: "1h" },
+      { from: "them", text: "Very. We keep losing them at procurement. Tomorrow morning any good? I'm out of here at nine.", ago: "52m" },
+    ],
+  },
+];

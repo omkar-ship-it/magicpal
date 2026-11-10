@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import MapGL, { Marker, NavigationControl } from "react-map-gl/mapbox";
 import Avatar from "./Avatar";
+import { IconChat, IconFeed, IconGlobe, IconPeople, IconPin, IconSparkle, IconUser, IconX } from "./Icons";
 import {
   ATTENDEES,
   EVENT,
@@ -11,9 +12,11 @@ import {
   TOPICS,
   YOU,
   ZONE_LABEL,
+  THREADS,
   matchOf,
   matchesFor,
   type Attendee,
+  type Line,
   type Match,
   type Tier,
 } from "@/lib/eventRoom";
@@ -23,14 +26,22 @@ const MAP_STYLE = "mapbox://styles/mapbox/light-v11";
 
 type Slot = "home" | "forYou" | "feed" | "people" | "now" | "chats" | "you";
 
-const SLOTS: Array<{ id: Slot; label: string; icon: string }> = [
-  { id: "home", label: "Home", icon: "◎" },
-  { id: "forYou", label: "For you", icon: "✦" },
-  { id: "feed", label: "Feed", icon: "☰" },
-  { id: "people", label: "People", icon: "⚇" },
-  { id: "now", label: "Now", icon: "⌖" },
-  { id: "chats", label: "Chats", icon: "✉" },
-  { id: "you", label: "You", icon: "●" },
+/**
+ * The live dock's own set, drawn rather than typed.
+ *
+ * The first pass used text glyphs — ◎ ✦ ☰ — which every platform draws
+ * differently and none draws at the weight of the rest of the chrome.
+ * These are the same 1.75-stroke icons the real product uses, so a demo
+ * sent to an organiser looks like the thing they would be buying.
+ */
+const SLOTS: Array<{ id: Slot; label: string; icon: React.ReactNode }> = [
+  { id: "home", label: "Home", icon: <IconGlobe size={17} /> },
+  { id: "forYou", label: "For you", icon: <IconSparkle size={17} /> },
+  { id: "feed", label: "Feed", icon: <IconFeed size={17} /> },
+  { id: "people", label: "People", icon: <IconPeople size={17} /> },
+  { id: "now", label: "Now", icon: <IconPin size={17} /> },
+  { id: "chats", label: "Chats", icon: <IconChat size={17} /> },
+  { id: "you", label: "You", icon: <IconUser size={17} /> },
 ];
 
 /**
@@ -63,7 +74,16 @@ export default function EventRoom() {
   const [q, setQ] = useState("");
   const [hereOnly, setHereOnly] = useState(false);
   const [chatWith, setChatWith] = useState<Attendee | null>(null);
-  const [threads, setThreads] = useState<Record<string, string[]>>({});
+  /**
+   * Seeded, because an empty inbox is the worst thing to show somebody
+   * you are trying to persuade. Each one is an hour of the evening
+   * compressed down to the step a badge wall never reaches — a time and
+   * a place inside the venue.
+   */
+  const [threads, setThreads] = useState<Record<string, Line[]>>(() =>
+    Object.fromEntries(THREADS.map((t) => [t.withId, t.lines]))
+  );
+  const [unread, setUnread] = useState<Set<string>>(() => new Set(THREADS.filter((t) => t.unread).map((t) => t.withId)));
   const [draft, setDraft] = useState("");
   const [myZone, setMyZone] = useState<string>("hall");
   const [wide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 640);
@@ -87,13 +107,22 @@ export default function EventRoom() {
 
   function say(a: Attendee) {
     setChatWith(a);
-    setDraft(tierOf.get(a.id)?.opener ?? "");
+    // An existing conversation is resumed, never overwritten with a draft.
+    setDraft(threads[a.id]?.length ? "" : tierOf.get(a.id)?.opener ?? "");
+    setUnread((u) => {
+      const n = new Set(u);
+      n.delete(a.id);
+      return n;
+    });
     setSlot("chats");
     setOpenId(null);
   }
   function send() {
     if (!chatWith || !draft.trim()) return;
-    setThreads((t) => ({ ...t, [chatWith.id]: [...(t[chatWith.id] ?? []), draft.trim()] }));
+    setThreads((t) => ({
+      ...t,
+      [chatWith.id]: [...(t[chatWith.id] ?? []), { from: "me" as const, text: draft.trim(), ago: "now" }],
+    }));
     setDraft("");
   }
   const pick = (id: string) => {
@@ -206,13 +235,26 @@ export default function EventRoom() {
           {slot === "people" && <People list={shown} tierOf={tierOf} onOpen={pick} />}
           {slot === "now" && <Now myZone={myZone} setMyZone={setMyZone} />}
           {slot === "chats" && (
-            <Chat who={chatWith} sent={chatWith ? threads[chatWith.id] ?? [] : []} draft={draft} setDraft={setDraft} onSend={send} />
+            <Chats
+              who={chatWith}
+              threads={threads}
+              unread={unread}
+              draft={draft}
+              setDraft={setDraft}
+              onSend={send}
+              onPick={say}
+              onBack={() => setChatWith(null)}
+            />
           )}
           {slot === "you" && <YouPanel myZone={myZone} />}
         </Panel>
       )}
 
-      <Dock active={slot} onSelect={(s) => setSlot((cur) => (cur === s ? null : s))} waiting={Object.keys(threads).length} />
+      <Dock
+        active={slot}
+        onSelect={(s) => setSlot((cur) => (cur === s ? null : s))}
+        counts={{ forYou: matches.length, people: shown.length, chats: unread.size }}
+      />
 
       {open && <Profile a={open} m={tierOf.get(open.id)!} onClose={() => setOpenId(null)} onSay={() => say(open)} />}
     </div>
@@ -666,7 +708,16 @@ function Panel({ title, onClose, wide, children }: { title: string; onClose: () 
   );
 }
 
-function Dock({ active, onSelect, waiting }: { active: Slot | null; onSelect: (s: Slot) => void; waiting: number }) {
+function Dock({
+  active,
+  onSelect,
+  counts,
+}: {
+  active: Slot | null;
+  onSelect: (s: Slot) => void;
+  /** Shown beside the label, as the live dock does. Zero renders nothing. */
+  counts: Partial<Record<Slot, number>>;
+}) {
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex justify-center px-1 pb-[max(10px,env(safe-area-inset-bottom))] sm:px-2">
       <div
@@ -679,23 +730,30 @@ function Dock({ active, onSelect, waiting }: { active: Slot | null; onSelect: (s
       >
         {SLOTS.map((s) => {
           const on = active === s.id;
+          const n = counts[s.id];
           return (
             <button
               key={s.id}
               type="button"
               onClick={() => onSelect(s.id)}
               aria-pressed={on}
-              className="flex w-[44px] flex-none flex-col items-center justify-center gap-0.5 rounded-2xl py-1.5 sm:w-[58px]"
+              className="flex w-[46px] flex-none flex-col items-center justify-center gap-1 rounded-2xl py-1.5 sm:w-[60px]"
               style={on ? { background: "color-mix(in srgb, var(--brand) 13%, transparent)" } : undefined}
             >
-              <span className="relative text-[15px]" style={{ color: on ? "var(--brand)" : "var(--ink-soft)" }}>
-                {s.icon}
-                {s.id === "chats" && waiting > 0 && (
-                  <span className="absolute -right-1.5 -top-1 h-2 w-2 rounded-full" style={{ background: "var(--brand)" }} />
-                )}
+              {/* "You" wears the visitor's own face rather than an icon,
+                  same as the live dock — it is the one slot that is a
+                  person instead of a place. */}
+              <span className="relative" style={{ color: on ? "var(--brand)" : "var(--ink-soft)" }}>
+                {s.id === "you" ? <Avatar name="You" size={19} /> : s.icon}
               </span>
-              <span className="text-[9px] font-semibold sm:text-[10px]" style={{ color: on ? "var(--brand)" : "var(--ink)" }}>
+              <span
+                className="whitespace-nowrap text-[9px] font-semibold sm:text-[10.5px]"
+                style={{ color: on ? "var(--brand)" : "var(--ink)" }}
+              >
                 {s.label}
+                {n != null && n > 0 && (
+                  <span style={{ color: on ? "var(--brand)" : "var(--ink-soft)" }}> {n}</span>
+                )}
               </span>
             </button>
           );
@@ -893,30 +951,77 @@ function YouPanel({ myZone }: { myZone: string }) {
   );
 }
 
-function Chat({
+/**
+ * The inbox, then one conversation — a list first, because the question
+ * on opening Chats is "who is waiting on me", not "what did I say to
+ * Vikram".
+ */
+function Chats({
   who,
-  sent,
+  threads,
+  unread,
   draft,
   setDraft,
   onSend,
+  onPick,
+  onBack,
 }: {
   who: Attendee | null;
-  sent: string[];
+  threads: Record<string, Line[]>;
+  unread: Set<string>;
   draft: string;
   setDraft: (v: string) => void;
   onSend: () => void;
+  onPick: (a: Attendee) => void;
+  onBack: () => void;
 }) {
-  if (!who)
+  if (!who) {
+    const ids = Object.keys(threads);
+    if (!ids.length)
+      return (
+        <p className="p-2 text-[12px] leading-[1.5]" style={{ color: "var(--ink-soft)" }}>
+          Pick somebody from <strong>For you</strong> and the opening line is written for you.
+        </p>
+      );
     return (
-      <p className="p-2 text-[12px] leading-[1.5]" style={{ color: "var(--ink-soft)" }}>
-        Pick somebody from <strong>For you</strong> and the opening line is already written — you
-        edit and send. Messages stay in this browser; it&rsquo;s a demo of the room, not a real
-        inbox.
-      </p>
+      <ul className="flex flex-col gap-0.5">
+        {ids.map((id) => {
+          const a = ATTENDEES.find((x) => x.id === id);
+          if (!a) return null;
+          const lines = threads[id];
+          const last = lines[lines.length - 1];
+          return (
+            <li key={id}>
+              <button type="button" onClick={() => onPick(a)} className="flex w-full items-start gap-2 rounded-xl p-1.5 text-left">
+                <Avatar name={a.name} size={30} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-bold">{a.name}</span>
+                    <span className="flex-none text-[10px]" style={{ color: "var(--ink-soft)" }}>
+                      {last.ago}
+                    </span>
+                    {unread.has(id) && <span className="h-2 w-2 flex-none rounded-full" style={{ background: "var(--brand)" }} />}
+                  </span>
+                  <span className="block truncate text-[11px]" style={{ color: "var(--ink-soft)" }}>
+                    {last.from === "me" ? "You: " : ""}
+                    {last.text}
+                  </span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     );
+  }
+
+  const lines = threads[who.id] ?? [];
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-none items-center gap-2 pb-2">
+        <button type="button" onClick={onBack} aria-label="All chats" className="text-[13px]" style={{ color: "var(--ink-soft)" }}>
+          ‹
+        </button>
         <Avatar name={who.name} size={26} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[12px] font-bold">{who.name}</span>
@@ -926,17 +1031,22 @@ function Chat({
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {sent.length === 0 ? (
+        {lines.length === 0 && (
           <p className="text-[11.5px] italic" style={{ color: "var(--ink-soft)" }}>
             Draft below — edit it or send as it is.
           </p>
-        ) : (
-          sent.map((m, i) => (
-            <p key={i} className="mb-1.5 ml-6 rounded-2xl rounded-br-sm p-2 text-[12px] leading-[1.45] text-white" style={{ background: "var(--brand)" }}>
-              {m}
-            </p>
-          ))
         )}
+        {lines.map((l, i) => (
+          <p
+            key={i}
+            className={`mb-1.5 max-w-[85%] rounded-2xl p-2 text-[12px] leading-[1.45] ${
+              l.from === "me" ? "ml-auto rounded-br-sm text-white" : "rounded-bl-sm"
+            }`}
+            style={l.from === "me" ? { background: "var(--brand)" } : { background: "var(--sunk)" }}
+          >
+            {l.text}
+          </p>
+        ))}
       </div>
       <form
         className="mt-2 flex flex-none items-end gap-1.5"
@@ -948,7 +1058,8 @@ function Chat({
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          rows={3}
+          rows={draft.length > 70 ? 3 : 1}
+          placeholder={`Reply to ${who.name.split(" ")[0]}…`}
           aria-label="Your message"
           className="min-w-0 flex-1 resize-none rounded-2xl border bg-transparent px-3 py-2 text-[12px] leading-[1.4] outline-none"
           style={{ borderColor: "var(--line)" }}
