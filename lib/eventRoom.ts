@@ -42,27 +42,42 @@ export const EVENT = {
 } as const;
 
 /**
- * Where people actually stand, which is never evenly.
+ * Zones, and people laid out in rows inside them.
  *
- * A venue has gravity: most of the room is by the stage, a knot forms at
- * the coffee, a few people take a call on the terrace. Scattering fifty
- * pins uniformly across a rectangle would be tidier and would read as
- * synthetic — a crowd has lumps, and the lumps are what make "who's near
- * the coffee" a question worth asking.
+ * The first pass scattered everybody organically — a crowd has lumps,
+ * and lumps are honest. It was also unreadable: forty faces at slightly
+ * different random offsets overlap, and the ones underneath may as well
+ * not be on the map. At fifty people the thing somebody wants is to
+ * *scan the room*, and you cannot scan a pile.
  *
- * Offsets are in degrees; 0.0001° ≈ 11m. The zones sit roughly ninety
- * metres apart and each holds its people within thirty to sixty, so at
- * the zoom this opens at a face is a face rather than part of a clump —
- * the first pass packed eighteen avatars into forty pixels, which is the
- * density problem this page exists to avoid.
+ * So each zone is a block of rows. Position still carries the only
+ * geography that matters inside one building — which part of the venue
+ * somebody is in — and within the zone it carries order instead of a
+ * fake precision that was never real. Nobody is standing on a grid
+ * point at a mixer, and nobody was standing on their random offset
+ * either; the difference is that the grid can be read.
  */
 const ZONES = [
-  { id: "hall", label: "Main hall", dx: 0.00004, dy: -0.00004, spread: 0.00058, weight: 18 },
-  { id: "stage", label: "By the stage", dx: -0.00078, dy: 0.00044, spread: 0.00030, weight: 9 },
-  { id: "coffee", label: "Coffee bar", dx: 0.00086, dy: -0.00020, spread: 0.00030, weight: 11 },
-  { id: "mezz", label: "Mezzanine", dx: 0.00020, dy: 0.00080, spread: 0.00038, weight: 7 },
-  { id: "workshop", label: "Workshop room", dx: -0.00080, dy: -0.00064, spread: 0.00032, weight: 5 },
+  { id: "mezz", label: "Mezzanine", weight: 7 },
+  { id: "stage", label: "By the stage", weight: 9 },
+  { id: "hall", label: "Main hall", weight: 18 },
+  { id: "coffee", label: "Coffee bar", weight: 11 },
+  { id: "workshop", label: "Workshop room", weight: 5 },
 ] as const;
+
+/** Eight across keeps the block narrower than it is tall on a laptop. */
+const PER_ROW = 8;
+/**
+ * One avatar plus the gap two of them read as separate across, in
+ * degrees — and latitude needs roughly half of what longitude does to
+ * cover the same pixels at this zoom, which is measured rather than
+ * derived. Nine rows at the first guess spanned 937px inside 658 of
+ * usable screen; these are set from the pitch the browser actually
+ * reported.
+ */
+const COL_DX = 0.00019;
+const ROW_DY = 0.00015;
+const ZONE_GAP = 0.00012;
 
 export type ZoneId = (typeof ZONES)[number]["id"];
 export const ZONE_LABEL: Record<string, string> = Object.fromEntries(ZONES.map((z) => [z.id, z.label]));
@@ -241,42 +256,54 @@ const BIOS = [
 
 function buildAttendees(): Attendee[] {
   const out: Attendee[] = [];
-  for (let i = 0; i < 50; i++) {
-    const zone = ZONE_BAG[rnd(`z-${i}`) % ZONE_BAG.length];
-    const z = ZONES.find((x) => x.id === zone)!;
 
-    /**
-     * Two independent offsets inside the zone, each its own hash key.
-     * Deriving both from one number correlates them and lays the crowd
-     * out along a diagonal — which is the tell that a map is generated.
-     */
-    const ox = ((rnd(`ox-${i}`) % 2000) / 1000 - 1) * z.spread;
-    const oy = ((rnd(`oy-${i}`) % 2000) / 1000 - 1) * z.spread;
+  /**
+   * Row origins per zone, walked top to bottom so the blocks stack
+   * without overlapping whatever the counts turn out to be.
+   */
+  const rowsFor = (n: number) => Math.ceil(n / PER_ROW);
+  const totalRows = ZONES.reduce((s, z) => s + rowsFor(z.weight), 0);
+  const totalHeight = totalRows * ROW_DY + (ZONES.length - 1) * ZONE_GAP;
+  let cursor = totalHeight / 2;
 
-    const askTopic = TOPICS[rnd(`at-${i}`) % TOPICS.length].id;
-    /** Never the same topic on both sides: a card that asks and offers the
-     *  same thing says nothing about why two people should talk. */
-    const offerPool = TOPICS.filter((t) => t.id !== askTopic);
-    const offerTopic = offerPool[rnd(`ot-${i}`) % offerPool.length].id;
+  let i = 0;
+  for (const z of ZONES) {
+    const rows = rowsFor(z.weight);
+    for (let k = 0; k < z.weight; k++, i++) {
+      const row = Math.floor(k / PER_ROW);
+      const inRow = k % PER_ROW;
+      // The last row of a zone is usually short; centre it under the rest
+      // rather than leaving a ragged left edge.
+      const widthOfRow = Math.min(PER_ROW, z.weight - row * PER_ROW);
+      const x = (inRow - (widthOfRow - 1) / 2) * COL_DX;
+      const y = cursor - row * ROW_DY;
 
-    out.push({
-      id: `a-${i}`,
-      name: `${GIVEN[rnd(`g-${i}`) % GIVEN.length]} ${FAMILY[rnd(`f-${i}`) % FAMILY.length]}`,
-      role: ROLES[rnd(`r-${i}`) % ROLES.length],
-      company: COMPANIES[rnd(`c-${i}`) % COMPANIES.length],
-      lat: EVENT.lat + z.dy + oy,
-      lng: EVENT.lng + z.dx + ox,
-      zone,
-      askTopic,
-      ask: ASKS[askTopic][rnd(`ax-${i}`) % ASKS[askTopic].length],
-      offerTopic,
-      offer: OFFERS[offerTopic][rnd(`ofx-${i}`) % OFFERS[offerTopic].length],
-      status: (() => {
-        const r = rnd(`h-${i}`) % 100;
-        return r < 72 ? "checked_in" : r < 92 ? "going" : "no_show";
-      })(),
-      bio: BIOS[rnd(`b-${i}`) % BIOS.length],
-    });
+      const askTopic = TOPICS[rnd(`at-${i}`) % TOPICS.length].id;
+      /** Never the same topic on both sides: a card that asks and offers
+       *  the same thing says nothing about why two people should talk. */
+      const offerPool = TOPICS.filter((t) => t.id !== askTopic);
+      const offerTopic = offerPool[rnd(`ot-${i}`) % offerPool.length].id;
+
+      out.push({
+        id: `a-${i}`,
+        name: `${GIVEN[rnd(`g-${i}`) % GIVEN.length]} ${FAMILY[rnd(`f-${i}`) % FAMILY.length]}`,
+        role: ROLES[rnd(`r-${i}`) % ROLES.length],
+        company: COMPANIES[rnd(`c-${i}`) % COMPANIES.length],
+        lat: EVENT.lat + y,
+        lng: EVENT.lng + x,
+        zone: z.id,
+        askTopic,
+        ask: ASKS[askTopic][rnd(`ax-${i}`) % ASKS[askTopic].length],
+        offerTopic,
+        offer: OFFERS[offerTopic][rnd(`ofx-${i}`) % OFFERS[offerTopic].length],
+        status: (() => {
+          const r = rnd(`h-${i}`) % 100;
+          return r < 72 ? "checked_in" : r < 92 ? "going" : "no_show";
+        })(),
+        bio: BIOS[rnd(`b-${i}`) % BIOS.length],
+      });
+    }
+    cursor -= rows * ROW_DY + ZONE_GAP;
   }
   return out;
 }

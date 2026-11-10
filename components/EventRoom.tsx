@@ -295,8 +295,13 @@ function RoomMap({
       initialViewState={{
         latitude: EVENT.lat,
         longitude: EVENT.lng,
-        zoom: 17.35,
-        padding: { top: 132, right: wide ? 372 : 16, bottom: wide ? 110 : 360, left: 16 },
+        /* The block of rows is a fixed size in degrees, so the only way
+           to fit it into a phone's shorter band of map is to pull back a
+           little. Measured, not guessed: nine rows come to 419px at
+           17.35, and a phone leaves about 380 between the header and the
+           panel. */
+        zoom: wide ? 17.35 : 17.02,
+        padding: { top: 128, right: wide ? 372 : 14, bottom: wide ? 110 : 336, left: 14 },
       }}
       minZoom={16.5}
       maxZoom={20}
@@ -340,7 +345,7 @@ function RoomMap({
         return (
           <Marker key={id} latitude={top} longitude={lng} anchor="bottom">
             <span
-              className="pointer-events-none mb-2 block whitespace-nowrap rounded-full px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.14em] backdrop-blur"
+              className="pointer-events-none mb-7 block whitespace-nowrap rounded-full px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.14em] backdrop-blur"
               style={{
                 background: "color-mix(in srgb, var(--card) 76%, transparent)",
                 color: "color-mix(in srgb, var(--ink) 50%, transparent)",
@@ -690,7 +695,7 @@ function Panel({ title, onClose, wide, children }: { title: string; onClose: () 
       <div
         className="pointer-events-auto flex flex-col overflow-hidden rounded-2xl border backdrop-blur"
         style={{
-          maxHeight: wide ? "64dvh" : "42dvh",
+          maxHeight: wide ? "64dvh" : "38dvh",
           background: "color-mix(in srgb, var(--card) 95%, transparent)",
           borderColor: "var(--line)",
           boxShadow: "0 26px 60px -30px rgba(0,0,0,.65)",
