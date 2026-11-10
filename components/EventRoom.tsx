@@ -8,6 +8,7 @@ import {
   EVENT,
   FEED,
   TIER,
+  TOPICS,
   YOU,
   ZONE_LABEL,
   matchOf,
@@ -364,12 +365,31 @@ function MatchRings({
   const cx = pad.left + (size.w - pad.left - pad.right) / 2;
   const cy = pad.top + (size.h - pad.top - pad.bottom) / 2;
   /** Less the avatar's own radius, or the outer ring is clipped by half a face. */
-  const unit = Math.max(Math.min(size.w - pad.left - pad.right, size.h - pad.top - pad.bottom) / 2 - 22, 110);
+  const unit = Math.max(Math.min(size.w - pad.left - pad.right, size.h - pad.top - pad.bottom) / 2 - 58, 96);
 
   return (
     <div ref={box} className="absolute inset-0 overflow-hidden" style={{ background: "var(--sunk)" }}>
+      {TOPICS.map((t, ti) => {
+        const ang = ti * ((Math.PI * 2) / TOPICS.length) - Math.PI / 2;
+        const r = unit * 1.1;
+        return (
+          <span
+            key={`spoke-${t.id}`}
+            className="pointer-events-none absolute origin-left"
+            style={{
+              left: cx,
+              top: cy,
+              width: r,
+              height: 1,
+              transform: `rotate(${ang}rad)`,
+              background: "color-mix(in srgb, var(--ink) 7%, transparent)",
+            }}
+          />
+        );
+      })}
+
       {rings.map((t, i) => {
-        const r = unit * (0.3 + i * 0.233);
+        const r = unit * (0.27 + i * 0.235) + unit * 0.055;
         return (
           <span
             key={t}
@@ -386,11 +406,66 @@ function MatchRings({
         );
       })}
 
+      {/* Sector labels, so the angle reads as a subject rather than as
+          decoration. They also answer the organiser's question in one
+          glance: this room is fourteen people short of funding and nine
+          who can give it. */}
+      {TOPICS.map((t, ti) => {
+        const n = ATTENDEES.filter((a) => a.askTopic === t.id).length;
+        const mid = (ti + 0.5) * ((Math.PI * 2) / TOPICS.length) - Math.PI / 2;
+        const r = unit * 1.21;
+        return (
+          <span
+            key={t.id}
+            className="pointer-events-none absolute whitespace-nowrap rounded-full px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.12em] backdrop-blur"
+            style={{
+              left: cx + Math.cos(mid) * r,
+              top: cy + Math.sin(mid) * r,
+              transform: "translate(-50%,-50%)",
+              background: "color-mix(in srgb, var(--card) 80%, transparent)",
+              color: "color-mix(in srgb, var(--ink) 46%, transparent)",
+            }}
+          >
+            {t.label} · {n}
+          </span>
+        );
+      })}
+
       {rings.flatMap((t, ri) => {
         const band = ATTENDEES.filter((a) => tierOf.get(a.id)!.tier === t);
-        const r = unit * (0.3 + ri * 0.233);
-        return band.map((a, k) => {
-          const angle = (k / Math.max(band.length, 1)) * Math.PI * 2 + ri * 0.6;
+        const base = unit * (0.27 + ri * 0.235);
+        /**
+         * Angle is what they are looking for; radius is what they are
+         * worth to you. Both coordinates carry something, which the
+         * first pass did not — people were spread evenly around each
+         * ring, so forty-nine of fifty positions meant nothing and the
+         * picture spent most of its pixels saying one number.
+         *
+         * Grouped by ask rather than offer because that is how a room
+         * is described — "half of them are raising" — and because it is
+         * the question an organiser asks about their own event.
+         */
+        const perTopic = (Math.PI * 2) / TOPICS.length;
+        const seen = new Map<string, number>();
+        const inBandByTopic = new Map<string, number>();
+        for (const x of band) inBandByTopic.set(x.askTopic, (inBandByTopic.get(x.askTopic) ?? 0) + 1);
+        return band.map((a) => {
+          const ti = TOPICS.findIndex((x) => x.id === a.askTopic);
+          const k = seen.get(a.askTopic) ?? 0;
+          seen.set(a.askTopic, k + 1);
+          const count = inBandByTopic.get(a.askTopic) ?? 1;
+          // Fanned inside the sector, never on its seam, so neighbouring
+          // subjects stay visually separate.
+          const frac = (k + 1) / (count + 1);
+          const angle = ti * perTopic + frac * perTopic * 0.78 + perTopic * 0.11 - Math.PI / 2;
+          /**
+           * A band, not a line. Nine people who share a tier and a
+           * subject were landing on one arc at identical radius and
+           * overlapping into a smear — the stagger gives each ring
+           * thickness so a cluster reads as a cluster of faces rather
+           * than as one wide blob.
+           */
+          const r = base + (k % 3) * unit * 0.055;
           const m = tierOf.get(a.id)!;
           const dim = !shownIds.has(a.id);
           return (
