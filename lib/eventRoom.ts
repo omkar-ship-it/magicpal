@@ -65,19 +65,16 @@ const ZONES = [
   { id: "workshop", label: "Workshop room", weight: 5 },
 ] as const;
 
-/** Eight across keeps the block narrower than it is tall on a laptop. */
-const PER_ROW = 8;
 /**
- * One avatar plus the gap two of them read as separate across, in
- * degrees — and latitude needs roughly half of what longitude does to
- * cover the same pixels at this zoom, which is measured rather than
- * derived. Nine rows at the first guess spanned 937px inside 658 of
- * usable screen; these are set from the pitch the browser actually
- * reported.
+ * Order within a zone, and nothing about pixels.
+ *
+ * The first pass baked a fixed eight-across grid into the latitudes at
+ * module load, which is why it could not adapt: a phone and a laptop
+ * got the same block, and the phone wore it badly. Position is a view
+ * decision that depends on the viewport, so it belongs in the view —
+ * the data says who is in which zone and in what order, and the room
+ * decides how wide to lay them out.
  */
-const COL_DX = 0.00019;
-const ROW_DY = 0.00015;
-const ZONE_GAP = 0.00012;
 
 export type ZoneId = (typeof ZONES)[number]["id"];
 export const ZONE_LABEL: Record<string, string> = Object.fromEntries(ZONES.map((z) => [z.id, z.label]));
@@ -217,10 +214,9 @@ export type Attendee = {
   name: string;
   role: string;
   company: string;
-  /** Degrees, already offset from the venue centre. */
-  lat: number;
-  lng: number;
   zone: ZoneId;
+  /** Their place in the zone's reading order. The view turns it into a cell. */
+  seat: number;
   askTopic: TopicId;
   ask: string;
   offerTopic: TopicId;
@@ -256,42 +252,21 @@ const BIOS = [
 
 function buildAttendees(): Attendee[] {
   const out: Attendee[] = [];
-
-  /**
-   * Row origins per zone, walked top to bottom so the blocks stack
-   * without overlapping whatever the counts turn out to be.
-   */
-  const rowsFor = (n: number) => Math.ceil(n / PER_ROW);
-  const totalRows = ZONES.reduce((s, z) => s + rowsFor(z.weight), 0);
-  const totalHeight = totalRows * ROW_DY + (ZONES.length - 1) * ZONE_GAP;
-  let cursor = totalHeight / 2;
-
   let i = 0;
   for (const z of ZONES) {
-    const rows = rowsFor(z.weight);
-    for (let k = 0; k < z.weight; k++, i++) {
-      const row = Math.floor(k / PER_ROW);
-      const inRow = k % PER_ROW;
-      // The last row of a zone is usually short; centre it under the rest
-      // rather than leaving a ragged left edge.
-      const widthOfRow = Math.min(PER_ROW, z.weight - row * PER_ROW);
-      const x = (inRow - (widthOfRow - 1) / 2) * COL_DX;
-      const y = cursor - row * ROW_DY;
-
+    for (let seat = 0; seat < z.weight; seat++, i++) {
       const askTopic = TOPICS[rnd(`at-${i}`) % TOPICS.length].id;
       /** Never the same topic on both sides: a card that asks and offers
        *  the same thing says nothing about why two people should talk. */
       const offerPool = TOPICS.filter((t) => t.id !== askTopic);
       const offerTopic = offerPool[rnd(`ot-${i}`) % offerPool.length].id;
-
       out.push({
         id: `a-${i}`,
         name: `${GIVEN[rnd(`g-${i}`) % GIVEN.length]} ${FAMILY[rnd(`f-${i}`) % FAMILY.length]}`,
         role: ROLES[rnd(`r-${i}`) % ROLES.length],
         company: COMPANIES[rnd(`c-${i}`) % COMPANIES.length],
-        lat: EVENT.lat + y,
-        lng: EVENT.lng + x,
         zone: z.id,
+        seat,
         askTopic,
         ask: ASKS[askTopic][rnd(`ax-${i}`) % ASKS[askTopic].length],
         offerTopic,
@@ -303,10 +278,12 @@ function buildAttendees(): Attendee[] {
         bio: BIOS[rnd(`b-${i}`) % BIOS.length],
       });
     }
-    cursor -= rows * ROW_DY + ZONE_GAP;
   }
   return out;
 }
+
+/** Zone order and headcounts, for a view laying the room out. */
+export const ZONE_ORDER = ZONES.map((z) => ({ id: z.id as ZoneId, label: z.label, size: z.weight }));
 
 export const ATTENDEES: Attendee[] = buildAttendees();
 

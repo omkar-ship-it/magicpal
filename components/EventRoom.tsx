@@ -12,6 +12,7 @@ import {
   TOPICS,
   YOU,
   ZONE_LABEL,
+  ZONE_ORDER,
   THREADS,
   matchOf,
   matchesFor,
@@ -67,7 +68,17 @@ const SLOTS: Array<{ id: Slot; label: string; icon: React.ReactNode }> = [
  * other forty, and a room where everyone is a match has no signal in it.
  */
 export default function EventRoom() {
-  const [slot, setSlot] = useState<Slot | null>("forYou");
+  /**
+   * The room leads on a phone; the panel leads on a laptop.
+   *
+   * A phone has one screen, and giving half of it to a panel squeezed
+   * fifty faces down to twenty-two pixels — which is the opposite of
+   * what laying them out in rows was for. The dock is one tap away, and
+   * For You is the first thing on it.
+   */
+  const [slot, setSlot] = useState<Slot | null>(() =>
+    typeof window !== "undefined" && window.innerWidth >= 640 ? "forYou" : null
+  );
   const [view, setView] = useState<"room" | "match">("room");
   const [openId, setOpenId] = useState<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -87,6 +98,24 @@ export default function EventRoom() {
   const [draft, setDraft] = useState("");
   const [myZone, setMyZone] = useState<string>("hall");
   const [wide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 640);
+
+  /**
+   * How much room the header actually takes, measured rather than guessed.
+   *
+   * It wraps to three rows on a phone and one on a laptop, and grows
+   * again by a line the moment a search narrows the room — a constant
+   * that clears it in one of those states clips the first zone in the
+   * others, which is exactly what it did.
+   */
+  const head = useRef<HTMLElement | null>(null);
+  const [topH, setTopH] = useState(wide ? 62 : 140);
+  useEffect(() => {
+    const el = head.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setTopH(el.getBoundingClientRect().height));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const matches = useMemo(() => matchesFor(), []);
   const tierOf = useMemo(() => new Map(ATTENDEES.map((a) => [a.id, matchOf(a)] as const)), []);
@@ -133,12 +162,12 @@ export default function EventRoom() {
   return (
     <div className="fixed inset-0 overflow-hidden" style={{ background: "var(--sunk)" }}>
       {view === "room" ? (
-        <RoomMap {...{ shownIds, tierOf, hoverId, setHoverId, myZone, wide }} onOpen={pick} />
+        <RoomMap {...{ shownIds, tierOf, hoverId, setHoverId, myZone, wide, topH }} onOpen={pick} />
       ) : (
         <MatchRings {...{ shownIds, tierOf, hoverId, setHoverId }} onOpen={pick} />
       )}
 
-      <header className="pointer-events-none absolute inset-x-0 top-0 z-30 p-2.5">
+      <header ref={head} className="pointer-events-none absolute inset-x-0 top-0 z-30 p-2.5">
         <div className="pointer-events-auto mx-auto max-w-3xl">
           <div
             className="flex flex-wrap items-center gap-2 rounded-[22px] border px-2.5 py-2 backdrop-blur sm:flex-nowrap sm:rounded-full"
@@ -263,6 +292,22 @@ export default function EventRoom() {
 
 /* ───────────────────────────────────────────────────────── the two views */
 
+/**
+ * The venue, with the room laid out in rows that fit the screen.
+ *
+ * Rendered as an overlay rather than as map markers. The rows stopped
+ * corresponding to real coordinates the moment they became rows, so
+ * pinning them to latitudes bought nothing and cost everything that
+ * matters here: a block baked into degrees is a fixed size in metres,
+ * which is a different size on every screen and adapts to none of them.
+ * As an overlay the room reads the viewport and lays itself out — wider
+ * rows on a laptop, narrower on a phone, the same generous spacing on
+ * both.
+ *
+ * The map stays underneath, dimmed. It is no longer claiming that
+ * anybody stands on a particular paving stone; it is saying this is a
+ * real venue, which is the only thing it was ever really saying.
+ */
 function RoomMap({
   shownIds,
   tierOf,
@@ -271,6 +316,7 @@ function RoomMap({
   onOpen,
   myZone,
   wide,
+  topH,
 }: {
   shownIds: Set<string>;
   tierOf: Map<string, Match>;
@@ -279,88 +325,169 @@ function RoomMap({
   onOpen: (id: string) => void;
   myZone: string;
   wide: boolean;
+  /** Measured height of the header the room has to start below. */
+  topH: number;
 }) {
-  const mine = ATTENDEES.filter((a) => a.zone === myZone);
-  const youLat = mine.length ? mine.reduce((s, a) => s + a.lat, 0) / mine.length : EVENT.lat;
-  const youLng = mine.length ? mine.reduce((s, a) => s + a.lng, 0) / mine.length : EVENT.lng;
+  const box = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState({ w: 1200, h: 800 });
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const measure = () => setSize({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  /**
+   * Cells sized for a thumb, and as many across as honestly fit.
+   *
+   * Four on a narrow phone and up to ten on a laptop, from the width
+   * that is actually free rather than from a constant somebody picked
+   * once. The face grows with the cell, which is what "expand them"
+   * means in practice — a 34px avatar in a 46px cell was a room seen
+   * through a letterbox.
+   */
+  const padX = 18;
+  const padTop = topH + 8;
+  const padBottom = wide ? 92 : 96;
+  const right = wide ? 372 : 0;
+  const usableW = Math.max(size.w - right - padX * 2, 240);
+  const face = wide ? 46 : 40;
+  /* A phone pays for air twice — once between faces and again in the
+     shrink-to-fit that a taller block forces — so it gets tighter gaps
+     and ends up with bigger faces than a generous grid would leave it. */
+  const cellX = face + (wide ? 22 : 12);
+  const cellY = face + (wide ? 20 : 12);
+  const zoneGap = wide ? 26 : 16;
+  /**
+   * The air a zone label sits in, on top of the gap between zones.
+   *
+   * Small on purpose. A label needs to clear two faces — the row below
+   * it and the row above — but the row above belongs to the previous
+   * zone, so `zoneGap` is already paying for most of that. Charging
+   * every zone the full clearance was five times the bill for one
+   * zone's problem, and it cost a phone a third of its face size.
+   */
+  const labelRoom = wide ? 20 : 14;
+  const cols = Math.max(3, Math.min(10, Math.floor(usableW / cellX)));
+
+  /* You occupy a seat like everybody else rather than floating below
+     the zone: parked in the gap, your marker landed squarely on the
+     next zone's label, and a room that seats fifty and leaves you
+     hovering outside it is making the wrong point anyway. */
+  const seats = (z: { id: string; size: number }) => z.size + (z.id === myZone ? 1 : 0);
+  const blocks = ZONE_ORDER.map((z) => ({ ...z, rows: Math.ceil(seats(z) / cols) }));
+  const totalH = blocks.reduce((s, z) => s + z.rows * cellY, 0) + (blocks.length - 1) * zoneGap + labelRoom * blocks.length;
+  const availH = Math.max(size.h - padTop - padBottom, 260);
+  /** Shrink to fit rather than overflow — a room you cannot see is worse
+   *  than a room drawn slightly small. */
+  const k = Math.min(1, availH / totalH);
+
+  /** What the top zone's label needs beyond its own band, since it is
+   *  the one label with no row above it to sit between. */
+  const headroom = Math.max(0, (face / 2 + 16 - labelRoom) * k + 9);
+  const originY = padTop + headroom + Math.max(0, (availH - headroom - totalH * k) / 2);
+  const centreX = padX + usableW / 2;
+
+  const place = new Map<string, { x: number; y: number }>();
+  let mine: { x: number; y: number } | null = null;
+  let y = originY;
+  for (const z of blocks) {
+    y += labelRoom * k;
+    const n = seats(z);
+    const at = (seat: number) => {
+      const row = Math.floor(seat / cols);
+      const widthOfRow = Math.min(cols, n - row * cols);
+      return {
+        x: centreX + ((seat % cols) - (widthOfRow - 1) / 2) * cellX * k,
+        y: y + row * cellY * k,
+      };
+    };
+    for (const a of ATTENDEES) if (a.zone === z.id) place.set(a.id, at(a.seat));
+    if (z.id === myZone) mine = at(z.size);
+    y += z.rows * cellY * k + zoneGap * k;
+  }
 
   return (
-    <MapGL
-      mapboxAccessToken={MAPBOX_TOKEN}
-      mapStyle={MAP_STYLE}
-      /* Framed around the chrome, not the viewport: the header and the
-         panel cover a third of the screen, and Mapbox centres on the
-         canvas — so without padding a fifth of the room hides behind
-         them, on a page whose whole argument is how many people there are. */
-      initialViewState={{
-        latitude: EVENT.lat,
-        longitude: EVENT.lng,
-        /* The block of rows is a fixed size in degrees, so the only way
-           to fit it into a phone's shorter band of map is to pull back a
-           little. Measured, not guessed: nine rows come to 419px at
-           17.35, and a phone leaves about 380 between the header and the
-           panel. */
-        zoom: wide ? 17.35 : 17.02,
-        padding: { top: 128, right: wide ? 372 : 14, bottom: wide ? 110 : 336, left: 14 },
-      }}
-      minZoom={16.5}
-      maxZoom={20}
-      style={{ position: "absolute", inset: 0 }}
-      reuseMaps
-    >
-      <NavigationControl position="top-right" showCompass={false} />
+    <div ref={box} className="absolute inset-0 overflow-hidden">
+      <MapGL
+        mapboxAccessToken={MAPBOX_TOKEN}
+        mapStyle={MAP_STYLE}
+        initialViewState={{ latitude: EVENT.lat, longitude: EVENT.lng, zoom: 16.4 }}
+        minZoom={15}
+        maxZoom={18}
+        style={{ position: "absolute", inset: 0 }}
+        reuseMaps
+      />
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{ background: "color-mix(in srgb, var(--sunk) 52%, transparent)" }}
+      />
+
+      {blocks.map((z, zi) => {
+        const first = ATTENDEES.find((a) => a.zone === z.id);
+        const p = first ? place.get(first.id) : null;
+        if (!p) return null;
+        const here = ATTENDEES.filter((a) => a.zone === z.id && a.status === "checked_in").length;
+        return (
+          <span
+            key={z.id}
+            data-zone-label={z.id}
+            className="pointer-events-none absolute whitespace-nowrap rounded-full px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.14em] backdrop-blur"
+            style={{
+              left: centreX,
+              // Above its own first row, never on it.
+              top: p.y - (face / 2 + 16) * k,
+              transform: "translate(-50%,-50%)",
+              background: "color-mix(in srgb, var(--card) 84%, transparent)",
+              color: "color-mix(in srgb, var(--ink) 52%, transparent)",
+              zIndex: 4 + zi,
+            }}
+          >
+            {z.label} · {here}
+          </span>
+        );
+      })}
 
       {ATTENDEES.map((a) => {
+        const p = place.get(a.id);
+        if (!p) return null;
         const m = tierOf.get(a.id)!;
         const dim = !shownIds.has(a.id);
         return (
-          <Marker
+          <span
             key={a.id}
-            latitude={a.lat}
-            longitude={a.lng}
-            anchor="center"
-            /* Markers are siblings in source order, so without this the
-               hover card opens underneath whoever is drawn later — which
-               in a crowd is most of them. */
-            style={{ zIndex: hoverId === a.id ? 60 : m.tier === "mutual" ? 3 : m.tier === "none" ? 1 : 2 }}
+            className="absolute"
+            style={{
+              left: p.x,
+              top: p.y,
+              transform: "translate(-50%,-50%)",
+              zIndex: hoverId === a.id ? 60 : m.tier === "mutual" ? 3 : 2,
+            }}
           >
             <Pin
               a={a}
               m={m}
+              size={Math.round(face * k)}
               dim={dim}
               hovered={hoverId === a.id}
               onEnter={() => !dim && setHoverId(a.id)}
               onLeave={() => setHoverId(null)}
               onClick={() => !dim && onOpen(a.id)}
             />
-          </Marker>
+          </span>
         );
       })}
 
-      {Object.entries(ZONE_LABEL).map(([id, label]) => {
-        const inZone = ATTENDEES.filter((a) => a.zone === id);
-        if (!inZone.length) return null;
-        const lng = inZone.reduce((s, a) => s + a.lng, 0) / inZone.length;
-        const top = Math.max(...inZone.map((a) => a.lat));
-        return (
-          <Marker key={id} latitude={top} longitude={lng} anchor="bottom">
-            <span
-              className="pointer-events-none mb-7 block whitespace-nowrap rounded-full px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.14em] backdrop-blur"
-              style={{
-                background: "color-mix(in srgb, var(--card) 76%, transparent)",
-                color: "color-mix(in srgb, var(--ink) 50%, transparent)",
-              }}
-            >
-              {label} · {inZone.filter((a) => a.status === "checked_in").length}
-            </span>
-          </Marker>
-        );
-      })}
-
-      <Marker latitude={youLat} longitude={youLng} anchor="center" style={{ zIndex: 70 }}>
-        <YouPin />
-      </Marker>
-    </MapGL>
+      {/* You, in the last seat of whichever zone the Now panel says you are. */}
+      {mine && (
+        <span className="absolute" style={{ left: mine.x, top: mine.y, transform: "translate(-50%,-50%)", zIndex: 70 }}>
+          <YouPin size={Math.round(face * k)} />
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -552,6 +679,7 @@ function MatchRings({
 function Pin({
   a,
   m,
+  size = 34,
   dim,
   hovered,
   onEnter,
@@ -560,6 +688,8 @@ function Pin({
 }: {
   a: Attendee;
   m: Match;
+  /** The room sizes its own faces; the rings keep the default. */
+  size?: number;
   dim: boolean;
   hovered: boolean;
   onEnter: () => void;
@@ -569,6 +699,7 @@ function Pin({
   const c = TIER[m.tier].colour;
   return (
     <span
+      data-pin={a.id}
       className="relative block"
       style={{ opacity: dim ? 0.14 : a.status === "no_show" ? 0.4 : 1, transition: "opacity 180ms ease" }}
       onMouseEnter={onEnter}
@@ -593,18 +724,25 @@ function Pin({
           outlineOffset: a.status !== "checked_in" ? 2 : undefined,
         }}
       >
-        <Avatar name={a.name} size={34} />
+        <Avatar name={a.name} size={size} />
       </button>
       {hovered && <Hover a={a} m={m} />}
     </span>
   );
 }
 
-function YouPin() {
+function YouPin({ size = 40 }: { size?: number }) {
   return (
     <span
-      className="grid h-[40px] w-[40px] place-items-center rounded-full text-[11px] font-bold text-white"
-      style={{ background: "var(--brand)", boxShadow: "0 0 0 3px var(--card), 0 10px 24px -10px rgba(0,0,0,.55)" }}
+      data-you=""
+      className="grid place-items-center rounded-full font-bold text-white"
+      style={{
+        width: size,
+        height: size,
+        fontSize: Math.max(8, Math.round(size * 0.27)),
+        background: "var(--brand)",
+        boxShadow: "0 0 0 3px var(--card), 0 10px 24px -10px rgba(0,0,0,.55)",
+      }}
     >
       You
     </span>
