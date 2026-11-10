@@ -195,6 +195,8 @@ const COMPANIES = [
 
 // ───────────────────────────────────────────────────────────── attendees
 
+export type Status = "checked_in" | "going" | "no_show";
+
 export type Attendee = {
   id: string;
   name: string;
@@ -208,8 +210,21 @@ export type Attendee = {
   ask: string;
   offerTopic: TopicId;
   offer: string;
-  /** Checked in and in the room right now, as opposed to merely registered. */
-  here: boolean;
+  /**
+   * Where they are in the funnel, which is three states and not two.
+   *
+   * `going` is a promise made last week. `checked_in` is a fact about
+   * right now, and it is the single most valuable thing the matcher
+   * knows — an introduction you can make in the next ten minutes beats
+   * one you have to arrange. `no_show` is the honesty: some of the
+   * guest list never arrives, and a product that pretends otherwise
+   * sends people looking for somebody who is at home.
+   *
+   * Check-in only exists while the event is running. Before the doors
+   * open everyone is `going` and the room view is empty by definition,
+   * which is why this demo is pinned to an event in progress.
+   */
+  status: "checked_in" | "going" | "no_show";
   bio: string;
 };
 
@@ -256,8 +271,10 @@ function buildAttendees(): Attendee[] {
       ask: ASKS[askTopic][rnd(`ax-${i}`) % ASKS[askTopic].length],
       offerTopic,
       offer: OFFERS[offerTopic][rnd(`ofx-${i}`) % OFFERS[offerTopic].length],
-      // Most of the room is here; a few registered and are still in traffic.
-      here: rnd(`h-${i}`) % 100 < 78,
+      status: (() => {
+        const r = rnd(`h-${i}`) % 100;
+        return r < 72 ? "checked_in" : r < 92 ? "going" : "no_show";
+      })(),
       bio: BIOS[rnd(`b-${i}`) % BIOS.length],
     });
   }
@@ -290,51 +307,99 @@ export const YOU = {
 
 // ─────────────────────────────────────────────────────────── the matcher
 
-export type Match = { a: Attendee; score: number; reason: string };
+/**
+ * Four tiers, and a colour for each, because a number is not a decision.
+ *
+ * A score of 0.73 tells a reader nothing they can act on. What they can
+ * act on is "this one goes both ways" — and a room where the mutual
+ * matches are green and the rest fade out is read in a second, from
+ * across the map, without opening anything.
+ *
+ * The order is by what the reader gets, not by symmetry. Mutual first.
+ * Then people who can help *you*, because that is why you came. Then
+ * people you could help, which is worth knowing and is not the same
+ * favour. Then everybody else, who are not failures — they are the other
+ * forty, and a room where everyone is a match is a room with no signal
+ * in it.
+ */
+export type Tier = "mutual" | "they-help" | "you-help" | "none";
+
+export const TIER: Record<Tier, { label: string; colour: string; rank: number }> = {
+  mutual: { label: "Both ways", colour: "var(--good)", rank: 3 },
+  "they-help": { label: "They can help you", colour: "#d99a00", rank: 2 },
+  "you-help": { label: "You can help them", colour: "var(--brand)", rank: 1 },
+  none: { label: "No overlap", colour: "var(--ink-soft)", rank: 0 },
+};
+
+export type Match = {
+  a: Attendee;
+  tier: Tier;
+  score: number;
+  reason: string;
+  /** The first line, already written. See `opener`. */
+  opener: string;
+};
+
+const label = (t: TopicId) => TOPICS.find((x) => x.id === t)?.label.toLowerCase() ?? t;
+const first = (name: string) => name.split(" ")[0];
 
 /**
- * Why these four, and not the other forty-six.
+ * The first message, drafted from the overlap and nothing else.
  *
- * The score is deliberately legible rather than clever: a two-way fit —
- * they can help with what you asked for *and* you can help with what they
- * asked for — beats a one-way one, and being in the room beats being on
- * the guest list. Anything a reader cannot reconstruct from the sentence
- * underneath it is the kind of recommendation nobody acts on.
+ * The step everybody stalls on is not deciding who to talk to, it is the
+ * opening sentence — which is why a matcher that stops at a name has
+ * done about half the job. These are built from the two facts both
+ * people have already published, so the draft can never claim a
+ * connection neither of them stated. It is a starting point in a box
+ * somebody edits, not a message sent on their behalf.
  */
+function opener(a: Attendee, you: { askTopic: TopicId; offerTopic: TopicId; ask: string }, tier: Tier): string {
+  const n = first(a.name);
+  if (tier === "mutual")
+    return `Hi ${n} — I'm after ${you.ask}, and ${label(a.offerTopic)} is your thing. I can probably help with ${label(
+      you.offerTopic
+    )}, which looks like what you're looking for. Worth ten minutes?`;
+  if (tier === "they-help")
+    return `Hi ${n} — you mentioned ${a.offer}. That's exactly what I'm stuck on. Could I borrow ten minutes before this wraps up?`;
+  if (tier === "you-help")
+    return `Hi ${n} — saw you're looking for ${a.ask}. I've done some of that and I'm happy to talk it through if it's useful.`;
+  return `Hi ${n} — good to see you here tonight.`;
+}
+
+export function matchOf(
+  a: Attendee,
+  you: { askTopic: TopicId; offerTopic: TopicId; ask: string } = YOU
+): Match {
+  const theyHelpYou = a.offerTopic === you.askTopic;
+  const youHelpThem = a.askTopic === you.offerTopic;
+  const tier: Tier = theyHelpYou && youHelpThem ? "mutual" : theyHelpYou ? "they-help" : youHelpThem ? "you-help" : "none";
+
+  const reason =
+    tier === "mutual"
+      ? `You're after ${label(you.askTopic)} and they do it — and they want ${label(you.offerTopic)}, which is yours.`
+      : tier === "they-help"
+        ? `You're looking for ${label(you.askTopic)}. They can help with ${a.offer}.`
+        : tier === "you-help"
+          ? `They're looking for ${a.ask} — that's what you offer.`
+          : `No overlap stated, but they're in the room.`;
+
+  // Presence breaks every tie: an introduction you can make tonight is
+  // worth more than one you have to arrange.
+  const presence = a.status === "checked_in" ? 0.6 : a.status === "going" ? 0.2 : 0;
+  return { a, tier, score: TIER[tier].rank + presence, reason, opener: opener(a, you, tier) };
+}
+
 export function matchesFor(
-  you: { askTopic: TopicId; offerTopic: TopicId },
+  you: { askTopic: TopicId; offerTopic: TopicId; ask: string } = YOU,
   pool: Attendee[] = ATTENDEES,
-  limit = 5
+  limit = 6
 ): Match[] {
-  const scored = pool.map((a) => {
-    const theyHelpYou = a.offerTopic === you.askTopic;
-    const youHelpThem = a.askTopic === you.offerTopic;
-    let score = 0;
-    let reason = "";
-    if (theyHelpYou && youHelpThem) {
-      score = 3;
-      reason = `You're after ${label(you.askTopic)} and they do it. They're after ${label(
-        you.offerTopic
-      )}, which is yours.`;
-    } else if (theyHelpYou) {
-      score = 2;
-      reason = `You're looking for ${label(you.askTopic)}. They can help with ${a.offer}.`;
-    } else if (youHelpThem) {
-      score = 1;
-      reason = `They're looking for ${a.ask} — that's what you offer.`;
-    }
-    // Presence breaks ties, because an introduction you can make tonight
-    // is worth more than one you have to arrange.
-    if (a.here) score += 0.5;
-    return { a, score, reason };
-  });
-  return scored
-    .filter((m) => m.score >= 1)
+  return pool
+    .map((a) => matchOf(a, you))
+    .filter((m) => m.tier !== "none")
     .sort((x, y) => y.score - x.score)
     .slice(0, limit);
 }
-
-const label = (t: TopicId) => TOPICS.find((x) => x.id === t)?.label.toLowerCase() ?? t;
 
 // ──────────────────────────────────────────────────────────────── feed
 
